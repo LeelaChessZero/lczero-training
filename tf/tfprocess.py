@@ -253,6 +253,7 @@ class TFProcess:
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             self.calculate_test_summaries(test_batches, steps)
 
+        # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             path = os.path.join(self.root_dir, self.cfg['name'])
