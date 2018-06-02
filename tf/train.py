@@ -134,8 +134,7 @@ def main(cmd):
     num_evals = num_test*10 // ChunkParser.BATCH_SIZE
     print("Using {} evaluation batches".format(num_evals))
 
-    for _ in range(cfg['training']['total_steps']):
-        tfprocess.process(ChunkParser.BATCH_SIZE, num_evals)
+    tfprocess.process_loop(ChunkParser.BATHC_SIZE, num_evals)
 
     tfprocess.save_leelaz_weights(cmd.output)
 

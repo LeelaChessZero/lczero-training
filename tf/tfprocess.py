@@ -186,6 +186,14 @@ class TFProcess:
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
 
+    def process_loop(self, batch_size, test_batches):
+        # Get the initial steps value in case this is a resume from a step count
+        # which is not a multiple of total_steps.
+        steps = tf.train.global_step(self.session, self.global_step)
+        total_steps = self.cfg['training']['total_steps']
+        for _ in range(steps % total_steps, total_steps):
+            self.process(batch_size, test_batches)
+
     def process(self, batch_size, test_batches):
         if not self.time_start:
             self.time_start = time.time()
