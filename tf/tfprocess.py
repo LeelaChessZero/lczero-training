@@ -246,7 +246,7 @@ class TFProcess:
                 # value being optimized.
                 # If you changed the factor in the loss formula above, you need
                 # to change it here as well for correct outputs.
-                pol_loss_w * avg_policy_loss + val_loss_w * avg_mse_loss + avg_reg_term,
+                pol_loss_w * avg_policy_loss + val_loss_w * 4.0 * avg_mse_loss + avg_reg_term,
                 speed))
             train_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
