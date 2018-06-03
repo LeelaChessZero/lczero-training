@@ -159,9 +159,10 @@ class TFProcess:
                 # Rescale rule50 related weights as clients do not normalize the input.
                 if e == 0:
                     num_inputs = 112
-                    rule50_input = 110
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    rule50_input = 109
                     for i in range(len(new_weights[e])):
-                        if (i%(num_inputs*9))//9 == rule50_input - 1:
+                        if (i%(num_inputs*9))//9 == rule50_input:
                             new_weights[e][i] = new_weights[e][i]*99
 
                 # Convolution weights need a transpose
@@ -314,10 +315,11 @@ class TFProcess:
                 # Rescale rule50 related weights as clients do not normalize the input.
                 if e == 0:
                     num_inputs = 112
-                    rule50_input = 110
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    rule50_input = 109
                     wt_str = []
                     for i, weight in enumerate(np.ravel(nparray)):
-                        if (i%(num_inputs*9))//9 == rule50_input - 1:
+                        if (i%(num_inputs*9))//9 == rule50_input:
                             wt_str.append(str(weight/99))
                         else:
                             wt_str.append(str(weight))
