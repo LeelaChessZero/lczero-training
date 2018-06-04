@@ -168,6 +168,11 @@ class ChunkParser:
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
+
+        # Set planes 14-18 and 20-104 to zero
+        planes[896:1216] = 0
+        planes[1280:6656] = 0
+
         rule50_plane = (np.zeros(8*8, dtype=np.float32) + rule50_count) / 99
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
