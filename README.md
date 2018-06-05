@@ -26,18 +26,24 @@ gpu: 0                                 # gpu id to process on
 dataset: 
   num_chunks: 100000                   # newest nof chunks to parse
   train_ratio: 0.90                    # trainingset ratio
-  input: '/path/to/chunks/*/draw/'     # supports glob
+  # For separated test and train data.
+  input_train: '/path/to/chunks/*/draw/' # supports glob
+  input_test: '/path/to/chunks/*/draw/'  # supports glob
+  # For a one-shot run with all data in one directory.
+  # input: '/path/to/chunks/*/draw/'
 
 training:
     batch_size: 2048                   # training batch
     total_steps: 140000                # terminate after these steps
-    test_steps: 2000                   # number of steps between test evaluations.
+    test_steps: 2000                   # eval test set values after this many steps
+    total_steps: 140000                # terminate after these steps
+    # checkpoint_steps: 10000          # optional frequency for checkpointing before finish
     shuffle_size: 524288               # size of the shuffle buffer
     lr_values:                         # list of learning rates
         - 0.02
         - 0.002
         - 0.0005
-    lr_boundaries:                     # list of boundaries
+    lr_boundaries:                     # list of boundaries (boundaries are absolute to number of trained steps)
         - 100000
         - 130000
     policy_loss_weight: 1.0            # weight of policy loss
