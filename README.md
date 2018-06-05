@@ -42,7 +42,7 @@ training:
         - 0.02
         - 0.002
         - 0.0005
-    lr_boundaries:                     # list of boundaries (boundaries are absolute to number of trained steps)
+    lr_boundaries:                     # list of boundaries
         - 100000
         - 130000
     policy_loss_weight: 1.0            # weight of policy loss
