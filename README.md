@@ -36,7 +36,6 @@ training:
     batch_size: 2048                   # training batch
     total_steps: 140000                # terminate after these steps
     test_steps: 2000                   # eval test set values after this many steps
-    total_steps: 140000                # terminate after these steps
     # checkpoint_steps: 10000          # optional frequency for checkpointing before finish
     shuffle_size: 524288               # size of the shuffle buffer
     lr_values:                         # list of learning rates
