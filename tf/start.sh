@@ -37,7 +37,6 @@ do
     echo ""
 
     # prepare ramdisk
-    rm -rf $RAMDISK/{train,test}
     rsync -aq --delete-during $ROOT/split/{train,test} $RAMDISK
 
     # train all networks
