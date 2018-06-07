@@ -5,6 +5,7 @@ set -e
 CONFIGDIR=$1
 GAMES=$2
 
+NETARCHS=(64x6 128x10 192x15)
 ROOT="/work/lc0"
 NETDIR="$ROOT/networks/upload"
 GAMEFILE="$HOME/.lc0.dat"
@@ -23,7 +24,7 @@ file="training.${game_num}.gz"
 echo "Starting with '$file' as last game in window"
 
 train() {
-  unbuffer ./train.py --cfg=$1 --output=$2 2>&1 > "$ROOT/logs/$(date +%Y%m%d-%H%M%S).log"
+  unbuffer ./train.py --cfg=$1 --output=$2 2>&1 | tee "$ROOT/logs/$(date +%Y%m%d-%H%M%S).log"
   gzip -9 $2
   mv -v $2.gz $NETDIR
 }
@@ -36,15 +37,13 @@ do
     echo ""
 
     # prepare ramdisk
-    rm -rf $RAMDISK/*
-    cp -r $ROOT/split/{train,test} $RAMDISK
+    rm -rf $RAMDISK/{train,test}
+    rsync -aq --delete-during $ROOT/split/{train,test} $RAMDISK
 
     # train all networks
-    for netarch in 64x6 128x10
+    for netarch in ${NETARCHS[@]}
     do
-      cfg="$CONFIGDIR/$netarch.yaml"
       echo "Training $netarch:"
-      echo $(cat $cfg)
       train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N").txt"
     done
 
@@ -54,7 +53,7 @@ do
     file="training.${game_num}.gz"
     echo "Waiting for '$file'"
   else
-    sleep 60
     echo -n "."
+    sleep 60
   fi
 done
