@@ -23,7 +23,6 @@ import tensorflow as tf
 import time
 import bisect
 
-NUM_STEP_TRAIN = 200
 VERSION = 2
 
 def weight_variable(shape):
@@ -129,6 +128,7 @@ class TFProcess:
         self.avg_mse_loss = []
         self.avg_reg_term = []
         self.time_start = None
+        self.last_steps = None
 
         # Summary part
         self.test_writer = tf.summary.FileWriter(
@@ -206,6 +206,8 @@ class TFProcess:
 
         # Get the initial steps value before we do a training step.
         steps = tf.train.global_step(self.session, self.global_step)
+        if not self.last_steps:
+            self.last_steps = steps
 
         # Run test before first step to see delta since end of last run.
         if steps % self.cfg['training']['total_steps'] == 0:
@@ -235,14 +237,15 @@ class TFProcess:
         self.avg_policy_loss.append(policy_loss)
         self.avg_mse_loss.append(mse_loss)
         self.avg_reg_term.append(reg_term)
-        if steps % NUM_STEP_TRAIN == 0:
+        if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             pol_loss_w = self.cfg['training']['policy_loss_weight']
             val_loss_w = self.cfg['training']['value_loss_weight']
             time_end = time.time()
             speed = 0
             if self.time_start:
                 elapsed = time_end - self.time_start
-                speed = batch_size * (NUM_STEP_TRAIN / elapsed)
+                steps_elapsed = steps - self.last_steps
+                speed = batch_size * (steps_elapsed / elapsed)
             avg_policy_loss = np.mean(self.avg_policy_loss or [0])
             avg_mse_loss = np.mean(self.avg_mse_loss or [0])
             avg_reg_term = np.mean(self.avg_reg_term or [0])
@@ -260,6 +263,7 @@ class TFProcess:
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.time_start = time_end
+            self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
 
         # Calculate test values every 'test_steps', but also ensure there is
