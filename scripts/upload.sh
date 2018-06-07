@@ -51,10 +51,12 @@ netarch="${FILTERS}x${BLOCKS}"
 inotifywait -q -m -e close_write $NETDIR | 
 while read -r dir events file
 do
-  if [[ $file = ${netarch}* ]]
+  if [[ $file = ${netarch}*.gz ]]
   then
     echo -n "uploading ${file}..."
     curl -s -F "file=@${dir}/${file}" -F "training_id=1" -F "layers=${BLOCKS}" -F "filters=${FILTERS}" $UPLOADURL
     echo "[done]"
+  else
+    echo "ignoring ${file}"
   fi
 done
