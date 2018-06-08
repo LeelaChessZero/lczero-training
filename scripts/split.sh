@@ -99,7 +99,7 @@ echo -n "processing data in '$INPUTDIR'..."
 for f in $(ls $INPUTDIR)
 do
   file=$(basename $f)
-  process $dir $file
+  process $INPUTDIR $file
 done
 echo "[done]"
 
@@ -107,5 +107,5 @@ echo "monitoring '$INPUTDIR'"
 inotifywait -q -m -e close_write $INPUTDIR | mbuffer -m 10M |
   while read dir event file
   do
-    process $dir $file
+    process $INPUTDIR $file
   done
