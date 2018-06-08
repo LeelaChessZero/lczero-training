@@ -25,7 +25,7 @@ do
       exit
       ;;
     -i | --input)
-      NETDIR=$VALUE
+      INPUTDIR=$VALUE
       ;;
     -o | --output)
       TESTDIR="$VALUE/test"
@@ -64,9 +64,11 @@ echo "  max test:   $overhead_test"
 echo "  max train:  $overhead_train"
 echo ""
 
-inotifywait -q -m -e close_write $NETDIR | mbuffer -m 10M |
-while read dir event file
-do
+
+process() {
+  local dir=$1
+  local file=$2
+
   if [[ $file = training.*.gz ]]
   then
     let "n++"
@@ -88,7 +90,22 @@ do
       ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
       ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
       let "n -= $overhead"
-      echo -n "-"
     fi
   fi
+}
+
+
+echo -n "processing data in '$INPUTDIR'..."
+for f in $(ls $INPUTDIR)
+do
+  file=$(basename $f)
+  process $dir $file
 done
+echo "[done]"
+
+echo "monitoring '$INPUTDIR'"
+inotifywait -q -m -e close_write $INPUTDIR | mbuffer -m 10M |
+  while read dir event file
+  do
+    process $dir $file
+  done
