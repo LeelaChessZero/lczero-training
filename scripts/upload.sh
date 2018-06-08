@@ -17,31 +17,32 @@ function usage()
   echo ""
 }
 
-while [ "$1" != "" ]; do
+while [ "$1" != "" ]
+do
   PARAM=`echo $1 | awk -F= '{print $1}'`
   VALUE=`echo $1 | awk -F= '{print $2}'`
   case $PARAM in
     -h | --help)
-        usage
-        exit
-        ;;
+      usage
+      exit
+      ;;
     -u | --upload)
-        UPLOADURL=$VALUE
-        ;;
+      UPLOADURL=$VALUE
+      ;;
     -d | --netdir)
-        NETDIR=$VALUE
-        ;;
+      NETDIR=$VALUE
+      ;;
     -f | --filters)
-        FILTERS=$VALUE
-        ;;
+      FILTERS=$VALUE
+      ;;
     -b | --blocks)
-        BLOCKS=$VALUE
-        ;;
+      BLOCKS=$VALUE
+      ;;
     *)
-        echo "ERROR: unknown parameter \"$PARAM\""
-        usage
-        exit 1
-        ;;
+      echo "ERROR: unknown parameter \"$PARAM\""
+      usage
+      exit 1
+      ;;
   esac
   shift
 done
@@ -50,14 +51,13 @@ netarch="${FILTERS}x${BLOCKS}"
 
 echo "start upload monitor for $netarch*.gz"
 
-inotifywait -q -m -e close_write $NETDIR | 
+inotifywait -q -m -e close_write $NETDIR | mbuffer -q -m 1M | 
 while read -r dir events file
 do
   if [[ $file = ${netarch}*.gz ]]
   then
-    echo -n "uploading ${file}..."
-    curl -s -F "file=@${dir}/${file}" -F "training_id=1" -F "layers=${BLOCKS}" -F "filters=${FILTERS}" $UPLOADURL
-    echo "[done]"
+    echo -n "uploading ${file}"
+    curl -F "file=@${dir}/${file}" -F "training_id=1" -F "layers=${BLOCKS}" -F "filters=${FILTERS}" $UPLOADURL
   else
     echo "ignoring ${file}"
   fi
