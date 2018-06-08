@@ -2,7 +2,7 @@
 
 function usage()
 {
-  echo "Uploads a network with NxM prefix, where N=filters and M=blocks"
+  echo "Watches a directory and copies data to train/test set"
   echo ""
   echo "./split.sh"
   echo "  -h --help"
