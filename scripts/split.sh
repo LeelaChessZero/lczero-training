@@ -58,7 +58,7 @@ let max="$WINSIZE + $overhead"
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
-inotifywait -q -m -e close_write $NETDIR |
+inotifywait -q -m -e close_write $NETDIR | mbuffer -m 10M |
 while read -r path event file
 do
   if [[ $file = training.*.gz ]]
