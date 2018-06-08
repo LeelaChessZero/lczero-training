@@ -21,32 +21,31 @@ do
   VALUE=`echo $1 | awk -F= '{print $2}'`
   case $PARAM in
     -h | --help)
-        usage
-        exit
-        ;;
+      usage
+      exit
+      ;;
     -i | --input)
-        NETDIR=$VALUE
-        ;;
+      NETDIR=$VALUE
+      ;;
     -o | --output)
-        TESTDIR="$VALUE/test"
-        TRAINDIR="$VALUE/train"
-        ;;
+      TESTDIR="$VALUE/test"
+      TRAINDIR="$VALUE/train"
+      ;;
     -n | --window)
-        WINSIZE=$VALUE
-        ;;
+      WINSIZE=$VALUE
+      ;;
     -t | --train)
-        TRAINPCT=$VALUE
-        ;;
+      TRAINPCT=$VALUE
+      ;;
     *)
-        echo "ERROR: unknown parameter \"$PARAM\""
-        usage
-        exit 1
-        ;;
+      echo "ERROR: unknown parameter \"$PARAM\""
+      usage
+      exit 1
+      ;;
   esac
   shift
 done
 
-echo "monitor start"
 
 # clear test and train split dirs
 rm -rf $TESTDIR $TRAINDIR
@@ -58,8 +57,15 @@ let max="$WINSIZE + $overhead"
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
+echo ""
+echo "start splitter"
+echo "  max chunks: $max"
+echo "  max test:   $overhead_test"
+echo "  max train:  $overhead_train"
+echo ""
+
 inotifywait -q -m -e close_write $NETDIR | mbuffer -m 10M |
-while read -r path event file
+while read dir event file
 do
   if [[ $file = training.*.gz ]]
   then
@@ -70,16 +76,14 @@ do
 
     if [ $x -gt $TRAINPCT ]
     then
-      echo -n "*"
       target=$TESTDIR/$file
     else
-      echo -n "T"
       target=$TRAINDIR/$file
     fi
 
-    cp -a $path/$file $target
+    cp -a $dir/$file $target
 
-    if [ $n -eq $max ]
+    if [ $n -gt $max ]
     then
       ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
       ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
@@ -88,4 +92,3 @@ do
     fi
   fi
 done
-
