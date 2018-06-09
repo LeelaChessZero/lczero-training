@@ -85,7 +85,7 @@ process() {
       echo -n "*"
     fi
 
-    cp -a $dir/$file $target
+    ln $dir/$file $target
 
     if [ $n -gt $max ]
     then
