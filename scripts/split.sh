@@ -96,7 +96,7 @@ process() {
 
 
 echo -n "processing data in '$INPUTDIR'..."
-for f in $(ls $INPUTDIR)
+for f in $(ls -1rt $INPUTDIR | tail -n $WINSIZE)
 do
   file=$(basename $f)
   process $INPUTDIR $file
