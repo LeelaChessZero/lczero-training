@@ -79,8 +79,10 @@ process() {
     if [ $x -gt $TRAINPCT ]
     then
       target=$TESTDIR/$file
+      echo -n "T"
     else
       target=$TRAINDIR/$file
+      echo -n "*"
     fi
 
     cp -a $dir/$file $target
