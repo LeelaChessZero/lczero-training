@@ -104,8 +104,11 @@ done
 echo "[done]"
 
 echo "monitoring '$INPUTDIR'"
-inotifywait -q -m -e close_write $INPUTDIR | mbuffer -m 10M |
+inotifywait -q -m -e moved_to -e close_write $INPUTDIR | mbuffer -m 10M |
   while read dir event file
   do
-    process $INPUTDIR $file
+    if [ "$event" = "MOVED_TO" || "$event" = "CLOSE_WRITE" ]
+    then
+      process $INPUTDIR $file
+    fi
   done
