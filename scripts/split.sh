@@ -55,13 +55,13 @@ fi
 # clear test and train split dirs
 if [ ! -d "$TESTDIR" ] || [ ! -d "$TRAINDIR" ]
 then
-  rm -rf $TESTDIR $TRAINDIR
-  mkdir -vp $TESTDIR $TRAINDIR
+  rm -rf "$TESTDIR" "$TRAINDIR"
+  mkdir -vp "$TESTDIR" "$TRAINDIR"
 fi
 
 let n="$(ls $TESTDIR | wc -l) + $(ls $TRAINDIR | wc -l)"
 let overhead="$WINSIZE / 10"
-let max="$WINSIZE + $overhead"
+let max="$WINSIZE + $overhead + 100"
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
