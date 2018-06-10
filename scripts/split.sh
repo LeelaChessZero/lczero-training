@@ -79,12 +79,14 @@ process() {
 
   if [[ $file = training.*.gz ]]
   then
+    # check if the file already exists in the desired location
     if [ -f "$TESTDIR/$file" ] || [ -f "$TRAINDIR/$file" ]
     then
       echo -n "."
       return
     fi
 
+    # compute basic file integrity check
     size=$(zcat $dir/$file | wc -c)
     let rem="size % 8276"
     
@@ -94,6 +96,7 @@ process() {
       return
     fi
 
+    # new correct file, put in correct directory
     let "n++"
 
     id=$(echo $file | cut -d'.' -f 2)
@@ -110,14 +113,15 @@ process() {
 
     ln $dir/$file $target
 
+    # exceeding max buffer size, remove overhead
     if [ $n -gt $max ]
     then
       (
       flock -e 200
       ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
       ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
-      let "n -= $overhead"
       ) 200>$LC0LOCKFILE
+      let "n -= $overhead"
     fi
   fi
 }
