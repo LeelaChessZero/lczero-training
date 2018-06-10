@@ -17,6 +17,12 @@ then
   exit 1
 fi
 
+if [ -z "$LC0LOCKFILE" ]
+then
+  echo "env var LC0LOCKFILE not set"
+  exit 1
+fi
+
 game_num=$(cat $GAMEFILE)
 game_num=$((game_num + GAMES))
 file="training.${game_num}.gz"
@@ -37,7 +43,10 @@ do
     echo ""
 
     # prepare ramdisk
+    (
+    flock -e 200
     rsync -aq --delete-during $ROOT/split/{train,test} $RAMDISK
+    ) 200>$LC0LOCKFILE
 
     # train all networks
     for netarch in ${NETARCHS[@]}
