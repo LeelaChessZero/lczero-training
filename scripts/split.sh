@@ -79,13 +79,6 @@ process() {
 
   if [[ $file = training.*.gz ]]
   then
-    # check if the file already exists in the desired location
-    if [ -f "$TESTDIR/$file" ] || [ -f "$TRAINDIR/$file" ]
-    then
-      echo -n "."
-      return
-    fi
-
     # compute basic file integrity check
     size=$(zcat $dir/$file | wc -c)
     let rem="size % 8276"
@@ -127,13 +120,11 @@ process() {
 }
 
 
-echo -n "processing data in '$INPUTDIR'..."
-for f in $(ls -1rt $INPUTDIR | tail -n $WINSIZE)
+echo "processing '$INPUTDIR'..."
+for f in $(./diff.py -i $INPUTDIR -w $WINSIZE $TRAINDIR $TESTDIR)
 do
-  file=$(basename $f)
   process $INPUTDIR $file
 done
-echo "[done]"
 
 echo "monitoring '$INPUTDIR'"
 inotifywait -q -m -e moved_to -e close_write $INPUTDIR | mbuffer -m 10M |
