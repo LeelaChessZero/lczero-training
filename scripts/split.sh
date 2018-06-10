@@ -46,19 +46,27 @@ do
   shift
 done
 
+if [ -z "$LC0LOCKFILE" ]
+then
+  echo "env var LC0LOCKFILE not set"
+  exit 1
+fi
 
 # clear test and train split dirs
-rm -rf $TESTDIR $TRAINDIR
-mkdir -vp $TESTDIR $TRAINDIR
+if [ ! -d "$TESTDIR" ] || [ ! -d "$TRAINDIR" ]
+then
+  rm -rf "$TESTDIR" "$TRAINDIR"
+  mkdir -vp "$TESTDIR" "$TRAINDIR"
+fi
 
-n=0
+let n="$(ls $TESTDIR | wc -l) + $(ls $TRAINDIR | wc -l)"
 let overhead="$WINSIZE / 10"
-let max="$WINSIZE + $overhead"
+let max="$WINSIZE + $overhead + 100"
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
 echo ""
-echo "start splitter"
+echo "start splitter, found $n games"
 echo "  max chunks: $max"
 echo "  max test:   $overhead_test"
 echo "  max train:  $overhead_train"
@@ -71,6 +79,24 @@ process() {
 
   if [[ $file = training.*.gz ]]
   then
+    # check if the file already exists in the desired location
+    if [ -f "$TESTDIR/$file" ] || [ -f "$TRAINDIR/$file" ]
+    then
+      echo -n "."
+      return
+    fi
+
+    # compute basic file integrity check
+    size=$(zcat $dir/$file | wc -c)
+    let rem="size % 8276"
+    
+    if [[ $size -eq 0 ]] || [[ $rem -ne 0 ]]
+    then
+      echo -n "X"
+      return
+    fi
+
+    # new correct file, put in correct directory
     let "n++"
 
     id=$(echo $file | cut -d'.' -f 2)
@@ -87,10 +113,14 @@ process() {
 
     ln $dir/$file $target
 
+    # exceeding max buffer size, remove overhead
     if [ $n -gt $max ]
     then
+      (
+      flock -e 200
       ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
       ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
+      ) 200>$LC0LOCKFILE
       let "n -= $overhead"
     fi
   fi
