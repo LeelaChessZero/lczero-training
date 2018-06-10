@@ -42,6 +42,10 @@ do
     # train all networks
     for netarch in ${NETARCHS[@]}
     do
+      echo "Saving .yaml changes:"
+      git add $CONFIGDIR/$netarch.yaml
+      git commit -m "Configuration change"
+      git push https://github.com/LeelaChessZero/lczero-training.git running_conf
       echo "Training $netarch:"
       train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N").txt"
     done
