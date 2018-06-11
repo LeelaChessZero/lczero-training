@@ -19,7 +19,7 @@ def main(argv):
     n = min(argv.wsize, len(a))
     b = get_latest_chunk_ids(argv.dirs)
     diff = set(a[:n]) - set(b)
-    for i in diff:
+    for i in sorted(diff):
         print('training.{}.gz'.format(i))
 
 
