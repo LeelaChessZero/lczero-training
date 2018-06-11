@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+RECORDSIZE=8276 # size in bytes of a record (s, pi, v)
+
 function usage()
 {
   echo "Watches a directory and copies data to train/test set"
@@ -79,16 +81,9 @@ process() {
 
   if [[ $file = training.*.gz ]]
   then
-    # check if the file already exists in the desired location
-    if [ -f "$TESTDIR/$file" ] || [ -f "$TRAINDIR/$file" ]
-    then
-      echo -n "."
-      return
-    fi
-
     # compute basic file integrity check
     size=$(zcat $dir/$file | wc -c)
-    let rem="size % 8276"
+    let rem="size % $RECORDSIZE"
     
     if [[ $size -eq 0 ]] || [[ $rem -ne 0 ]]
     then
@@ -96,13 +91,13 @@ process() {
       return
     fi
 
-    # new correct file, put in correct directory
+    # new file, put hard link in correct directory
     let "n++"
 
     id=$(echo $file | cut -d'.' -f 2)
-    let x="$id % 100 + 1"
+    let hash_index="$id % 100 + 1"
 
-    if [ $x -gt $TRAINPCT ]
+    if [ $hash_index -gt $TRAINPCT ]
     then
       target=$TESTDIR/$file
       echo -n "T"
@@ -121,21 +116,20 @@ process() {
       ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
       ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
       ) 200>$LC0LOCKFILE
+
       let "n -= $overhead"
     fi
   fi
 }
 
 
-echo -n "processing data in '$INPUTDIR'..."
-for f in $(ls -1rt $INPUTDIR | tail -n $WINSIZE)
+echo "processing '$INPUTDIR'"
+for file in $(./diff.py -i $INPUTDIR -w $WINSIZE $TRAINDIR $TESTDIR)
 do
-  file=$(basename $f)
   process $INPUTDIR $file
 done
-echo "[done]"
 
-echo "monitoring '$INPUTDIR'"
+echo -e "\nmonitoring '$INPUTDIR'"
 inotifywait -q -m -e moved_to -e close_write $INPUTDIR | mbuffer -m 10M |
   while read dir event file
   do
