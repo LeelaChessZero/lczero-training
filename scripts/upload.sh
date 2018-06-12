@@ -51,14 +51,14 @@ netarch="${FILTERS}x${BLOCKS}"
 
 echo "start upload monitor for $netarch*.gz"
 
-inotifywait -q -m -e close_write $NETDIR | mbuffer -q -m 1M | 
-while read -r dir events file
-do
-  if [[ $file = ${netarch}*.gz ]]
-  then
-    echo -n "uploading ${file}"
-    curl -F "file=@${dir}/${file}" -F "training_id=1" -F "layers=${BLOCKS}" -F "filters=${FILTERS}" $UPLOADURL
-  else
-    echo "ignoring ${file}"
-  fi
-done
+inotifywait -m -e moved_to -e close_write $NETDIR |
+  while read dir events file
+  do
+    if [[ $file = ${netarch}*.gz ]]
+    then
+      echo "uploading ${file} ($events)"
+      curl -s -F "file=@${dir}/${file}" -F "training_id=1" -F "layers=${BLOCKS}" -F "filters=${FILTERS}" $UPLOADURL &
+    else
+      echo "ignoring ${file} ($events)"
+    fi
+  done

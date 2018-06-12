@@ -133,7 +133,7 @@ echo -e "\nmonitoring '$INPUTDIR'"
 inotifywait -q -m -e moved_to -e close_write $INPUTDIR | mbuffer -m 10M |
   while read dir event file
   do
-    if [[ $event = MOVED_TO ]] || [[ $event = CLOSE_WRITE ]]
+    if [[ $event = *MOVED_TO* ]] || [[ $event = *CLOSE_WRITE* ]]
     then
       process $INPUTDIR $file
     fi
