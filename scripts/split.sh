@@ -118,6 +118,7 @@ process() {
       ) 200>$LC0LOCKFILE
 
       let "n -= $overhead"
+      echo -n "-"
     fi
   fi
 }
