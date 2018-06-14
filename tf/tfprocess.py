@@ -25,20 +25,20 @@ import bisect
 
 VERSION = 2
 
-def weight_variable(shape):
+def weight_variable(shape, name=None):
     """Xavier initialization"""
     stddev = np.sqrt(2.0 / (sum(shape)))
     initial = tf.truncated_normal(shape, stddev=stddev)
-    weights = tf.Variable(initial)
+    weights = tf.Variable(initial, name=name)
     tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, weights)
     return weights
 
 # Bias weights for layers not followed by BatchNorm
 # We do not regularlize biases, so they are not
 # added to the regularlizer collection
-def bias_variable(shape):
+def bias_variable(shape, name=None):
     initial = tf.constant(0.0, shape=shape)
-    return tf.Variable(initial)
+    return tf.Variable(initial, name=name)
 
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, data_format='NCHW',
@@ -361,12 +361,13 @@ class TFProcess:
         return result
 
     def conv_block(self, inputs, filter_size, input_channels, output_channels):
-        W_conv = weight_variable([filter_size, filter_size,
-                                  input_channels, output_channels])
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
         weight_key = self.get_batchnorm_key()
+        conv_key = weight_key + "/conv_weight"
+        W_conv = weight_variable([filter_size, filter_size,
+                                  input_channels, output_channels], name=conv_key)
 
         with tf.variable_scope(weight_key):
             h_bn = \
@@ -395,12 +396,14 @@ class TFProcess:
     def residual_block(self, inputs, channels):
         # First convnet
         orig = tf.identity(inputs)
-        W_conv_1 = weight_variable([3, 3, channels, channels])
         weight_key_1 = self.get_batchnorm_key()
+        conv_key_1 = weight_key_1 + "/conv_weight"
+        W_conv_1 = weight_variable([3, 3, channels, channels], name=conv_key_1)
 
         # Second convnet
-        W_conv_2 = weight_variable([3, 3, channels, channels])
         weight_key_2 = self.get_batchnorm_key()
+        conv_key_2 = weight_key_2 + "/conv_weight"
+        W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2)
 
         with tf.variable_scope(weight_key_1):
             h_bn1 = \
@@ -465,8 +468,8 @@ class TFProcess:
                                    input_channels=self.RESIDUAL_FILTERS,
                                    output_channels=32)
         h_conv_pol_flat = tf.reshape(conv_pol, [-1, 32*8*8])
-        W_fc1 = weight_variable([32*8*8, 1858])
-        b_fc1 = bias_variable([1858])
+        W_fc1 = weight_variable([32*8*8, 1858], name='fc1/weight')
+        b_fc1 = bias_variable([1858], name='fc1/bias')
         self.weights.append(W_fc1)
         self.weights.append(b_fc1)
         h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1), b_fc1, name='policy_head')
@@ -476,13 +479,13 @@ class TFProcess:
                                    input_channels=self.RESIDUAL_FILTERS,
                                    output_channels=32)
         h_conv_val_flat = tf.reshape(conv_val, [-1, 32*8*8])
-        W_fc2 = weight_variable([32 * 8 * 8, 128])
-        b_fc2 = bias_variable([128])
+        W_fc2 = weight_variable([32 * 8 * 8, 128], name='fc2/weight')
+        b_fc2 = bias_variable([128], name='fc2/bias')
         self.weights.append(W_fc2)
         self.weights.append(b_fc2)
         h_fc2 = tf.nn.relu(tf.add(tf.matmul(h_conv_val_flat, W_fc2), b_fc2))
-        W_fc3 = weight_variable([128, 1])
-        b_fc3 = bias_variable([1])
+        W_fc3 = weight_variable([128, 1], name='fc3/weight')
+        b_fc3 = bias_variable([1], name='fc3/bias')
         self.weights.append(W_fc3)
         self.weights.append(b_fc3)
         h_fc3 = tf.nn.tanh(tf.add(tf.matmul(h_fc2, W_fc3), b_fc3), name='value_head')
