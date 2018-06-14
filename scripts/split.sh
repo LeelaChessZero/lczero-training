@@ -133,5 +133,10 @@ echo -e "\nmonitoring '$INPUTDIR'"
 inotifywait -q -m -e moved_to -e close_write $INPUTDIR | mbuffer -m 10M |
   while read dir event file
   do
+    if [ -f "$TESTDIR/$file" ] || [ -f "$TRAINDIR/$file" ]
+    then
+      continue
+    fi
+
     process $INPUTDIR $file
   done
