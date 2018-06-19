@@ -2,9 +2,8 @@
 
 set -e
 
-NETARCHS=(64x6 128x10 192x15)
-REPO="https://github.com/LeelaChessZero/lczero-training-conf.git"
-BRANCH=""
+NETARCHS=(64x6)
+REPO="origin"
 ROOT="/work/lc0"
 NETDIR="$ROOT/networks/upload"
 GAMEFILE="$HOME/.lc0.dat"
@@ -39,9 +38,6 @@ do
     -g | --games)
       GAMES=$VALUE
       ;;
-    -b | --branch)
-      BRANCH=$VALUE
-      ;;
     *)
       echo "ERROR: unknown parameter \"$PARAM\""
       usage
@@ -62,14 +58,6 @@ then
   exit 1
 fi
 
-if [ ! -z "$BRANCH" ]
-then
-  echo "Initialize git branch $BRANCH ($REPO)"
-  pushd $CONFIGDIR
-  git checkout -b $BRANCH
-  popd
-fi
-
 
 game_num=$(cat $GAMEFILE)
 game_num=$((game_num + GAMES))
@@ -81,17 +69,6 @@ train() {
   unbuffer ./train.py --cfg=$1 --output=$2 2>&1 | tee "$ROOT/logs/$(date +%Y%m%d-%H%M%S).log"
   gzip -9 $2
   mv -v $2.gz $NETDIR
-}
-
-push_cfg() {
-  local dir=$1
-  local file=$2
-  local branch=$3
-  pushd $dir
-  git add $file
-  git commit -m "Update '$file' config"
-  git push $REPO $branch &
-  popd
 }
 
 
@@ -110,11 +87,6 @@ do
     # train all networks
     for netarch in ${NETARCHS[@]}
     do
-      if [ ! -z "$BRANCH" ]
-      then
-        echo "Saving $netarch.yaml changes:"
-        push_cfg "$CONFIGDIR" "$netarch.yaml" "$BRANCH"
-      fi
       echo "Training $netarch:"
       train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N").txt"
     done
