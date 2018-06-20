@@ -47,7 +47,7 @@ def get_latest_chunks(path, num_chunks):
         chunks += get_chunks(d)
 
     if len(chunks) < num_chunks:
-        print("Not enough chunks")
+        print("Not enough chunks {}".format(len(chunks)))
         sys.exit(1)
 
     print("sorting {} chunks...".format(len(chunks)), end='')

@@ -26,8 +26,8 @@ echo $WINDOWSIZE > $HOME/.lc0.dat
 
 rm -rf $ROOT/split
 mkdir -vp $ROOT/split/{test,train}
-let trainsize="$WINDOWSIZE / 10"
-let testsize="$WINDOWSIZE - $trainsize"
+let testsize="$WINDOWSIZE / 10"
+let trainsize="$WINDOWSIZE - $testsize"
 echo "Create $ROOT/split/test ($testsize) and $ROOT/split/train ($trainsize)"
 ls -1 -U $ROOT/data | head -n $trainsize | xargs -I{} ln $ROOT/data/{} $ROOT/split/train/{}
 ls -1 -U $ROOT/data | tail -n $testsize | xargs -I{} ln $ROOT/data/{} $ROOT/split/test/{}
