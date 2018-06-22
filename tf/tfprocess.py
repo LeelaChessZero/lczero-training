@@ -260,6 +260,7 @@ class TFProcess:
             train_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
+                tf.Summary.Value(tag="LR", simple_value=self.lr),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.time_start = time_end
