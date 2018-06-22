@@ -303,7 +303,7 @@ class TFProcess:
         test_summaries = tf.Summary(value=[
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-            tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)])
+            tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
         test_summaries = tf.summary.merge([test_summaries] + histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
