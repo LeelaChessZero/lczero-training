@@ -105,7 +105,6 @@ class TFProcess:
 
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
-        self.cfg['training']['lr_values'].sort(reverse=True)
         self.lr = self.cfg['training']['lr_values'][0]
 
         # You need to change the learning rate here if you are training
