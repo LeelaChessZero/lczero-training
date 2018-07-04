@@ -41,6 +41,8 @@ def pack(ids, sizes):
         e += sizes[i]
         with gzip.open(filename, 'rb') as f:
             f.readinto(data[s:e])
+        if argv.remove:
+            os.remove(filename)
         s = e
 
     data = data.reshape(RECORD_SIZE, -1)
@@ -72,10 +74,12 @@ if __name__ == "__main__":
             'Repack training.*.gz files in batches of bz2 format.')
     argparser.add_argument('-i', '--input', type=str,
             help='input directory')
-    argparser.add_argument('-n', '--number', type=int,
-            help='number of games to repack per bz2 package')
     argparser.add_argument('-o', '--output', type=str,
             help='output directory')
+    argparser.add_argument('-r', '--remove', action='store_true',
+            help='remove input files while processing')
+    argparser.add_argument('-n', '--number', type=int, default=1000,
+            help='number of games to repack per bz2 package')
     argv = argparser.parse_args()
 
     main()
