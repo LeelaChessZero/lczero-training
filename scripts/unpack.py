@@ -30,7 +30,6 @@ def unpack(filepath):
     with gzip.open(filename, 'ab') as f:
         for row in data[begin+records_per_chunk:]:
             f.write(row)
-        print("Appending {}".format(data[begin+records_per_chunk:].shape))
 
     print("Written {} chunks with {} records per chunk".format(num_chunks, records_per_chunk))
 
