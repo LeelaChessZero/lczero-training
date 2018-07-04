@@ -38,7 +38,7 @@ def pack(ids, sizes):
 
     s = 0
     e = 0
-    for i, tid in enumerate(reversed(ids)):
+    for i, tid in enumerate(ids):
         filename = os.path.join(argv.input, 'training.{}.gz'.format(tid))
         e += sizes[i]
         with gzip.open(filename, 'rb') as f:
