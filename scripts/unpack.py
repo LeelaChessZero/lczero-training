@@ -5,6 +5,8 @@ import argparse
 import gzip
 import bz2
 import numpy as np
+import pickle
+import struct
 from pack import RECORD_SIZE
 
 
@@ -16,22 +18,23 @@ def unpack(filepath):
     num_chunks = last - first + 1
 
     buf = bz2.BZ2File(filepath, 'rb').read()
-    data = np.frombuffer(buf, dtype=np.int8).reshape(-1, RECORD_SIZE)
-    records_per_chunk = data.shape[0] // (num_chunks)
+    size = struct.unpack('I', buf[-4:])[0]
+    plylist = np.frombuffer(buf[-4-size:-4], dtype=np.int16)
+    data = np.frombuffer(buf[:-4-size], dtype=np.int8).reshape(-1, RECORD_SIZE)
+    assert(num_chunks == len(plylist))
 
-    for i in range(first, last + 1):
-        filename = os.path.join(argv.output, "training.{}.gz".format(i))
+    begin = 0
+    for i, plies in enumerate(plylist):
+        end = begin + plies
+        filename = os.path.join(argv.output, "training.{}.gz".format(i + first))
+
         with gzip.open(filename, 'wb') as f:
-            begin = (i - first) * records_per_chunk
-            for row in data[begin:begin+records_per_chunk]:
+            for row in data[begin:end]:
                 f.write(row)
 
-    # append remaining records to last chunk
-    with gzip.open(filename, 'ab') as f:
-        for row in data[begin+records_per_chunk:]:
-            f.write(row)
+        begin = end
 
-    print("Written {} chunks with {} records per chunk".format(num_chunks, records_per_chunk))
+    print("Written {} chunks".format(num_chunks))
 
 
 def main():

@@ -36,22 +36,25 @@ def pack(ids, sizes):
     total = np.sum(sizes)
     data = np.zeros(total, dtype=np.int8)
 
-    s = 0
-    e = 0
+    begin = 0
     for i, tid in enumerate(ids):
         filename = os.path.join(argv.input, 'training.{}.gz'.format(tid))
-        e += sizes[i]
+        end = begin + sizes[i]
         with gzip.open(filename, 'rb') as f:
-            f.readinto(data[s:e])
+            f.readinto(data[begin:end])
         if argv.remove:
             os.remove(filename)
-        s = e
+        begin = end
 
     data = data.reshape(RECORD_SIZE, -1)
     filename = os.path.join(argv.output, '{}-{}.bz2'.format(ids[0], ids[-1]))
     with bz2.open(filename, 'xb') as f:
         for row in data:
             f.write(row)
+        plylist = (sizes // RECORD_SIZE).astype(np.int16)
+        size = struct.pack('I', len(plylist)*2)
+        f.write(plylist.tobytes())
+        f.write(size)
 
     print("Written '{}' {}x{}".format(filename, data.shape[0], data.shape[1]))
 
