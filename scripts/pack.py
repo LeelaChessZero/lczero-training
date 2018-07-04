@@ -5,28 +5,51 @@ import os
 import argparse
 import gzip
 import bz2
+import struct
+import numpy as np
 from multiprocessing import Pool
 
 
-def get_sorted_chunk_ids(dirs):
+RECORD_SIZE = 8276
+
+
+def get_uncompressed_size(filename):
+    with open(filename, 'rb') as f:
+        f.seek(-4, 2)
+        return struct.unpack('I', f.read(4))[0]
+
+
+def get_sorted_chunk_ids(dirs, reverse=True):
     ids = []
+    sizes = []
     for d in dirs:
         for f in glob.glob(os.path.join(d, "training.*.gz")):
             ids.append(int(os.path.basename(f).split('.')[-2]))
-    ids.sort(reverse=True)
-    return ids
+            sizes.append(get_uncompressed_size(f))
+    ids.sort(reverse=reverse)
+    return ids, sizes
 
 
-def pack(ids):
-    fout_name = os.path.join(argv.output, '{}-{}.bz2'.format(ids[-1], ids[0]))
+def pack(ids, sizes):
+    total = np.sum(sizes)
+    data = np.zeros(total, dtype=np.int8)
 
-    with bz2.open(fout_name, 'xb') as fout:
-        for tid in reversed(ids):
-            fin_name = os.path.join(argv.input, 'training.{}.gz'.format(tid))
-            with gzip.open(fin_name, 'rb') as fin:
-                fout.write(fin.read())
+    s = 0
+    e = 0
+    for i, tid in enumerate(reversed(ids)):
+        filename = os.path.join(argv.input, 'training.{}.gz'.format(tid))
+        e += sizes[i]
+        with gzip.open(filename, 'rb') as f:
+            f.readinto(data[s:e])
+        s = e
 
-    print("Written '{}'".format(fout_name))
+    data = data.reshape(RECORD_SIZE, -1)
+    filename = os.path.join(argv.output, '{}-{}.bz2'.format(ids[-1], ids[0]))
+    with bz2.open(filename, 'xb') as f:
+        for row in data:
+            f.write(row)
+
+    print("Written '{}' {}x{}".format(filename, data.shape[0], data.shape[1]))
 
 
 def main():
@@ -34,12 +57,14 @@ def main():
         os.makedirs(argv.output)
         print("Created directory '{}'".format(argv.output))
 
-    ids = get_sorted_chunk_ids([argv.input])
-    print("Processing {} ids, {} - {}".format(len(ids), ids[-1], ids[0]))
+    ids, sizes = get_sorted_chunk_ids([argv.input])
     n = len(ids) // argv.number
-    packs = [ids[i*argv.number:i*argv.number+argv.number] for i in range(n)]
-    pool = Pool()
-    pool.map(pack, packs)
+    m = argv.number
+    print("Processing {} ids, {} - {} ({}x{})".format(len(ids), ids[-1], ids[0], n, m))
+    packs = [(ids[i*m:i*m+m], sizes[i*m:i*m+m]) for i in range(n)]
+
+    with Pool() as pool:
+        pool.starmap(pack, packs)
                 
 
 if __name__ == "__main__":
