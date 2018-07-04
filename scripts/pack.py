@@ -19,14 +19,16 @@ def get_uncompressed_size(filename):
         return struct.unpack('I', f.read(4))[0]
 
 
-def get_sorted_chunk_ids(dirs, reverse=True):
+def get_sorted_chunk_ids(dirs):
     ids = []
     sizes = []
     for d in dirs:
         for f in glob.glob(os.path.join(d, "training.*.gz")):
             ids.append(int(os.path.basename(f).split('.')[-2]))
             sizes.append(get_uncompressed_size(f))
-    ids.sort(reverse=reverse)
+    I = np.argsort(ids)
+    ids = np.array(ids)[I]
+    sizes = np.array(sizes)[I]
     return ids, sizes
 
 
@@ -46,7 +48,7 @@ def pack(ids, sizes):
         s = e
 
     data = data.reshape(RECORD_SIZE, -1)
-    filename = os.path.join(argv.output, '{}-{}.bz2'.format(ids[-1], ids[0]))
+    filename = os.path.join(argv.output, '{}-{}.bz2'.format(ids[0], ids[-1]))
     with bz2.open(filename, 'xb') as f:
         for row in data:
             f.write(row)
@@ -62,7 +64,7 @@ def main():
     ids, sizes = get_sorted_chunk_ids([argv.input])
     n = len(ids) // argv.number
     m = argv.number
-    print("Processing {} ids, {} - {} ({}x{})".format(len(ids), ids[-1], ids[0], n, m))
+    print("Processing {} ids, {} - {} ({}x{})".format(len(ids), ids[0], ids[-1], n, m))
     packs = [(ids[i*m:i*m+m], sizes[i*m:i*m+m]) for i in range(n)]
 
     with Pool() as pool:
