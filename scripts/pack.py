@@ -21,42 +21,32 @@ def get_uncompressed_size(filename):
 
 def get_sorted_chunk_ids(dirs):
     ids = []
-    sizes = []
     for d in dirs:
         for f in glob.glob(os.path.join(d, "training.*.gz")):
             ids.append(int(os.path.basename(f).split('.')[-2]))
-            sizes.append(get_uncompressed_size(f))
     I = np.argsort(ids)
     ids = np.array(ids)[I]
-    sizes = np.array(sizes)[I]
-    return ids, sizes
+    return ids
 
 
-def pack(ids, sizes):
-    total = np.sum(sizes)
-    data = np.zeros(total, dtype=np.int8)
+def pack(ids):
+    plies = []
+    fout_name = os.path.join(argv.output, '{}-{}.bz2'.format(ids[0], ids[-1]))
+    with bz2.open(fout_name, 'xb') as fout:
+        for i, tid in enumerate(ids):
+            fin_name = os.path.join(argv.input, 'training.{}.gz'.format(tid))
+            plies.append(get_uncompressed_size(fin_name) // RECORD_SIZE)
+            with gzip.open(fin_name, 'rb') as fin:
+                fout.write(fin.read())
+            if argv.remove:
+                os.remove(fin_name)
 
-    begin = 0
-    for i, tid in enumerate(ids):
-        filename = os.path.join(argv.input, 'training.{}.gz'.format(tid))
-        end = begin + sizes[i]
-        with gzip.open(filename, 'rb') as f:
-            f.readinto(data[begin:end])
-        if argv.remove:
-            os.remove(filename)
-        begin = end
-
-    data = data.reshape(RECORD_SIZE, -1)
-    filename = os.path.join(argv.output, '{}-{}.bz2'.format(ids[0], ids[-1]))
-    with bz2.open(filename, 'xb') as f:
-        for row in data:
-            f.write(row)
-        plylist = (sizes // RECORD_SIZE).astype(np.int16)
+        plylist = np.array(plies, dtype=np.int16)
         size = struct.pack('I', len(plylist)*2)
-        f.write(plylist.tobytes())
-        f.write(size)
+        fout.write(plylist.tobytes())
+        fout.write(size)
 
-    print("Written '{}' {}x{}".format(filename, data.shape[0], data.shape[1]))
+    print("Written '{}' {} records".format(fout_name, np.sum(plies)))
 
 
 def main():
@@ -64,14 +54,14 @@ def main():
         os.makedirs(argv.output)
         print("Created directory '{}'".format(argv.output))
 
-    ids, sizes = get_sorted_chunk_ids([argv.input])
+    ids = get_sorted_chunk_ids([argv.input])
     n = len(ids) // argv.number
     m = argv.number
     print("Processing {} ids, {} - {} ({}x{})".format(len(ids), ids[0], ids[-1], n, m))
-    packs = [(ids[i*m:i*m+m], sizes[i*m:i*m+m]) for i in range(n)]
+    packs = [ids[i*m:i*m+m] for i in range(n)]
 
     with Pool() as pool:
-        pool.starmap(pack, packs)
+        pool.map(pack, packs)
                 
 
 if __name__ == "__main__":
