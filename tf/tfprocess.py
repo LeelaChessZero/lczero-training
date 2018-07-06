@@ -112,11 +112,16 @@ class TFProcess:
         opt_op = tf.train.MomentumOptimizer(
             learning_rate=self.learning_rate, momentum=0.9, use_nesterov=True)
 
+        # Accumulate (possibly multiple) gradient updates to simulate larger batch sizes than can be held in GPU memory.
+        gradient_accum = [tf.Variable(tf.zeros_like(var.initialized_value()), trainable=False) for var in tf.trainable_variables()]
+        self.zero_op = [var.assign(tf.zeros_like(var)) for var in gradient_accum]
 
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(self.update_ops):
-            self.train_op = \
-                opt_op.minimize(loss, global_step=self.global_step)
+            gradients = opt_op.compute_gradients(loss)
+        self.accum_op = [accum.assign_add(gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
+        self.train_op = opt_op.apply_gradients(
+            [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
         correct_prediction = \
             tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y_, 1))
@@ -191,15 +196,15 @@ class TFProcess:
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
 
-    def process_loop(self, batch_size, test_batches):
+    def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
         # which is not a multiple of total_steps.
         steps = tf.train.global_step(self.session, self.global_step)
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
-            self.process(batch_size, test_batches)
+            self.process(batch_size, test_batches, batch_splits=batch_splits)
 
-    def process(self, batch_size, test_batches):
+    def process(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
             self.time_start = time.time()
 
@@ -215,10 +220,21 @@ class TFProcess:
             self.calculate_test_summaries(test_batches, steps + 1)
 
         # Run training for this batch
-        policy_loss, mse_loss, reg_term, _, _ = self.session.run(
-            [self.policy_loss, self.mse_loss, self.reg_term, self.train_op,
-                self.next_batch],
-            feed_dict={self.training: True, self.learning_rate: self.lr, self.handle: self.train_handle})
+        self.session.run(self.zero_op)
+        for _ in range(batch_splits):
+            policy_loss, mse_loss, reg_term, _, _ = self.session.run(
+                [self.policy_loss, self.mse_loss, self.reg_term, self.accum_op,
+                    self.next_batch],
+                feed_dict={self.training: True, self.handle: self.train_handle})
+            # Keep running averages
+            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
+            # get comparable values.
+            mse_loss /= 4.0
+            self.avg_policy_loss.append(policy_loss)
+            self.avg_mse_loss.append(mse_loss)
+            self.avg_reg_term.append(reg_term)
+        self.session.run(self.train_op,
+            feed_dict={self.learning_rate: self.lr / batch_splits, self.training: True, self.handle: self.train_handle})
 
         # Update steps since training should have incremented it.
         steps = tf.train.global_step(self.session, self.global_step)
@@ -229,13 +245,6 @@ class TFProcess:
         steps_total = (steps-1) % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
 
-        # Keep running averages
-        # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
-        # get comparable values.
-        mse_loss /= 4.0
-        self.avg_policy_loss.append(policy_loss)
-        self.avg_mse_loss.append(mse_loss)
-        self.avg_reg_term.append(reg_term)
         if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             pol_loss_w = self.cfg['training']['policy_loss_weight']
             val_loss_w = self.cfg['training']['value_loss_weight']
