@@ -24,8 +24,7 @@ def get_sorted_chunk_ids(dirs):
     for d in dirs:
         for f in glob.glob(os.path.join(d, "training.*.gz")):
             ids.append(int(os.path.basename(f).split('.')[-2]))
-    I = np.argsort(ids)
-    ids = np.array(ids)[I]
+    ids.sort()
     return ids
 
 
@@ -33,7 +32,7 @@ def pack(ids):
     plies = []
     fout_name = os.path.join(argv.output, '{}-{}.bz2'.format(ids[0], ids[-1]))
     with bz2.open(fout_name, 'xb') as fout:
-        for i, tid in enumerate(ids):
+        for tid in ids:
             fin_name = os.path.join(argv.input, 'training.{}.gz'.format(tid))
             plies.append(get_uncompressed_size(fin_name) // RECORD_SIZE)
             with gzip.open(fin_name, 'rb') as fin:
@@ -59,6 +58,9 @@ def main():
     m = argv.number
     print("Processing {} ids, {} - {} ({}x{})".format(len(ids), ids[0], ids[-1], n, m))
     packs = [ids[i*m:i*m+m] for i in range(n)]
+
+    # add remaining ids to last pack
+    packs[-1] += ids[n*m+m:]
 
     with Pool() as pool:
         pool.map(pack, packs)
