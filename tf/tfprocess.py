@@ -214,6 +214,12 @@ class TFProcess:
             # being equal to the value the end of a run is stored against.
             self.calculate_test_summaries(test_batches, steps + 1)
 
+        # Make sure that ghost batch norm can be applied
+        if batch_size % 64 != 0:
+            # Adjust required batch size for batch splitting.
+            required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
+            raise ValueError('batch_size must be a multiple of {}'.format(required_factor))
+
         # Run training for this batch
         policy_loss, mse_loss, reg_term, _, _ = self.session.run(
             [self.policy_loss, self.mse_loss, self.reg_term, self.train_op,
