@@ -137,7 +137,8 @@ def main(cmd):
 
     # Sweeps through all test chunks statistically
     # Assumes average of 10 samples per test game.
-    # Evaluation result doesn't depend on batch size, so we can use split instead of total batch size.
+    # For simplicity, testing can use the split batch size instead of total batch size.
+    # This does not affect results, because test results are simple averages that are independent of batch size.
     num_evals = num_test*10 // ChunkParser.BATCH_SIZE
     print("Using {} evaluation batches".format(num_evals))
 

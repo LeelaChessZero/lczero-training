@@ -233,8 +233,10 @@ class TFProcess:
             self.avg_policy_loss.append(policy_loss)
             self.avg_mse_loss.append(mse_loss)
             self.avg_reg_term.append(reg_term)
+        # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
+        corrected_lr = self.lr / batch_splits
         self.session.run(self.train_op,
-            feed_dict={self.learning_rate: self.lr / batch_splits, self.training: True, self.handle: self.train_handle})
+            feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
 
         # Update steps since training should have incremented it.
         steps = tf.train.global_step(self.session, self.global_step)
