@@ -219,6 +219,12 @@ class TFProcess:
             # being equal to the value the end of a run is stored against.
             self.calculate_test_summaries(test_batches, steps + 1)
 
+        # Make sure that ghost batch norm can be applied
+        if batch_size % 64 != 0:
+            # Adjust required batch size for batch splitting.
+            required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
+            raise ValueError('batch_size must be a multiple of {}'.format(required_factor))
+
         # Run training for this batch
         self.session.run(self.zero_op)
         for _ in range(batch_splits):
@@ -388,6 +394,7 @@ class TFProcess:
                     conv2d(inputs, W_conv),
                     epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=False,
+                    virtual_batch_size=64,
                     training=self.training)
         h_conv = tf.nn.relu(h_bn)
 
@@ -424,6 +431,7 @@ class TFProcess:
                     conv2d(inputs, W_conv_1),
                     epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=False,
+                    virtual_batch_size=64,
                     training=self.training)
         h_out_1 = tf.nn.relu(h_bn1)
         with tf.variable_scope(weight_key_2):
@@ -432,6 +440,7 @@ class TFProcess:
                     conv2d(h_out_1, W_conv_2),
                     epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=False,
+                    virtual_batch_size=64,
                     training=self.training)
         h_out_2 = tf.nn.relu(tf.add(h_bn2, orig))
 
