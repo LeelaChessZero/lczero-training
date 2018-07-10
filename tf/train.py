@@ -99,7 +99,13 @@ def main(cmd):
         test_chunks = chunks[num_train:]
 
     shuffle_size = cfg['training']['shuffle_size']
-    ChunkParser.BATCH_SIZE = cfg['training']['batch_size']
+    total_batch_size = cfg['training']['batch_size']
+    batch_splits = cfg['training'].get('num_batch_splits', 1)
+    if total_batch_size % batch_splits != 0:
+        raise ValueError('num_batch_splits must divide batch_size evenly')
+    split_batch_size = total_batch_size // batch_splits
+    # Load data with split batch size, which will be combined to the total batch size in tfprocess.
+    ChunkParser.BATCH_SIZE = split_batch_size
 
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
@@ -130,11 +136,13 @@ def main(cmd):
         tfprocess.restore(cp)
 
     # Sweeps through all test chunks statistically
-	# Assumes average of 10 samples per test game.
+    # Assumes average of 10 samples per test game.
+    # For simplicity, testing can use the split batch size instead of total batch size.
+    # This does not affect results, because test results are simple averages that are independent of batch size.
     num_evals = num_test*10 // ChunkParser.BATCH_SIZE
     print("Using {} evaluation batches".format(num_evals))
 
-    tfprocess.process_loop(ChunkParser.BATCH_SIZE, num_evals)
+    tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
 
     tfprocess.save_leelaz_weights(cmd.output)
 
