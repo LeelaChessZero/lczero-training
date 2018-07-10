@@ -139,6 +139,7 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])), self.session.graph)
         self.train_writer = tf.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])), self.session.graph)
+        self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -320,8 +321,7 @@ class TFProcess:
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
             tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
-        histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
-        test_summaries = tf.summary.merge([test_summaries] + histograms).eval(session=self.session)
+        test_summaries = tf.summary.merge([test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
             format(steps, sum_policy, sum_accuracy, sum_mse))
