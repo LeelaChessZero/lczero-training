@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import tensorflow as tf
+import gzip
 import os
 import sys
 import yaml
@@ -37,31 +38,14 @@ model:
 """
 YAMLCFG = textwrap.dedent(YAMLCFG).strip()
 cfg = yaml.safe_load(YAMLCFG)
+net = Net()
+net.parse_proto(sys.argv[1])
 
-with open(sys.argv[1], 'r') as f:
-    version = f.readline()
-    if version != '{}\n'.format(tfprocess.VERSION):
-        raise ValueError("Invalid version {}".format(version.strip()))
-
-    weights = []
-    for e, line in enumerate(f):
-        weights.append(list(map(float, line.split(' '))))
-
-        if e == 1:
-            filters = len(line.split(' '))
-            print("Channels", filters)
-
-    blocks = e - (3 + 14)
-
-    if blocks % 8 != 0:
-        raise ValueError("Inconsistent number of weights in the file")
-
-    blocks //= 8
-    print("Blocks", blocks)
-
-cfg['model']['filters'] = filters
-cfg['model']['residual_blocks'] = blocks
+cfg['model']['filters'] = net.filters()
+cfg['model']['residual_blocks'] = net.blocks()
 cfg['name'] = 'online-{}x{}'.format(filters, blocks)
+weights = net.get_weights()
+
 print(yaml.dump(cfg, default_flow_style=False))
 
 x = [

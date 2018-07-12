@@ -2,6 +2,10 @@
 
 The training pipeline resides in `tf`, this requires tensorflow running on linux (Ubuntu 16.04 in this case). (It can be made to work on windows too, but it takes more effort.)
 
+## Installation
+
+Install the requirements under `tf/requirements.txt`. And call `./init.sh` to compile the protobuf files.
+
 ## Data preparation
 
 In order to start a training session you first need to download trainingdata from http://lczero.org/training_data. This data is packed in tar.gz balls each containing 10'000 games or chunks as we call them. Preparing data requires the following steps:
