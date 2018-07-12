@@ -6,7 +6,7 @@ import os
 import numpy as np
 import lc0net_pb2 as pb
 
-LC0_MAJOR = 15
+LC0_MAJOR = 1
 LC0_MINOR = 0
 LC0_PATCH = 0
 
@@ -145,8 +145,6 @@ class Net:
             raise ValueError("Inconsistent number of weights in the file")
         blocks //= 8
 
-        self.pb.min_version.major = 14
-        self.pb.min_version.minor = 1
         self.pb.format.weights_encoding = pb.Format.LINEAR16
         self.fill_layer(self.pb.weights.ip2_val_b, weights)
         self.fill_layer(self.pb.weights.ip2_val_w, weights)
