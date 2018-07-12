@@ -110,7 +110,7 @@ class Net:
         return len(w[1])
 
 
-    def filters(self):
+    def blocks(self):
         w = self.get_weights()
         blocks = len(w) - (4 + 14)
 
@@ -122,7 +122,7 @@ class Net:
 
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
-            self.params = self.params.FromString(f.read())
+            self.pb = self.pb.FromString(f.read())
 
 
     def parse_txt(self, filename):

@@ -7,6 +7,8 @@ import yaml
 import textwrap
 import tfprocess
 
+from net import Net
+
 
 YAMLCFG = """
 %YAML 1.2
@@ -41,8 +43,9 @@ cfg = yaml.safe_load(YAMLCFG)
 net = Net()
 net.parse_proto(sys.argv[1])
 
-cfg['model']['filters'] = net.filters()
-cfg['model']['residual_blocks'] = net.blocks()
+filters, blocks = net.filters(), net.blocks()
+cfg['model']['filters'] = filters
+cfg['model']['residual_blocks'] = blocks
 cfg['name'] = 'online-{}x{}'.format(filters, blocks)
 weights = net.get_weights()
 
