@@ -88,7 +88,7 @@ do
     for netarch in ${NETARCHS[@]}
     do
       echo "Training $netarch:"
-      train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N").txt"
+      train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N")"
     done
 
     # wait for next cycle
