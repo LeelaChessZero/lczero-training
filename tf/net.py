@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import gzip
 import os
 import numpy as np
