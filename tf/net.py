@@ -7,7 +7,7 @@ import numpy as np
 import lc0net_pb2 as pb
 
 LC0_MAJOR = 0
-LC0_MINOR = 14
+LC0_MINOR = 15
 LC0_PATCH = 1
 
 
