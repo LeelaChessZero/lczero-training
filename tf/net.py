@@ -6,9 +6,9 @@ import os
 import numpy as np
 import lc0net_pb2 as pb
 
-LC0_MAJOR = 1
-LC0_MINOR = 0
-LC0_PATCH = 0
+LC0_MAJOR = 0
+LC0_MINOR = 14
+LC0_PATCH = 1
 
 
 class Net:
@@ -17,41 +17,42 @@ class Net:
         self.pb.min_version.major = LC0_MAJOR
         self.pb.min_version.minor = LC0_MINOR
         self.pb.min_version.patch = LC0_PATCH
+        self.pb.format.weights_encoding = pb.Format.LINEAR16
         self.weights = []
 
 
     def fill_layer(self, layer, weights):
-        """Normalize and populate 8bit layer in protobuf"""
+        """Normalize and populate 16bit layer in protobuf"""
         params = np.array(weights.pop(), dtype=np.float32)
         layer.min_val = 0 if len(params) == 1 else np.min(params)
-        layer.max_val = np.max(params)
+        layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else np.max(params)
         params = (params - layer.min_val) / (layer.max_val - layer.min_val)
-        params *= 2**16-1
+        params *= 0xffff
         params = np.round(params)
         layer.params = params.astype(np.uint16).tobytes()
 
 
     def fill_conv_block(self, convblock, weights):
-        """Normalize and populate 8bit convblock in protobuf"""
-        self.fill_layer(convblock.weights, weights)
-        self.fill_layer(convblock.biases, weights)
-        self.fill_layer(convblock.bn_means, weights)
+        """Normalize and populate 16bit convblock in protobuf"""
         self.fill_layer(convblock.bn_stddivs, weights)
+        self.fill_layer(convblock.bn_means, weights)
+        self.fill_layer(convblock.biases, weights)
+        self.fill_layer(convblock.weights, weights)
 
 
     def denorm_layer(self, layer, weights):
         """Denormalize a layer from protobuf"""
         params = np.frombuffer(layer.params, np.uint16).astype(np.float32)
-        params /= 2**16-1
+        params /= 0xffff
         weights.insert(0, params * (layer.max_val - layer.min_val) + layer.min_val)
 
 
     def denorm_conv_block(self, convblock, weights):
         """Denormalize a convblock from protobuf"""
-        self.denorm_layer(convblock.weights, weights)
-        self.denorm_layer(convblock.biases, weights)
-        self.denorm_layer(convblock.bn_means, weights)
         self.denorm_layer(convblock.bn_stddivs, weights)
+        self.denorm_layer(convblock.bn_means, weights)
+        self.denorm_layer(convblock.biases, weights)
+        self.denorm_layer(convblock.weights, weights)
 
 
     def save_txt(self, filename):
@@ -66,7 +67,7 @@ class Net:
             for row in weights:
                 f.write(" ".join(map(str, row.tolist())) + "\n")
 
-        size = os.path.getsize(filename) * 1e-6
+        size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
 
 

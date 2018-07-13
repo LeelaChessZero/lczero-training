@@ -280,9 +280,6 @@ class TFProcess:
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
-            self.net.pb.training_params.learning_rate = self.lr
-            self.net.pb.training_params.mse_loss = avg_mse_loss
-            self.net.pb.training_params.policy_loss = avg_policy_loss
             self.train_writer.add_summary(train_summaries, steps)
             self.time_start = time_end
             self.last_steps = steps
@@ -322,6 +319,10 @@ class TFProcess:
         sum_policy /= test_batches
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
+        self.net.pb.training_params.learning_rate = self.lr
+        self.net.pb.training_params.mse_loss = sum_mse
+        self.net.pb.training_params.policy_loss = sum_policy
+        self.net.pb.training_params.accuracy = sum_accuracy
         test_summaries = tf.Summary(value=[
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
