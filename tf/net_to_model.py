@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import tensorflow as tf
 import os
 import sys
@@ -38,8 +39,14 @@ model:
 """
 YAMLCFG = textwrap.dedent(YAMLCFG).strip()
 cfg = yaml.safe_load(YAMLCFG)
-
-with open(sys.argv[1], 'r') as f:
+argparser = argparse.ArgumentParser(description='Convert net to model.')
+argparser.add_argument('net', type=argparse.FileType('r'),
+    help='Net file to be converted to a model checkpoint.')
+argparser.add_argument('--start', type=int, default=0,
+    help='Offset to set global_step to.')
+args = argparser.parse_args()
+START_FROM = args.start
+with args.net as f:
     version = f.readline()
     if version != '{}\n'.format(tfprocess.VERSION):
         raise ValueError("Invalid version {}".format(version.strip()))
