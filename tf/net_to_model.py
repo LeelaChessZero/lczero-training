@@ -6,6 +6,7 @@ import yaml
 import textwrap
 import tfprocess
 
+START_FROM = 0
 
 YAMLCFG = """
 %YAML 1.2
@@ -74,5 +75,7 @@ tfp = tfprocess.TFProcess(cfg)
 tfp.init_net(x)
 tfp.replace_weights(weights)
 path = os.path.join(os.getcwd(), cfg['name'])
-save_path = tfp.saver.save(tfp.session, path, global_step=0)
+update_global_step = tfp.global_step.assign(START_FROM)
+tfp.session.run(update_global_step)
+save_path = tfp.saver.save(tfp.session, path, global_step=START_FROM)
 print("Writted model to {}".format(path))
