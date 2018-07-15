@@ -4,7 +4,7 @@ import argparse
 import gzip
 import os
 import numpy as np
-import lc0net_pb2 as pb
+import proto.net_pb2 as pb
 
 LC0_MAJOR = 0
 LC0_MINOR = 15
