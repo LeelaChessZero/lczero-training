@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import tensorflow as tf
 import os
 import sys
@@ -6,6 +7,7 @@ import yaml
 import textwrap
 import tfprocess
 
+START_FROM = 0
 
 YAMLCFG = """
 %YAML 1.2
@@ -37,8 +39,14 @@ model:
 """
 YAMLCFG = textwrap.dedent(YAMLCFG).strip()
 cfg = yaml.safe_load(YAMLCFG)
-
-with open(sys.argv[1], 'r') as f:
+argparser = argparse.ArgumentParser(description='Convert net to model.')
+argparser.add_argument('net', type=argparse.FileType('r'),
+    help='Net file to be converted to a model checkpoint.')
+argparser.add_argument('--start', type=int, default=0,
+    help='Offset to set global_step to.')
+args = argparser.parse_args()
+START_FROM = args.start
+with args.net as f:
     version = f.readline()
     if version != '{}\n'.format(tfprocess.VERSION):
         raise ValueError("Invalid version {}".format(version.strip()))
@@ -74,5 +82,7 @@ tfp = tfprocess.TFProcess(cfg)
 tfp.init_net(x)
 tfp.replace_weights(weights)
 path = os.path.join(os.getcwd(), cfg['name'])
-save_path = tfp.saver.save(tfp.session, path, global_step=0)
+update_global_step = tfp.global_step.assign(START_FROM)
+tfp.session.run(update_global_step)
+save_path = tfp.saver.save(tfp.session, path, global_step=START_FROM)
 print("Writted model to {}".format(path))
