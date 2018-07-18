@@ -7,8 +7,8 @@ import numpy as np
 import proto.net_pb2 as pb
 
 LC0_MAJOR = 0
-LC0_MINOR = 14
-LC0_PATCH = 2
+LC0_MINOR = 16
+LC0_PATCH = 0
 
 
 class Net:
