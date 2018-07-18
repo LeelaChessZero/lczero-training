@@ -9,11 +9,12 @@ import proto.net_pb2 as pb
 LC0_MAJOR = 0
 LC0_MINOR = 16
 LC0_PATCH = 0
-
+WEIGHTS_MAGIC = 0x1c0
 
 class Net:
     def __init__(self):
         self.pb = pb.Net()
+        self.pb.magic = WEIGHTS_MAGIC
         self.pb.min_version.major = LC0_MAJOR
         self.pb.min_version.minor = LC0_MINOR
         self.pb.min_version.patch = LC0_PATCH
