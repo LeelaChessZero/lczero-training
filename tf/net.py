@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import argparse
 import gzip
@@ -64,9 +64,9 @@ class Net:
             filename += ".txt.gz"
 
         with gzip.open(filename, 'wb') as f:
-            f.write("{}\n".format(2))
+            f.write("{}\n".format(2).encode('utf-8'))
             for row in weights:
-                f.write(" ".join(map(str, row.tolist())) + "\n")
+                f.write((" ".join(map(str, row.tolist())) + "\n").encode('utf-8'))
 
         size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
