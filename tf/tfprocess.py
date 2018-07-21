@@ -23,7 +23,7 @@ import tensorflow as tf
 import time
 import bisect
 
-VERSION = 2
+from net import Net
 
 def weight_variable(shape, name=None):
     """Xavier initialization"""
@@ -47,6 +47,7 @@ def conv2d(x, W):
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
+        self.net = Net()
         self.root_dir = os.path.join(self.cfg['training']['path'], self.cfg['name'])
 
         # Network structure
@@ -295,7 +296,8 @@ class TFProcess:
             path = os.path.join(self.root_dir, self.cfg['name'])
             save_path = self.saver.save(self.session, path, global_step=steps)
             print("Model saved in file: {}".format(save_path))
-            leela_path = path + "-" + str(steps) + ".txt"
+            leela_path = path + "-" + str(steps)
+            self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path) 
             print("Weights saved in file: {}".format(leela_path))
 
@@ -317,6 +319,10 @@ class TFProcess:
         sum_policy /= test_batches
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
+        self.net.pb.training_params.learning_rate = self.lr
+        self.net.pb.training_params.mse_loss = sum_mse
+        self.net.pb.training_params.policy_loss = sum_policy
+        self.net.pb.training_params.accuracy = sum_accuracy
         test_summaries = tf.Summary(value=[
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
@@ -327,52 +333,52 @@ class TFProcess:
             format(steps, sum_policy, sum_accuracy, sum_mse))
 
     def save_leelaz_weights(self, filename):
-        with open(filename, "w") as file:
-            # Version tag
-            file.write("{}".format(VERSION))
-            for e, weights in enumerate(self.weights):
-                # Newline unless last line (single bias)
-                file.write("\n")
-                work_weights = None
-                if weights.name.endswith('/batch_normalization/beta:0'):
-                    # Batch norm beta needs to be converted to biases before
-                    # the batch norm for backwards compatibility reasons
-                    var_key = weights.name.replace('beta', 'moving_variance')
-                    var = tf.get_default_graph().get_tensor_by_name(var_key)
-                    work_weights = tf.multiply(weights, tf.sqrt(var + tf.constant(1e-5)))
-                elif weights.shape.ndims == 4:
-                    # Convolution weights need a transpose
-                    #
-                    # TF (kYXInputOutput)
-                    # [filter_height, filter_width, in_channels, out_channels]
-                    #
-                    # Leela/cuDNN/Caffe (kOutputInputYX)
-                    # [output, input, filter_size, filter_size]
-                    work_weights = tf.transpose(weights, [3, 2, 0, 1])
-                elif weights.shape.ndims == 2:
-                    # Fully connected layers are [in, out] in TF
-                    #
-                    # [out, in] in Leela
-                    #
-                    work_weights = tf.transpose(weights, [1, 0])
-                else:
-                    # Biases, batchnorm etc
-                    work_weights = weights
-                nparray = work_weights.eval(session=self.session)
-                # Rescale rule50 related weights as clients do not normalize the input.
-                if e == 0:
-                    num_inputs = 112
-                    # 50 move rule is the 110th input, or 109 starting from 0.
-                    rule50_input = 109
-                    wt_str = []
-                    for i, weight in enumerate(np.ravel(nparray)):
-                        if (i%(num_inputs*9))//9 == rule50_input:
-                            wt_str.append(str(weight/99))
-                        else:
-                            wt_str.append(str(weight))
-                else:
-                    wt_str = [str(wt) for wt in np.ravel(nparray)]
-                file.write(" ".join(wt_str))
+        all_weights = []
+        for e, weights in enumerate(self.weights):
+            # Newline unless last line (single bias)
+            work_weights = None
+            if weights.name.endswith('/batch_normalization/beta:0'):
+                # Batch norm beta needs to be converted to biases before
+                # the batch norm for backwards compatibility reasons
+                var_key = weights.name.replace('beta', 'moving_variance')
+                var = tf.get_default_graph().get_tensor_by_name(var_key)
+                work_weights = tf.multiply(weights, tf.sqrt(var + tf.constant(1e-5)))
+            elif weights.shape.ndims == 4:
+                # Convolution weights need a transpose
+                #
+                # TF (kYXInputOutput)
+                # [filter_height, filter_width, in_channels, out_channels]
+                #
+                # Leela/cuDNN/Caffe (kOutputInputYX)
+                # [output, input, filter_size, filter_size]
+                work_weights = tf.transpose(weights, [3, 2, 0, 1])
+            elif weights.shape.ndims == 2:
+                # Fully connected layers are [in, out] in TF
+                #
+                # [out, in] in Leela
+                #
+                work_weights = tf.transpose(weights, [1, 0])
+            else:
+                # Biases, batchnorm etc
+                work_weights = weights
+            nparray = work_weights.eval(session=self.session)
+            # Rescale rule50 related weights as clients do not normalize the input.
+            if e == 0:
+                num_inputs = 112
+                # 50 move rule is the 110th input, or 109 starting from 0.
+                rule50_input = 109
+                wt_flt = []
+                for i, weight in enumerate(np.ravel(nparray)):
+                    if (i%(num_inputs*9))//9 == rule50_input:
+                        wt_flt.append(weight/99)
+                    else:
+                        wt_flt.append(weight)
+            else:
+                wt_flt = [wt for wt in np.ravel(nparray)]
+            all_weights.append(wt_flt)
+
+        self.net.fill_net(all_weights)
+        self.net.save_proto(filename)
 
     def get_batchnorm_key(self):
         result = "bn" + str(self.batch_norm_count)

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import tensorflow as tf
+import gzip
 import os
 import sys
 import yaml
 import textwrap
 import tfprocess
+
+from net import Net
 
 START_FROM = 0
 
@@ -40,36 +43,21 @@ model:
 YAMLCFG = textwrap.dedent(YAMLCFG).strip()
 cfg = yaml.safe_load(YAMLCFG)
 argparser = argparse.ArgumentParser(description='Convert net to model.')
-argparser.add_argument('net', type=argparse.FileType('r'),
+argparser.add_argument('net', type=str,
     help='Net file to be converted to a model checkpoint.')
 argparser.add_argument('--start', type=int, default=0,
     help='Offset to set global_step to.')
 args = argparser.parse_args()
 START_FROM = args.start
-with args.net as f:
-    version = f.readline()
-    if version != '{}\n'.format(tfprocess.VERSION):
-        raise ValueError("Invalid version {}".format(version.strip()))
+net = Net()
+net.parse_proto(args.net)
 
-    weights = []
-    for e, line in enumerate(f):
-        weights.append(list(map(float, line.split(' '))))
-
-        if e == 1:
-            filters = len(line.split(' '))
-            print("Channels", filters)
-
-    blocks = e - (3 + 14)
-
-    if blocks % 8 != 0:
-        raise ValueError("Inconsistent number of weights in the file")
-
-    blocks //= 8
-    print("Blocks", blocks)
-
+filters, blocks = net.filters(), net.blocks()
 cfg['model']['filters'] = filters
 cfg['model']['residual_blocks'] = blocks
 cfg['name'] = 'online-{}x{}'.format(filters, blocks)
+weights = net.get_weights()
+
 print(yaml.dump(cfg, default_flow_style=False))
 
 x = [

@@ -67,8 +67,7 @@ echo "Starting with '$file' as last game in window"
 
 train() {
   unbuffer ./train.py --cfg=$1 --output=$2 2>&1 | tee "$ROOT/logs/$(date +%Y%m%d-%H%M%S).log"
-  gzip -9 $2
-  mv -v $2.gz $NETDIR
+  mv -v $2.pb.gz $NETDIR
 }
 
 
@@ -88,7 +87,7 @@ do
     for netarch in ${NETARCHS[@]}
     do
       echo "Training $netarch:"
-      train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N").txt"
+      train "$CONFIGDIR/$netarch.yaml" "${netarch}-$(date +"%Y_%m%d_%H%M_%S_%3N")"
     done
 
     # wait for next cycle
