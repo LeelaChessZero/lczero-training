@@ -158,6 +158,7 @@ class Net:
         self.fill_layer(self.pb.weights.ip_pol_w, weights)
         self.fill_conv_block(self.pb.weights.policy, weights)
 
+        del self.pb.weights.residual[:]
         tower = []
         for i in range(blocks):
             tower.append(self.pb.weights.residual.add())
