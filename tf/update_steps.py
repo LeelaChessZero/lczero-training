@@ -39,7 +39,7 @@ def main(cmd):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
-    'Convert current checkpoint to a weights file.')
+    'Convert current checkpoint to new step count.')
     argparser.add_argument('--cfg', type=argparse.FileType('r'),
         help='yaml configuration with training parameters')
     argparser.add_argument('--start', type=int, default=0,
