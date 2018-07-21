@@ -30,12 +30,6 @@ from chunkparser import ChunkParser
 
 SKIP = 32
 
-def get_checkpoint(root_dir):
-    checkpoint = os.path.join(root_dir, 'checkpoint')
-    with open(checkpoint, 'r') as f:
-        cp = f.readline().split()[1][1:-1]
-    return cp
-
 
 def get_chunks(data_prefix):
     return glob.glob(data_prefix + "*.gz")
@@ -132,7 +126,7 @@ def main(cmd):
     tfprocess.init(dataset, train_iterator, test_iterator)
 
     if os.path.exists(os.path.join(root_dir, 'checkpoint')):
-        cp = get_checkpoint(root_dir)
+        cp = tf.train.latest_checkpoint(root_dir)
         tfprocess.restore(cp)
 
     # Sweeps through all test chunks statistically
