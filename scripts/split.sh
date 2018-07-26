@@ -61,17 +61,21 @@ then
   mkdir -vp "$TESTDIR" "$TRAINDIR"
 fi
 
-let n="$(ls $TESTDIR | wc -l) + $(ls $TRAINDIR | wc -l)"
+let n_test="$(ls $TESTDIR | wc -l)"
+let n_train="$(ls $TRAINDIR | wc -l)"
+let n="$n_test + $n_train"
 let overhead="$WINSIZE / 10"
-let max="$WINSIZE + $overhead + 100"
+let max="$WINSIZE + $overhead + 200"
+max_train=$(echo "scale=1;($TRAINPCT / 100) * $max" | bc | cut -d'.' -f1)
+max_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $max" | bc | cut -d'.' -f1)
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
 echo ""
-echo "start splitter, found $n games"
+echo "start splitter, found $n games, $n_test test, $n_train train"
 echo "  max chunks: $max"
-echo "  max test:   $overhead_test"
-echo "  max train:  $overhead_train"
+echo "  max test:   $max_test, trim_by: $overhead_test"
+echo "  max train:  $max_train, trim_by: $overhead_train"
 echo ""
 
 
@@ -99,26 +103,38 @@ process() {
 
     if [ $hash_index -gt $TRAINPCT ]
     then
+      let "n_test++"
       target=$TESTDIR/$file
       echo -n "T"
     else
+      let "n_train++"
       target=$TRAINDIR/$file
       echo -n "*"
     fi
 
     ln $dir/$file $target
 
-    # exceeding max buffer size, remove overhead
-    if [ $n -gt $max ]
+    # exceeding max buffer size for either, lock and remove overhead as appropriate
+    if [ $n_test -gt $max_test ] || [ $n_train -gt $max_train ]
     then
       (
       flock -e 200
-      ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
-      ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
+      if [ $n_test -gt $max_test ]
+      then
+        ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
+        let "n -= $overhead_test"
+        let "n_test -= $overhead_test"
+        echo -n "-"
+      fi
+      if [ $n_train -gt $max_train ]
+      then
+        ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
+        let "n -= $overhead_train"
+        let "n_train -= $overhead_train"
+        echo -n "_"
+      fi
       ) 200>$LC0LOCKFILE
 
-      let "n -= $overhead"
-      echo -n "-"
     fi
   fi
 }
