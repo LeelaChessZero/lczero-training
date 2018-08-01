@@ -42,8 +42,7 @@ class ChunkDataSrc:
 
 class ChunkParser:
     # static batch size
-    BATCH_SIZE = 8
-    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, buffer_size=1, batch_size=256, workers=None):
+    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, batch_size=256, workers=None):
         """
         Read data and yield batches of raw tensors.
 
@@ -127,22 +126,6 @@ class ChunkParser:
             int8 result (1 byte)
         """
         self.v3_struct = struct.Struct(STRUCT_STRING)
-
-
-    @staticmethod
-    def parse_function(planes, probs, winner):
-        """
-        Convert unpacked record batches to tensors for tensorflow training
-        """
-        planes = tf.decode_raw(planes, tf.float32)
-        probs = tf.decode_raw(probs, tf.float32)
-        winner = tf.decode_raw(winner, tf.float32)
-
-        planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
-        probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
-        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 1))
-
-        return (planes, probs, winner)
 
 
     def convert_v3_to_tuple(self, content):
@@ -365,7 +348,6 @@ class ChunkParserTest(unittest.TestCase):
         """
         truth = self.generate_fake_pos()
         batch_size = 4
-        ChunkParser.BATCH_SIZE = batch_size
         records = []
         for i in range(batch_size):
             record = b''

@@ -94,36 +94,23 @@ def main(cmd):
 
     shuffle_size = cfg['training']['shuffle_size']
     total_batch_size = cfg['training']['batch_size']
-    batch_splits = cfg['training'].get('num_batch_splits', 1)
-    if total_batch_size % batch_splits != 0:
-        raise ValueError('num_batch_splits must divide batch_size evenly')
-    split_batch_size = total_batch_size // batch_splits
+    ram_batch_size = cfg['training']['vram_batch_size']
+    if total_batch_size % ram_batch_size != 0:
+        raise ValueError('vram_batch_size must divide batch_size evenly')
     # Load data with split batch size, which will be combined to the total batch size in tfprocess.
-    ChunkParser.BATCH_SIZE = split_batch_size
 
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
 
     train_parser = ChunkParser(FileDataSrc(train_chunks),
-            shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
-        train_parser.parse, output_types=(tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    train_iterator = dataset.make_one_shot_iterator()
-
+            shuffle_size=shuffle_size, sample=SKIP, batch_size=ram_batch_size)
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     test_parser = ChunkParser(FileDataSrc(test_chunks),
-            shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
-        test_parser.parse, output_types=(tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    test_iterator = dataset.make_one_shot_iterator()
+            shuffle_size=shuffle_size, sample=SKIP, batch_size=ram_batch_size)
 
     tfprocess = TFProcess(cfg)
-    tfprocess.init(dataset, train_iterator, test_iterator)
+    tfprocess.init('logs')
 
     if os.path.exists(os.path.join(root_dir, 'checkpoint')):
         cp = tf.train.latest_checkpoint(root_dir)
@@ -133,11 +120,10 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = num_test*10 // ChunkParser.BATCH_SIZE
+    num_evals = num_test*10 // ram_batch_size
     print("Using {} evaluation batches".format(num_evals))
 
-    tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
-
+    tfprocess.process(train_parser.parse(), test_parser.parse(), num_evals)
     tfprocess.save_leelaz_weights(cmd.output)
 
     tfprocess.session.close()

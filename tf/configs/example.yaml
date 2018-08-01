@@ -1,36 +1,57 @@
 %YAML 1.2
 ---
-name: 'kb1-64x6'                       # ideally no spaces
-gpu: 0                                 # gpu id to process on
+# name of the training project
+name: 'example'
 
 dataset: 
-  num_chunks: 100000                   # newest nof chunks to parse
-  train_ratio: 0.90                    # trainingset ratio
-  # For separated test and train data.
-  input_train: '/path/to/chunks/*/draw/' # supports glob
-  input_test: '/path/to/chunks/*/draw/'  # supports glob
-  # For a one-shot run with all data in one directory.
-  # input: '/path/to/chunks/*/draw/'
+    # newest nof chunks to parse
+    num_chunks: 120000
+    # trainingset ratio
+    train_ratio: 0.90
+    # For separated test and train data.
+    input_train: '/path/to/chunks/*/train/' # supports glob
+    input_test: '/path/to/chunks/*/test/' # supports glob
+    # For a one-shot run with all data in one directory.
+    # input: '/path/to/chunks/*/draw/' # supports glob
 
 training:
-    batch_size: 2048                   # training batch
-    test_steps: 2000                   # eval test set values after this many steps
-    train_avg_report_steps: 200        # training reports its average values after this many steps.
-    total_steps: 140000                # terminate after these steps
-    # checkpoint_steps: 10000          # optional frequency for checkpointing before finish
-    shuffle_size: 524288               # size of the shuffle buffer
-    lr_values:                         # list of learning rates
+    # gpu ids to train on
+    gpus:                              
+        - 0
+        - 1
+    # enable/disable stochastic weight averaging
+    swa: true
+    # training batch size
+    batch_size: 4096
+    # batchsize that fits in gpu memory, must be a multiple of batch_size
+    vram_batch_size: 512               
+    # eval test set values after this many steps
+    test_steps: 2000                   
+    # training reports its average values after this many steps.
+    info_steps: 200
+    # terminate after these steps
+    total_steps: 10000
+    # optional frequency for checkpointing before finish
+    checkpoint_steps: 2500
+    # size of the shuffle buffer
+    shuffle_size: 100000
+    # list of learning rates
+    lr_values:
+        - 0.2
         - 0.02
-        - 0.002
-        - 0.0005
-    lr_boundaries:                     # list of boundaries
-        - 100000
-        - 130000
-    policy_loss_weight: 1.0            # weight of policy loss
-    value_loss_weight: 1.0             # weight of value loss
-    path: '/path/to/store/networks'    # network storage dir
+    # list of boundaries
+    lr_boundaries:
+        - 5000
+    # weight of policy loss
+    policy_loss_weight: 1.0
+    # weight of value loss
+    value_loss_weight: 1.0
+    # network storage dir
+    path: '/path/to/store/networks'
 
 model:
-  filters: 64
-  residual_blocks: 6
+    # filters per layer
+    filters: 128
+    # residual blocks in resnet
+    residual_blocks: 10
 ...
