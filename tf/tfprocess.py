@@ -27,7 +27,14 @@ from net import Net
 
 def weight_variable(shape, name=None):
     """Xavier initialization"""
-    stddev = np.sqrt(2.0 / (sum(shape)))
+    if len(shape) == 4:
+        receptive_field = shape[0] * shape[1]
+        fan_in = shape[2] * receptive_field
+        fan_out = shape[3] * receptive_field
+    else:
+        fan_in = shape[0]
+        fan_out = shape[1]
+    stddev = np.sqrt(2.0 / (fan_in + fan_out))
     initial = tf.truncated_normal(shape, stddev=stddev)
     weights = tf.Variable(initial, name=name)
     tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, weights)
