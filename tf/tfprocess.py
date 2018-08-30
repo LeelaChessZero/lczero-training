@@ -126,13 +126,13 @@ class TFProcess:
         # Output weight file with averaged weights
         self.swa_enabled = self.cfg['training']['swa']
 
-        # Net sampling rate (e.g 2 == every 2nd network).
-        self.swa_c = 1
-
         # Take an exponentially weighted moving average over this
         # many networks. Under the SWA assumptions, this will reduce
         # the distance to the optimal value by a factor of 1/sqrt(n)
-        self.swa_max_n = 16
+        self.swa_max_n = self.cfg['training']['swa_cycle']
+
+        # Net sampling rate (e.g 2 == every 2nd network).
+        self.swa_c = self.cfg['training']['swa_cycle']
 
         # Recalculate SWA weight batchnorm means and variances
         self.swa_recalc_bn = True
@@ -143,8 +143,14 @@ class TFProcess:
 
         self.training = tf.placeholder(tf.bool)
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.lr = self.cfg['training']['lr_values'][0]
+        self.lr = self.cfg['training']['lr1'][0]
         self.learning_rate = tf.placeholder(tf.float32)
+    
+    def learning_rate_(self, i, c, a1, a2):
+        return (1 - self.time(i, c)) * a1 + self.time(i, c) * a2
+
+    def time(self, i, c):
+        return 1 / c * (((i - 1) % c) + 1)
 
     def init(self, logbase='leelalogs'):
         self.batch_size = self.cfg['training']['vram_batch_size']
@@ -406,13 +412,14 @@ class TFProcess:
                            self.winner: batch[2]})
         # Google's paper scales mse by 1/4 to a [0,1] range, so we do the same here
         return {'policy': r[0], 'mse': r[1]/4., 'reg': r[2],
-                'accuracy': r[3], 'total': r[0]+r[1]+r[2] }
+                'accuracy': r[3] * 100, 'total': r[0]+r[1]+r[2] }
 
     def process(self, train_data, test_data, num_evals):
         total_steps = self.cfg['training']['total_steps']
         info_steps = self.cfg['training']['info_steps']
         test_steps = self.cfg['training']['test_steps']
-        lr_values = self.cfg['training']['lr_values']
+        lr1 = self.cfg['training']['lr1']
+        lr2 = self.cfg['training']['lr2']
         lr_boundaries = self.cfg['training']['lr_boundaries']
         checkpoint_steps = self.cfg['training'].get('checkpoint_steps', total_steps)
         stats = Stats()
@@ -425,7 +432,9 @@ class TFProcess:
             # fetch the current global step.
             steps = tf.train.global_step(self.session, self.global_step)
             mod_steps = steps % total_steps
-            self.lr = lr_values[bisect.bisect_right(lr_boundaries, mod_steps)]
+            a1 = lr1[bisect.bisect_right(lr_boundaries, mod_steps)]
+            a2 = lr2[bisect.bisect_right(lr_boundaries, mod_steps)]
+            self.lr = self.learning_rate_(mod_steps + 1, self.swa_max_n, a1, a2)
             stats.add(losses)
             if steps % self.macrobatch == (self.macrobatch-1):
                 # Apply the accumulated gradients to the weights.
@@ -435,11 +444,11 @@ class TFProcess:
 
             if steps % info_steps == 0:
                 speed = info_steps * self.batch_size / timer.elapsed()
-                print("step {}, policy={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
+                print("step {}, policy={:g} mse={:g} reg={:g} total={:g} lr={:g} ({:g} pos/s)".format(
                     steps, stats.mean('policy'), stats.mean('mse'), stats.mean('reg'),
-                    stats.mean('total'), speed))
+                    stats.mean('total'), self.lr, speed))
                 summaries = stats.summaries({'Policy Loss': 'policy',
-                    'MSE Loss': 'mse', 'LR': 'lr', 'Reg Term': 'reg'})
+                    'MSE Loss': 'mse', 'LR': 'lr', 'Reg term': 'reg'})
                 self.train_writer.add_summary(
                     tf.Summary(value=summaries), steps)
                 stats.clear()
@@ -456,22 +465,22 @@ class TFProcess:
                 self.test_writer.add_summary(tf.Summary(value=summaries), steps)
                 print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
                     format(steps, test_stats.mean('policy'),
-                        test_stats.mean('accuracy')*100.0,
+                        test_stats.mean('accuracy'),
                         test_stats.mean('mse')))
 
+            path = os.path.join(self.root_dir, self.cfg['name'])
+            leela_path = path + "-" + str(steps)
             if steps % checkpoint_steps == 0:
-                path = os.path.join(self.root_dir, self.cfg['name'])
-                leela_path = path + "-" + str(steps)
                 self.net.pb.training_params.training_steps = steps
                 self.save_leelaz_weights(leela_path)
                 print("Weights saved in file: {}".format(leela_path))
-
-                if self.swa_enabled:
-                    self.save_swa_network(steps, path, leela_path, train_data)
-
                 save_path = self.saver.save(self.session, path,
                                             global_step=steps)
                 print("Model saved in file: {}".format(save_path))
+
+            if self.swa_enabled:
+                self.save_swa_network(steps, path, leela_path, train_data)
+
 
     def save_leelaz_weights(self, filename):
         all_weights = []
@@ -661,16 +670,14 @@ class TFProcess:
         # Sample 1 in self.swa_c of the networks. Compute in this way so
         # that it's safe to change the value of self.swa_c
         rem = self.session.run(tf.assign_add(self.swa_skip, -1))
-        if rem > 0:
+        if rem > 1:
             return
         self.swa_skip.load(self.swa_c, self.session)
 
         # Add the current weight vars to the running average.
         num = self.session.run(self.swa_accum_op)
-
-        if self.swa_max_n != None:
-            num = min(num, self.swa_max_n)
-            self.swa_count.load(float(num), self.session)
+        num = min(num, self.swa_max_n)
+        self.swa_count.load(float(num), self.session)
 
         swa_path = path + "-swa-" + str(int(num)) + "-" + str(steps)
 

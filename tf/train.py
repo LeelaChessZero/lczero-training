@@ -120,7 +120,7 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = num_test*10 // ram_batch_size
+    num_evals = num_test // ram_batch_size
     print("Using {} evaluation batches".format(num_evals))
 
     tfprocess.process(train_parser.parse(), test_parser.parse(), num_evals)
