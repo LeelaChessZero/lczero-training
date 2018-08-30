@@ -1,0 +1,74 @@
+%YAML 1.2
+---
+# network name in tensorboard and storage dir
+name: '128x10-swa4'
+
+dataset: 
+    # use this many chunks/games during training
+    num_chunks: 2650000
+    # training ratio vs test ratio
+    train_ratio: 0.90
+    # directory containing trainingdata
+    input_train: '/home/fhuizing/Downloads/chess/computer/training/train/'
+    # directory containing testdata
+    input_test: '/home/fhuizing/Downloads/chess/computer/training/test/'
+
+training:
+    # enable/disable stochastic weight averaging
+    swa: false
+    # list of gpu ids to use during training
+    gpus:
+        - 0
+        - 1
+    # cumulative batch size (positions processed per step)
+    batch_size: 2048
+    # batchsize that fits in gpu memory, must be a multiple of batch_size
+    vram_batch_size: 2048
+    # eval test set values after this many steps
+    test_steps: 1000
+    # training reports its average values after this many steps.
+    info_steps: 100
+    # terminate training after this many steps
+    total_steps: 200000
+    # create a network snapshot every n steps
+    checkpoint_steps: 10000
+    # size of the shufflebuffer in positions
+    shuffle_size: 8192
+    # nof networks to average and length of a cycle
+    swa_cycle: 10
+    # list of learning rates a1,a2 to interpolate between for swa
+    #
+    #   a(i) = (1 - t(i))*a1 + t(i)*a2
+    #   t(i) = 1/c * (mod(i - 1, c) + 1),
+    #
+    #   where i is the training iteration, a(i) is the interpolated
+    #   learningrate, c is the cycle and a1,a2 are the begin and end learning
+    #   rates such that a1 >= a2
+    lr1:
+        - 0.1
+        - 0.01
+        - 0.001
+        - 0.0001
+    lr2:
+        - 0.01
+        - 0.001
+        - 0.0001
+        - 0.00001
+    # list of boundaries, select new a1,a2 at each boundary
+    lr_boundaries:
+        - 80000
+        - 140000
+        - 180000
+    # weight of policy loss
+    policy_loss_weight: 1.0
+    # weight of value loss (should be lower with supervised learning)
+    value_loss_weight: 0.01
+    # storage directory for all networks
+    path: '/mnt/storage/home/fhuizing/chess/networks'
+
+model:
+    # number of filters per convolutional layer
+    filters: 128
+    # number of residual blocks
+    residual_blocks: 10
+...
