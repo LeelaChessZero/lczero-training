@@ -35,7 +35,7 @@ def weight_variable(shape, name=None):
         fan_in = shape[0]
         fan_out = shape[1]
     # truncated normal has lower stddev than a regular normal distribution, so need to correct for that 
-    trunc_correction = math.sqrt(1.3)
+    trunc_correction = np.sqrt(1.3)
     stddev = trunc_correction * np.sqrt(2.0 / (fan_in + fan_out))
     initial = tf.truncated_normal(shape, stddev=stddev)
     weights = tf.Variable(initial, name=name)
