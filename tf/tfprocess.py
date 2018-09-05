@@ -242,7 +242,7 @@ class TFProcess:
         lr_boundaries = self.cfg['training']['lr_boundaries']
         steps_total = steps % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
-        if self.warmup_steps > 0 and steps < self.warmup_steps
+        if self.warmup_steps > 0 and steps < self.warmup_steps:
              self.lr = self.lr * steps / self.warmup_steps
 
         # Run training for this batch
