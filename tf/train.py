@@ -133,12 +133,12 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = num_test*10 // ChunkParser.BATCH_SIZE
+    num_evals = num_test// ChunkParser.BATCH_SIZE
     print("Using {} evaluation batches".format(num_evals))
 
     tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
 
-    tfprocess.save_leelaz_weights(cmd.output)
+    #tfprocess.save_leelaz_weights(cmd.output)
 
     tfprocess.session.close()
     train_parser.shutdown()
@@ -147,10 +147,10 @@ def main(cmd):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
     'Tensorflow pipeline for training Leela Chess.')
-    argparser.add_argument('--cfg', type=argparse.FileType('r'), 
+    argparser.add_argument('--cfg', type=argparse.FileType('r'),
         help='yaml configuration with training parameters')
-    argparser.add_argument('--output', type=str, 
-        help='file to store weights in')
+    #argparser.add_argument('--output', type=str, 
+    #    help='file to store weights in')
 
     mp.set_start_method('spawn')
     main(argparser.parse_args())
