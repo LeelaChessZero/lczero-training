@@ -140,7 +140,7 @@ class ChunkParser:
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
-        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 1))
+        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
 
         return (planes, probs, winner)
 
@@ -185,7 +185,7 @@ class ChunkParser:
         assert len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)
         winner = float(winner)
         assert winner == 1.0 or winner == -1.0 or winner == 0.0
-        winner = struct.pack('f', winner)
+        winner = struct.pack('fff', winner == 1.0, winner == 0.0, winner == -1.0)
 
         return (planes, probs, winner)
 
