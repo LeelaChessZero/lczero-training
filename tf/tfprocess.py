@@ -236,6 +236,10 @@ class TFProcess:
             required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
             raise ValueError('batch_size must be a multiple of {}'.format(required_factor))
 
+        # need to add 1 to steps because steps will be incremented after gradient update
+        if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
+            before_weights = self.session.run(self.weights)
+
         # Run training for this batch
         self.session.run(self.zero_op)
         for _ in range(batch_splits):
@@ -284,12 +288,17 @@ class TFProcess:
                 # to change it here as well for correct outputs.
                 pol_loss_w * avg_policy_loss + val_loss_w * 4.0 * avg_mse_loss + avg_reg_term,
                 speed))
+
+            after_weights = self.session.run(self.weights)
+            update_ratio_summaries = self.compute_update_ratio(before_weights, after_weights)
+
             train_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
+            self.train_writer.add_summary(update_ratio_summaries, steps)
             self.time_start = time_end
             self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
@@ -314,7 +323,8 @@ class TFProcess:
         sum_accuracy = 0
         sum_mse = 0
         sum_policy = 0
-        for _ in range(0, test_batches):
+        for _ in range(0, 50):
+#        for _ in range(0, test_batches):
             test_policy, test_accuracy, test_mse, _ = self.session.run(
                 [self.policy_loss, self.accuracy, self.mse_loss,
                  self.next_batch],
@@ -340,6 +350,56 @@ class TFProcess:
         self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
             format(steps, sum_policy, sum_accuracy, sum_mse))
+
+    def compute_update_ratio(self, before_weights, after_weights):
+        """Compute the ratio of gradient norm to weight norm.
+
+        Adapted from https://github.com/tensorflow/minigo/blob/c923cd5b11f7d417c9541ad61414bf175a84dc31/dual_net.py#L567
+        """
+        deltas = [after - before for after,
+                  before in zip(after_weights, before_weights)]
+        delta_norms = [np.linalg.norm(d.ravel()) for d in deltas]
+        weight_norms = [np.linalg.norm(w.ravel()) for w in before_weights]
+        ratios = [d / w for d, w in zip(delta_norms, weight_norms)]
+        all_summaries = [
+            tf.Summary.Value(tag='update_ratios/' +
+                             tensor.name, simple_value=ratio)
+            for tensor, ratio in zip(self.weights, ratios) if not 'running' in tensor.name]
+        ratios = [r for r in ratios if r < np.inf]
+        all_summaries.append(self.log_histogram('update_ratios', ratios))
+        return tf.Summary(value=all_summaries)
+
+    def log_histogram(self, tag, values, bins=1000):
+            """Logs the histogram of a list/vector of values.
+
+            From https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
+            """
+            # Convert to a numpy array
+            values = np.array(values)
+
+            # Create histogram using numpy
+            counts, bin_edges = np.histogram(values, bins=bins)
+
+            # Fill fields of histogram proto
+            hist = tf.HistogramProto()
+            hist.min = float(np.min(values))
+            hist.max = float(np.max(values))
+            hist.num = int(np.prod(values.shape))
+            hist.sum = float(np.sum(values))
+            hist.sum_squares = float(np.sum(values**2))
+
+            # Requires equal number as bins, where the first goes from -DBL_MAX to bin_edges[1]
+            # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/summary.proto#L30
+            # Thus, we drop the start of the first bin
+            bin_edges = bin_edges[1:]
+
+            # Add bin edges and counts
+            for edge in bin_edges:
+                hist.bucket_limit.append(edge)
+            for c in counts:
+                hist.bucket.append(c)
+
+            return tf.Summary.Value(tag=tag, histo=hist)
 
     def save_leelaz_weights(self, filename):
         all_weights = []
