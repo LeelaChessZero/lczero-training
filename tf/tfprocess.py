@@ -364,8 +364,8 @@ class TFProcess:
             tf.Summary.Value(tag='update_ratios/' +
                              tensor.name, simple_value=ratio)
             for tensor, ratio in zip(self.weights, ratios) if not 'moving' in tensor.name]
-        ratios = [r for r in ratios if r < np.inf]
-        all_summaries.append(self.log_histogram('update_ratios', ratios))
+        ratios = np.log10([r for r in ratios if 0 < r < np.inf])
+        all_summaries.append(self.log_histogram('update_ratios_log10', ratios))
         return tf.Summary(value=all_summaries)
 
     def log_histogram(self, tag, values, bins=1000):
