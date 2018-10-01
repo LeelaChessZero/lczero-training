@@ -323,8 +323,7 @@ class TFProcess:
         sum_accuracy = 0
         sum_mse = 0
         sum_policy = 0
-        for _ in range(0, 50):
-#        for _ in range(0, test_batches):
+        for _ in range(0, test_batches):
             test_policy, test_accuracy, test_mse, _ = self.session.run(
                 [self.policy_loss, self.accuracy, self.mse_loss,
                  self.next_batch],
