@@ -363,7 +363,7 @@ class TFProcess:
         all_summaries = [
             tf.Summary.Value(tag='update_ratios/' +
                              tensor.name, simple_value=ratio)
-            for tensor, ratio in zip(self.weights, ratios) if not 'running' in tensor.name]
+            for tensor, ratio in zip(self.weights, ratios) if not 'moving' in tensor.name]
         ratios = [r for r in ratios if r < np.inf]
         all_summaries.append(self.log_histogram('update_ratios', ratios))
         return tf.Summary(value=all_summaries)
