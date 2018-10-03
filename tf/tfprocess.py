@@ -484,6 +484,7 @@ class TFProcess:
 
     def save_leelaz_weights(self, filename):
         with open(filename, 'w') as f:
+            f.write("2\n") # Version
             for e, weights in enumerate(self.weights):
                 # Newline unless last line (single bias)
                 work_weights = None
@@ -519,7 +520,7 @@ class TFProcess:
                             wt_flt.append(weight)
                 else:
                     wt_flt = [wt for wt in np.ravel(nparray)]
-                f.write(" ".join([str(x) for x in wt_flt]))
+                f.write(" ".join([str(x) for x in wt_flt]) + '\n')
 
     def get_batchnorm_key(self):
         result = "bn" + str(self.batch_norm_count)
@@ -530,17 +531,15 @@ class TFProcess:
 
         assert channels % ratio == 0
 
-        net = tf.nn.avg_pool(x, [1, 1, 8, 8], [1, 1, 1, 1],
-                             padding='VALID', data_format='NCHW')
-
-        net_flat = tf.reshape(net, [-1, channels])
+        # NCHW format reduced to NC
+        net = tf.reduce_mean(x, axis=[2, 3])
 
         W_fc1 = weight_variable([channels, channels // ratio], name='se_fc1_w')
         b_fc1 = bias_variable([channels // ratio], name='se_fc1_b')
         self.weights.append(W_fc1)
         self.weights.append(b_fc1)
 
-        net = tf.nn.relu(tf.add(tf.matmul(net_flat, W_fc1), b_fc1))
+        net = tf.nn.relu(tf.add(tf.matmul(net, W_fc1), b_fc1))
 
         W_fc2 = weight_variable([channels // ratio, channels], name='se_fc2_w')
         b_fc2 = bias_variable([channels], name='se_fc2_b')
@@ -595,13 +594,13 @@ class TFProcess:
     def residual_block(self, inputs, channels):
         # First convnet
         orig = tf.identity(inputs)
-        weight_key_1 = self.get_batchnorm_key()
-        conv_key_1 = weight_key_1 + "/conv_weight"
+        weight_key_1 = self.get_batchnorm_key() + "/"
+        conv_key_1 = weight_key_1 + "conv_weight"
         W_conv_1 = weight_variable([3, 3, channels, channels], name=conv_key_1)
 
         # Second convnet
-        weight_key_2 = self.get_batchnorm_key()
-        conv_key_2 = weight_key_2 + "/conv_weight"
+        weight_key_2 = self.get_batchnorm_key() + "/"
+        conv_key_2 = weight_key_2 + "conv_weight"
         W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2)
 
         with tf.variable_scope(weight_key_1):
@@ -621,10 +620,6 @@ class TFProcess:
                     center=True, scale=True,
                     virtual_batch_size=64,
                     training=self.training)
-
-        with tf.variable_scope(weight_key_2):
-            h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
-        h_out_2 = tf.nn.relu(tf.add(h_se, orig))
 
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
         mean_key_1 = weight_key_1 + "/batch_normalization/moving_mean:0"
@@ -654,6 +649,11 @@ class TFProcess:
         self.weights.append(beta_2)
         self.weights.append(mean_2)
         self.weights.append(var_2)
+
+        # Must be after adding weights to self.weights
+        with tf.variable_scope(weight_key_2):
+            h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
+        h_out_2 = tf.nn.relu(tf.add(h_se, orig))
 
         return h_out_2
 
