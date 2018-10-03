@@ -1,0 +1,35 @@
+%YAML 1.2 
+---
+name: '128x10-se'
+gpu: 0
+
+dataset:
+  num_chunks: 2500000
+  train_ratio: 0.80
+  input_train: '/home/henrik/Downloads/v3/v3/train/'
+  input_test: '/home/henrik/Downloads/v3/v3/test/'
+training:
+    batch_size: 1024
+    num_batch_splits: 1
+    test_steps: 10000
+    train_avg_report_steps: 500
+    total_steps: 200000
+    checkpoint_steps: 10000
+    shuffle_size: 250000
+    lr_values:
+        - 0.1
+        - 0.01
+        - 0.001
+        - 0.0001
+    lr_boundaries:
+        - 80000
+        - 140000
+        - 180000
+    policy_loss_weight: 1.0
+    value_loss_weight: 0.01
+    path: '/media/sda1/lc0/networks'
+
+model:
+  filters: 128
+  residual_blocks: 10
+  se_ratio: 4
