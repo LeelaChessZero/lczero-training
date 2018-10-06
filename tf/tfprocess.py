@@ -141,10 +141,14 @@ class TFProcess:
         self.train_op = opt_op.apply_gradients(
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
-        correct_prediction = \
+        correct_policy_prediction = \
             tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y_, 1))
-        correct_prediction = tf.cast(correct_prediction, tf.float32)
-        self.accuracy = tf.reduce_mean(correct_prediction)
+        correct_policy_prediction = tf.cast(correct_policy_prediction, tf.float32)
+        self.policy_accuracy = tf.reduce_mean(correct_policy_prediction)
+        correct_value_prediction = \
+            tf.equal(tf.argmax(self.z_conv, 1), tf.argmax(self.z_, 1))
+        correct_value_prediction = tf.cast(correct_policy_prediction, tf.float32)
+        self.value_accuracy = tf.reduce_mean(correct_value_prediction)
 
         self.avg_policy_loss = []
         self.avg_value_loss = []
@@ -319,22 +323,26 @@ class TFProcess:
             print("Weights saved in file: {}".format(leela_path))
 
     def calculate_test_summaries(self, test_batches, steps):
-        sum_accuracy = 0
+        sum_policy_accuracy = 0
+        sum_value_accuracy = 0
         sum_mse = 0
         sum_policy = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            test_policy, test_value, test_accuracy, test_mse, _ = self.session.run(
-                [self.policy_loss, self.value_loss, self.accuracy, self.mse_loss,
+            test_policy, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
+                [self.policy_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
                  self.next_batch],
                 feed_dict={self.training: False,
                            self.handle: self.test_handle})
-            sum_accuracy += test_accuracy
+            sum_policy_accuracy += test_policy_accuracy
+            sum_value_accuracy += test_value_accuracy
             sum_mse += test_mse
             sum_policy += test_policy
             sum_value += test_value
-        sum_accuracy /= test_batches
-        sum_accuracy *= 100
+        sum_policy_accuracy /= test_batches
+        sum_policy_accuracy *= 100
+        sum_value_accuracy /= test_batches
+        sum_value_accuracy *= 100
         sum_policy /= test_batches
         sum_value /= test_batches
         # Additionally rescale to [0, 1] so divide by 4
@@ -342,17 +350,18 @@ class TFProcess:
         self.net.pb.training_params.learning_rate = self.lr
         self.net.pb.training_params.mse_loss = sum_mse
         self.net.pb.training_params.policy_loss = sum_policy
-        # TODO store value in pb
-        self.net.pb.training_params.accuracy = sum_accuracy
+        # TODO store value and value accuracy in pb
+        self.net.pb.training_params.accuracy = sum_policy_accuracy
         test_summaries = tf.Summary(value=[
-            tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
+            tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+            tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
             tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
             tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         test_summaries = tf.summary.merge([test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
-        print("step {}, policy={:g} value={:g} training accuracy={:g}%, mse={:g}".\
-            format(steps, sum_policy, sum_value, sum_accuracy, sum_mse))
+        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
     def save_leelaz_weights(self, filename):
         all_weights = []
