@@ -100,10 +100,10 @@ class Net:
         result = np.delete(result, zeroes)
         
         with bz2.open(filename, 'wb') as out:
-            version = int(3).tobytes(4, 'little')
-            array_num = int(len(weights)).frombytes(4, 'little')
+            version = int(3).to_bytes(4, 'little')
+            array_num = int(len(weights)).to_bytes(4, 'little')
             for weight in weights:
-                out.write(int(len(weight)).tobytes(4, 'little'))
+                out.write(int(len(weight)).to_bytes(4, 'little'))
             out.write(result.tobytes())
 
         size = os.path.getsize(filename) / 1024**2
