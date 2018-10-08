@@ -147,7 +147,7 @@ class TFProcess:
         self.policy_accuracy = tf.reduce_mean(correct_policy_prediction)
         correct_value_prediction = \
             tf.equal(tf.argmax(self.z_conv, 1), tf.argmax(self.z_, 1))
-        correct_value_prediction = tf.cast(correct_policy_prediction, tf.float32)
+        correct_value_prediction = tf.cast(correct_value_prediction, tf.float32)
         self.value_accuracy = tf.reduce_mean(correct_value_prediction)
 
         self.avg_policy_loss = []
