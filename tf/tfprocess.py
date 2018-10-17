@@ -71,7 +71,7 @@ class TFProcess:
         # Take an exponentially weighted moving average over this
         # many networks. Under the SWA assumptions, this will reduce
         # the distance to the optimal value by a factor of 1/sqrt(n)
-        self.swa_max_n = self.cfg['training']['swa_cycle']
+        self.swa_max_n = self.cfg['training']['swa_max_n']
 
         # Net sampling rate (e.g 2 == every 2nd network).
         self.swa_c = self.cfg['training']['swa_cycle']
@@ -141,7 +141,7 @@ class TFProcess:
             learning_rate=self.learning_rate, momentum=0.9, use_nesterov=True)
 
         # Do swa after we contruct the net
-        if self.swa_enabled is True:
+        if self.swa_enabled:
             # Count of networks accumulated into SWA
             self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
             # Count of networks to skip
@@ -343,6 +343,9 @@ class TFProcess:
             self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
 
+        if self.swa_enabled:
+            self.update_swa(steps)
+
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
@@ -358,9 +361,6 @@ class TFProcess:
             self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path) 
             print("Weights saved in file: {}".format(leela_path))
-
-        if self.swa_enabled:
-            self.update_swa(steps)
 
     def calculate_test_summaries(self, test_batches, steps):
         self.snap_save()
