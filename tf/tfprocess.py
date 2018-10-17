@@ -1,4 +1,4 @@
-#/usr/bin/env python3
+#!/usr/bin/env python3
 #
 #    This file is part of Leela Zero.
 #    Copyright (C) 2017-2018 Gian-Carlo Pascutto
@@ -68,18 +68,11 @@ class TFProcess:
 
         self.swa_enabled = self.cfg['training']['swa']
 
-        # Take an exponentially weighted moving average over this
-        # many networks. Under the SWA assumptions, this will reduce
-        # the distance to the optimal value by a factor of 1/sqrt(n)
+        # Limit momentum of SWA exponential average to 1 - 1/swa_max_n
         self.swa_max_n = self.cfg['training']['swa_max_n']
 
         # Net sampling rate (e.g 2 == every 2nd network).
-        self.swa_c = self.cfg['training']['swa_cycle']
-
-        '''
-        # Recalculate SWA weight batchnorm means and variances
-        self.swa_recalc_bn = False
-        '''
+        self.swa_c = self.cfg['training']['swa_steps']
 
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
@@ -88,9 +81,6 @@ class TFProcess:
         self.training = tf.placeholder(tf.bool)
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.learning_rate = tf.placeholder(tf.float32)
-
-    def time(self, i, c):
-        return 1 / c * (((i - 1) % c) + 1)
 
     def init(self, dataset, train_iterator, test_iterator):
         # TF variables
@@ -133,7 +123,7 @@ class TFProcess:
 
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
-        self.lr = self.cfg['training']['lr1'][0]
+        self.lr = self.cfg['training']['lr_values'][0]
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
@@ -144,13 +134,9 @@ class TFProcess:
         if self.swa_enabled:
             # Count of networks accumulated into SWA
             self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
-            # Count of networks to skip
-            self.swa_skip = tf.Variable(self.swa_c, name='swa_skip',
-                trainable=False)
-            self.swa_skip_py = self.swa_c
             # Build the SWA variables and accumulators
-            accum=[]
-            load=[]
+            accum = []
+            load = []
             n = self.swa_count
             for w in self.weights:
                 name = w.name.split(':')[0]
@@ -247,7 +233,6 @@ class TFProcess:
     def restore(self, file):
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
-        self.swa_skip_py = self.session.run(self.swa_skip)
 
     def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
@@ -305,7 +290,7 @@ class TFProcess:
         steps = tf.train.global_step(self.session, self.global_step)
 
         # Determine learning rate
-        lr_values = self.cfg['training']['lr1']
+        lr_values = self.cfg['training']['lr_values']
         lr_boundaries = self.cfg['training']['lr_boundaries']
         steps_total = (steps-1) % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
@@ -345,8 +330,8 @@ class TFProcess:
             self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
 
-        if self.swa_enabled:
-            self.update_swa(steps)
+        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] != 0:
+            self.update_swa()
 
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
@@ -357,13 +342,15 @@ class TFProcess:
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             path = os.path.join(self.root_dir, self.cfg['name'])
-            self.swa_skip.load(self.swa_skip_py, self.session)
             save_path = self.saver.save(self.session, path, global_step=steps)
             print("Model saved in file: {}".format(save_path))
             leela_path = path + "-" + str(steps)
+            swa_path = path + "-swa-" + str(steps)
             self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path) 
+            self.save_swa_weights(swa_path)
             print("Weights saved in file: {}".format(leela_path))
+            print("SWA Weights saved in file: {}".format(swa_path))
 
     def calculate_test_summaries(self, test_batches, steps):
         self.snap_save()
@@ -451,32 +438,11 @@ class TFProcess:
 
             return tf.Summary.Value(tag=tag, histo=hist)
 
-    def update_swa(self, steps):
-        # Sample 1 in self.swa_c of the networks. Compute in this way so
-        # that it's safe to change the value of self.swa_c
-        self.swa_skip_py -= 1
-        if self.swa_skip_py > 0:
-            return
-        self.swa_skip_py = self.swa_c
-
+    def update_swa(self):
         # Add the current weight vars to the running average.
         num = self.session.run(self.swa_accum_op)
         num = min(num, self.swa_max_n)
         self.swa_count.load(float(num), self.session)
-
-        '''
-        if self.swa_recalc_bn:
-            print("Refining SWA batch normalization")
-            for _ in range(200):
-                batch = next(data)
-                self.session.run(
-                    [self.loss, self.update_ops],
-                    feed_dict={self.training: True,
-                               self.learning_rate: self.lr,
-                               self.planes: batch[0], self.probs: batch[1],
-                               self.winner: batch[2]})
-        '''
-
 
     def snap_save(self):
         # Save a snapshot of all the variables in the current graph.
@@ -498,10 +464,13 @@ class TFProcess:
         # Restore variables in the current graph from the snapshot.
         self.session.run(self.restore_op)
 
-    def save_leelaz_weights(self, filename):
+    def save_swa_weights(self, filename):
         self.snap_save()
         self.session.run(self.swa_load_op)
+        self.save_leelaz_weights(filename)
+        self.snap_restore()
 
+    def save_leelaz_weights(self, filename):
         all_weights = []
         for e, weights in enumerate(self.weights):
             # Newline unless last line (single bias)
@@ -548,8 +517,6 @@ class TFProcess:
 
         self.net.fill_net(all_weights)
         self.net.save_proto(filename)
-
-        self.snap_restore()
 
     def get_batchnorm_key(self):
         result = "bn" + str(self.batch_norm_count)
