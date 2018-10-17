@@ -147,6 +147,7 @@ class TFProcess:
             # Count of networks to skip
             self.swa_skip = tf.Variable(self.swa_c, name='swa_skip',
                 trainable=False)
+            self.swa_skip_py = self.swa_c
             # Build the SWA variables and accumulators
             accum=[]
             load=[]
@@ -156,7 +157,7 @@ class TFProcess:
                 var = tf.Variable(
                     tf.zeros(shape=w.shape), name='swa/'+name, trainable=False)
                 accum.append(
-                    tf.assign(var, var * (n / (n + 1.)) + w * (1. / (n + 1.))))
+                    tf.assign(var, var * (n / (n + 1.)) + tf.stop_gradient(w) * (1. / (n + 1.))))
                 load.append(tf.assign(w, var))
             with tf.control_dependencies(accum):
                 self.swa_accum_op = tf.assign_add(n, 1.)
@@ -246,6 +247,7 @@ class TFProcess:
     def restore(self, file):
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
+        self.swa_skip_py = self.session.run(self.swa_skip)
 
     def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
@@ -355,6 +357,7 @@ class TFProcess:
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             path = os.path.join(self.root_dir, self.cfg['name'])
+            self.swa_skip.load(self.swa_skip_py, self.session)
             save_path = self.saver.save(self.session, path, global_step=steps)
             print("Model saved in file: {}".format(save_path))
             leela_path = path + "-" + str(steps)
@@ -451,10 +454,10 @@ class TFProcess:
     def update_swa(self, steps):
         # Sample 1 in self.swa_c of the networks. Compute in this way so
         # that it's safe to change the value of self.swa_c
-        rem = self.session.run(tf.assign_add(self.swa_skip, -1))
-        if rem > 0:
+        self.swa_skip_py -= 1
+        if self.swa_skip_py > 0:
             return
-        self.swa_skip.load(self.swa_c, self.session)
+        self.swa_skip_py = self.swa_c
 
         # Add the current weight vars to the running average.
         num = self.session.run(self.swa_accum_op)
