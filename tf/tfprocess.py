@@ -348,13 +348,15 @@ class TFProcess:
             swa_path = path + "-swa-" + str(steps)
             self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path) 
-            self.save_swa_weights(swa_path)
             print("Weights saved in file: {}".format(leela_path))
-            print("SWA Weights saved in file: {}".format(swa_path))
+            if self.swa_enabled:
+                self.save_swa_weights(swa_path)
+                print("SWA Weights saved in file: {}".format(swa_path))
 
     def calculate_test_summaries(self, test_batches, steps):
-        self.snap_save()
-        self.session.run(self.swa_load_op)
+        if self.swa_enabled:
+            self.snap_save()
+            self.session.run(self.swa_load_op)
 
         sum_accuracy = 0
         sum_mse = 0
@@ -386,7 +388,8 @@ class TFProcess:
         print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
             format(steps, sum_policy, sum_accuracy, sum_mse))
 
-        self.snap_restore()
+        if self.swa_enabled:
+            self.snap_restore()
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
