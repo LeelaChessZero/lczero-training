@@ -330,7 +330,7 @@ class TFProcess:
             self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
 
-        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] != 0:
+        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
             self.update_swa()
 
         # Calculate test values every 'test_steps', but also ensure there is
