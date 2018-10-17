@@ -303,13 +303,10 @@ class TFProcess:
         steps = tf.train.global_step(self.session, self.global_step)
 
         # Determine learning rate
-        lr1 = self.cfg['training']['lr1']
-        lr2 = self.cfg['training']['lr2']
+        lr_values = self.cfg['training']['lr1']
         lr_boundaries = self.cfg['training']['lr_boundaries']
         steps_total = (steps-1) % self.cfg['training']['total_steps']
-        a1 = lr1[bisect.bisect_right(lr_boundaries, steps_total)]
-        a2 = lr2[bisect.bisect_right(lr_boundaries, steps_total)]
-        self.lr = self.learning_rate_(steps_total, self.swa_max_n, a1, a2)
+        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
 
         if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             pol_loss_w = self.cfg['training']['policy_loss_weight']
@@ -363,7 +360,7 @@ class TFProcess:
             print("Weights saved in file: {}".format(leela_path))
 
         if self.swa_enabled:
-            self.update_swa()
+            self.update_swa(steps)
 
     def calculate_test_summaries(self, test_batches, steps):
         self.snap_save()
@@ -451,12 +448,11 @@ class TFProcess:
 
             return tf.Summary.Value(tag=tag, histo=hist)
 
-    def update_swa(self):
-        print(self.steps)
+    def update_swa(self, steps):
         # Sample 1 in self.swa_c of the networks. Compute in this way so
         # that it's safe to change the value of self.swa_c
         rem = self.session.run(tf.assign_add(self.swa_skip, -1))
-        if rem > 1:
+        if rem > 0:
             return
         self.swa_skip.load(self.swa_c, self.session)
 
