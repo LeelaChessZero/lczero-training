@@ -71,9 +71,6 @@ class TFProcess:
         # Limit momentum of SWA exponential average to 1 - 1/swa_max_n
         self.swa_max_n = self.cfg['training']['swa_max_n']
 
-        # Net sampling rate (e.g 2 == every 2nd network).
-        self.swa_c = self.cfg['training']['swa_steps']
-
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
         self.session = tf.Session(config=config)
