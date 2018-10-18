@@ -1,6 +1,6 @@
 %YAML 1.2 
 ---
-name: '128x10-se'
+name: '128x10-se2'
 gpu: 0
 
 dataset:
@@ -26,7 +26,7 @@ training:
         - 140000
         - 180000
     policy_loss_weight: 1.0
-    value_loss_weight: 0.01
+    value_loss_weight: 1.0
     path: '/media/sda1/lc0/networks'
 
 model:
