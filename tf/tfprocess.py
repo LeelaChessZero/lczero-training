@@ -608,7 +608,7 @@ class TFProcess:
                 tf.layers.batch_normalization(
                     conv2d(inputs, W_conv_1),
                     epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=False,
+                    center=True, scale=True,
                     virtual_batch_size=64,
                     training=self.training)
         h_out_1 = tf.nn.relu(h_bn1)
@@ -621,10 +621,12 @@ class TFProcess:
                     virtual_batch_size=64,
                     training=self.training)
 
+        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma:0"
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
         mean_key_1 = weight_key_1 + "/batch_normalization/moving_mean:0"
         var_key_1 = weight_key_1 + "/batch_normalization/moving_variance:0"
 
+        gamma_1 = tf.get_default_graph().get_tensor_by_name(gamma_key_1)
         beta_1 = tf.get_default_graph().get_tensor_by_name(beta_key_1)
         mean_1 = tf.get_default_graph().get_tensor_by_name(mean_key_1)
         var_1 = tf.get_default_graph().get_tensor_by_name(var_key_1)
@@ -640,6 +642,7 @@ class TFProcess:
         var_2 = tf.get_default_graph().get_tensor_by_name(var_key_2)
 
         self.weights.append(W_conv_1)
+        self.weights.append(gamma_1)
         self.weights.append(beta_1)
         self.weights.append(mean_1)
         self.weights.append(var_1)
