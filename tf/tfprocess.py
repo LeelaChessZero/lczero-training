@@ -479,7 +479,7 @@ class TFProcess:
 
     def save_leelaz_weights(self, filename):
         with open(filename, 'w') as f:
-            f.write("2\n") # Version
+            f.write("3\n") # Version
             for e, weights in enumerate(self.weights):
                 # Newline unless last line (single bias)
                 work_weights = None
