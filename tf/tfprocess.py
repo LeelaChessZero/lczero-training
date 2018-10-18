@@ -456,13 +456,13 @@ class TFProcess:
                 v = tf.Variable(var, name='save/'+name, trainable=False)
                 save_ops.append(tf.assign(v, var))
                 rest_ops.append(tf.assign(var, v))
-            self.save_op = tf.group(*save_ops)
-            self.restore_op = tf.group(*rest_ops)
-        self.session.run(self.save_op)
+            self.snap_save_op = tf.group(*save_ops)
+            self.snap_restore_op = tf.group(*rest_ops)
+        self.session.run(self.snap_save_op)
 
     def snap_restore(self):
         # Restore variables in the current graph from the snapshot.
-        self.session.run(self.restore_op)
+        self.session.run(self.snap_restore_op)
 
     def save_swa_weights(self, filename):
         self.snap_save()
