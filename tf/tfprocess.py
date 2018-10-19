@@ -173,6 +173,8 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])), self.session.graph)
         self.train_writer = tf.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])), self.session.graph)
+        self.swa_writer = tf.summary.FileWriter(
+            os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
         self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
@@ -248,11 +250,17 @@ class TFProcess:
         if not self.last_steps:
             self.last_steps = steps
 
+        if self.swa_enabled:
+            # split half of test_batches between testing regular weights and SWA weights
+            test_batches //= 2
+
         # Run test before first step to see delta since end of last run.
         if steps % self.cfg['training']['total_steps'] == 0:
             # Steps is given as one higher than current in order to avoid it
             # being equal to the value the end of a run is stored against.
             self.calculate_test_summaries(test_batches, steps + 1)
+            if self.swa_enabled:
+                self.calculate_swa_summaries(test_batches, steps + 1)
 
         # Make sure that ghost batch norm can be applied
         if batch_size % 64 != 0:
@@ -334,6 +342,8 @@ class TFProcess:
         # one at the final step so the delta to the first step can be calculted.
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             self.calculate_test_summaries(test_batches, steps)
+            if self.swa_enabled:
+                self.calculate_swa_summaries(test_batches, steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
@@ -350,11 +360,15 @@ class TFProcess:
                 self.save_swa_weights(swa_path)
                 print("SWA Weights saved in file: {}".format(swa_path))
 
-    def calculate_test_summaries(self, test_batches, steps):
-        if self.swa_enabled:
-            self.snap_save()
-            self.session.run(self.swa_load_op)
+    def calculate_swa_summaries(self, test_batches, steps):
+        self.snap_save()
+        self.session.run(self.swa_load_op)
+        true_test_writer, self.test_writer = self.test_writer, self.swa_writer
+        self.calculate_test_summaries(test_batches, steps)
+        self.test_writer = true_test_writer
+        self.snap_restore()
 
+    def calculate_test_summaries(self, test_batches, steps):
         sum_accuracy = 0
         sum_mse = 0
         sum_policy = 0
@@ -384,9 +398,6 @@ class TFProcess:
         self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
             format(steps, sum_policy, sum_accuracy, sum_mse))
-
-        if self.swa_enabled:
-            self.snap_restore()
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
