@@ -122,18 +122,26 @@ process() {
       if [ $n_test -gt $max_test ]
       then
         ls -rt $TESTDIR | head -n $overhead_test | xargs -I{} rm -f $TESTDIR/{}
+        echo -n "-"
+      fi
+      if [ $n_train -gt $max_train ]
+      then
+        ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
+        echo -n "_"
+      fi
+      ) 200>$LC0LOCKFILE
+      if [ $n_test -gt $max_test ]
+      then
         let "n -= $overhead_test"
         let "n_test -= $overhead_test"
         echo -n "-"
       fi
       if [ $n_train -gt $max_train ]
       then
-        ls -rt $TRAINDIR | head -n $overhead_train | xargs -I{} rm -f $TRAINDIR/{}
         let "n -= $overhead_train"
         let "n_train -= $overhead_train"
         echo -n "_"
       fi
-      ) 200>$LC0LOCKFILE
 
     fi
   fi
