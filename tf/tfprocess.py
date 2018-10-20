@@ -66,10 +66,10 @@ class TFProcess:
         # For exporting
         self.weights = []
 
-        self.swa_enabled = self.cfg['training']['swa']
+        self.swa_enabled = self.cfg['training'].get('swa', False)
 
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
-        self.swa_max_n = self.cfg['training']['swa_max_n']
+        self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
 
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
