@@ -364,6 +364,7 @@ class TFProcess:
         self.snap_save()
         self.session.run(self.swa_load_op)
         true_test_writer, self.test_writer = self.test_writer, self.swa_writer
+        print('swa', end=' ')
         self.calculate_test_summaries(test_batches, steps)
         self.test_writer = true_test_writer
         self.snap_restore()
