@@ -68,7 +68,7 @@ class TFProcess:
 
         self.swa_enabled = self.cfg['training']['swa']
 
-        # Limit momentum of SWA exponential average to 1 - 1/swa_max_n
+        # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
         self.swa_max_n = self.cfg['training']['swa_max_n']
 
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
