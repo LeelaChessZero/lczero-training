@@ -120,7 +120,7 @@ class TFProcess:
 
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
-        self.lr = self.cfg['training']['lr_values'][0]
+        self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
@@ -268,6 +268,14 @@ class TFProcess:
             required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
             raise ValueError('batch_size must be a multiple of {}'.format(required_factor))
 
+        # Determine learning rate
+        lr_values = self.cfg['training']['lr_values']
+        lr_boundaries = self.cfg['training']['lr_boundaries']
+        steps_total = steps % self.cfg['training']['total_steps']
+        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
+        if self.warmup_steps > 0 and steps < self.warmup_steps:
+             self.lr = self.lr * (steps + 1) / self.warmup_steps
+
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
             before_weights = self.session.run(self.weights)
@@ -293,12 +301,6 @@ class TFProcess:
 
         # Update steps since training should have incremented it.
         steps = tf.train.global_step(self.session, self.global_step)
-
-        # Determine learning rate
-        lr_values = self.cfg['training']['lr_values']
-        lr_boundaries = self.cfg['training']['lr_boundaries']
-        steps_total = (steps-1) % self.cfg['training']['total_steps']
-        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
 
         if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             pol_loss_w = self.cfg['training']['policy_loss_weight']
