@@ -66,6 +66,11 @@ class TFProcess:
         # For exporting
         self.weights = []
 
+        self.swa_enabled = self.cfg['training'].get('swa', False)
+
+        # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
+        self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
+
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
         self.session = tf.Session(config=config)
@@ -122,6 +127,25 @@ class TFProcess:
         opt_op = tf.train.MomentumOptimizer(
             learning_rate=self.learning_rate, momentum=0.9, use_nesterov=True)
 
+        # Do swa after we contruct the net
+        if self.swa_enabled:
+            # Count of networks accumulated into SWA
+            self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
+            # Build the SWA variables and accumulators
+            accum = []
+            load = []
+            n = self.swa_count
+            for w in self.weights:
+                name = w.name.split(':')[0]
+                var = tf.Variable(
+                    tf.zeros(shape=w.shape), name='swa/'+name, trainable=False)
+                accum.append(
+                    tf.assign(var, var * (n / (n + 1.)) + tf.stop_gradient(w) * (1. / (n + 1.))))
+                load.append(tf.assign(w, var))
+            with tf.control_dependencies(accum):
+                self.swa_accum_op = tf.assign_add(n, 1.)
+            self.swa_load_op = tf.group(*load)
+
         # Accumulate (possibly multiple) gradient updates to simulate larger batch sizes than can be held in GPU memory.
         gradient_accum = [tf.Variable(tf.zeros_like(var.initialized_value()), trainable=False) for var in tf.trainable_variables()]
         self.zero_op = [var.assign(tf.zeros_like(var)) for var in gradient_accum]
@@ -149,6 +173,8 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])), self.session.graph)
         self.train_writer = tf.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])), self.session.graph)
+        self.swa_writer = tf.summary.FileWriter(
+            os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
         self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
@@ -224,11 +250,17 @@ class TFProcess:
         if not self.last_steps:
             self.last_steps = steps
 
+        if self.swa_enabled:
+            # split half of test_batches between testing regular weights and SWA weights
+            test_batches //= 2
+
         # Run test before first step to see delta since end of last run.
         if steps % self.cfg['training']['total_steps'] == 0:
             # Steps is given as one higher than current in order to avoid it
             # being equal to the value the end of a run is stored against.
             self.calculate_test_summaries(test_batches, steps + 1)
+            if self.swa_enabled:
+                self.calculate_swa_summaries(test_batches, steps + 1)
 
         # Make sure that ghost batch norm can be applied
         if batch_size % 64 != 0:
@@ -303,10 +335,15 @@ class TFProcess:
             self.last_steps = steps
             self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
 
+        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
+            self.update_swa()
+
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             self.calculate_test_summaries(test_batches, steps)
+            if self.swa_enabled:
+                self.calculate_swa_summaries(test_batches, steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
@@ -315,9 +352,22 @@ class TFProcess:
             save_path = self.saver.save(self.session, path, global_step=steps)
             print("Model saved in file: {}".format(save_path))
             leela_path = path + "-" + str(steps)
+            swa_path = path + "-swa-" + str(steps)
             self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path) 
             print("Weights saved in file: {}".format(leela_path))
+            if self.swa_enabled:
+                self.save_swa_weights(swa_path)
+                print("SWA Weights saved in file: {}".format(swa_path))
+
+    def calculate_swa_summaries(self, test_batches, steps):
+        self.snap_save()
+        self.session.run(self.swa_load_op)
+        true_test_writer, self.test_writer = self.test_writer, self.swa_writer
+        print('swa', end=' ')
+        self.calculate_test_summaries(test_batches, steps)
+        self.test_writer = true_test_writer
+        self.snap_restore()
 
     def calculate_test_summaries(self, test_batches, steps):
         sum_accuracy = 0
@@ -399,6 +449,38 @@ class TFProcess:
                 hist.bucket.append(c)
 
             return tf.Summary.Value(tag=tag, histo=hist)
+
+    def update_swa(self):
+        # Add the current weight vars to the running average.
+        num = self.session.run(self.swa_accum_op)
+        num = min(num, self.swa_max_n)
+        self.swa_count.load(float(num), self.session)
+
+    def snap_save(self):
+        # Save a snapshot of all the variables in the current graph.
+        if not hasattr(self, 'save_op'):
+            save_ops = []
+            rest_ops = []
+            for var in self.weights:
+                if isinstance(var, str):
+                    var = tf.get_default_graph().get_tensor_by_name(var)
+                name = var.name.split(':')[0]
+                v = tf.Variable(var, name='save/'+name, trainable=False)
+                save_ops.append(tf.assign(v, var))
+                rest_ops.append(tf.assign(var, v))
+            self.snap_save_op = tf.group(*save_ops)
+            self.snap_restore_op = tf.group(*rest_ops)
+        self.session.run(self.snap_save_op)
+
+    def snap_restore(self):
+        # Restore variables in the current graph from the snapshot.
+        self.session.run(self.snap_restore_op)
+
+    def save_swa_weights(self, filename):
+        self.snap_save()
+        self.session.run(self.swa_load_op)
+        self.save_leelaz_weights(filename)
+        self.snap_restore()
 
     def save_leelaz_weights(self, filename):
         all_weights = []
