@@ -121,7 +121,6 @@ class TFProcess:
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
-        self.lr = self.cfg['training']['lr_values'][0]
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
@@ -275,7 +274,7 @@ class TFProcess:
         steps_total = steps % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
         if self.warmup_steps > 0 and steps < self.warmup_steps:
-             self.lr = self.lr * steps / self.warmup_steps
+             self.lr = self.lr * (steps + 1) / self.warmup_steps
 
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
