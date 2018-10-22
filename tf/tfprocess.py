@@ -121,6 +121,7 @@ class TFProcess:
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
+        self.lr = self.cfg['training']['lr_values'][0]
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
