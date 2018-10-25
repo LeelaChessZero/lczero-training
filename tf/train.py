@@ -137,8 +137,9 @@ def main(cmd):
     print("Using {} evaluation batches".format(num_evals))
 
     tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
-
-    tfprocess.save_leelaz_weights(cmd.output)
+    
+    if cmd.output is not None:
+        tfprocess.save_leelaz_weights(cmd.output)
 
     tfprocess.session.close()
     train_parser.shutdown()
