@@ -155,7 +155,9 @@ class TFProcess:
         with tf.control_dependencies(self.update_ops):
             gradients = opt_op.compute_gradients(loss)
         self.accum_op = [accum.assign_add(gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
-        gradient_accum, self.grad_norm = tf.clip_by_global_norm(gradient_accum, self.cfg['training'].get('max_grad_norm', 10000.0))
+        # gradients are num_batch_splits times higher due to accumulation by summing, so the norm will be too
+        max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * self.cfg['training'].get('num_batch_splits', 1)
+        gradient_accum, self.grad_norm = tf.clip_by_global_norm(gradient_accum, max_grad_norm)
         self.train_op = opt_op.apply_gradients(
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
@@ -332,7 +334,7 @@ class TFProcess:
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
-                tf.Summary.Value(tag="Gradient norm", simple_value=grad_norm),
+                tf.Summary.Value(tag="Gradient norm", simple_value=grad_norm / batch_splits),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.train_writer.add_summary(update_ratio_summaries, steps)
