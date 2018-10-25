@@ -30,10 +30,10 @@ def main(cmd):
         reader = tf.train.NewCheckpointReader(cp)
         saved_shapes = reader.get_variable_to_shape_map()
         new_names = sorted(
-            [(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+            [var.name.split(':')[0] for var in tf.global_variables()
              if var.name.split(':')[0] not in saved_shapes])
-        for var_name, saved_var_name in new_names:
-            print("New name {} will use default value ".format(saved_var_name))
+        for saved_var_name in new_names:
+            print("New name {} will use default value".format(saved_var_name))
         var_names = sorted(
             [(var.name, var.name.split(':')[0]) for var in tf.global_variables()
              if var.name.split(':')[0] in saved_shapes])
@@ -54,6 +54,9 @@ def main(cmd):
             print("Dropping {} as no longer used".format(saved_var_name))
         opt_saver = tf.train.Saver(restore_vars)
         opt_saver.restore(tfprocess.session, cp)
+    else:
+        print("No checkpoint to upgrade!")
+        exit(1)
 
     steps = tf.train.global_step(tfprocess.session, tfprocess.global_step)
     path = os.path.join(root_dir, cfg['name'])
