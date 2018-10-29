@@ -19,26 +19,55 @@ class Net:
         self.pb.min_version.minor = LC0_MINOR
         self.pb.min_version.patch = LC0_PATCH
         self.pb.format.weights_encoding = pb.Format.LINEAR16
+
+        self.set_networkformat(classical=True)
+
         self.weights = []
 
+    def set_networkformat(self, **kwargs):
+        if kwargs.get('classical'):
+            self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_CLASSICAL
+            self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
+        if kwargs.get('se'):
+            self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_SE
+            self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
+
+            # SE needs at least lc0 version 19
+            self.pb.min_version.major = 0
+            self.pb.min_version.minor = 19
 
     def fill_layer(self, layer, weights):
         """Normalize and populate 16bit layer in protobuf"""
         params = np.array(weights.pop(), dtype=np.float32)
-        layer.min_val = 0 if len(params) == 1 else np.min(params)
-        layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else np.max(params)
+        layer.min_val = 0 if len(params) == 1 else float(np.min(params))
+        layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else float(np.max(params))
         params = (params - layer.min_val) / (layer.max_val - layer.min_val)
         params *= 0xffff
         params = np.round(params)
         layer.params = params.astype(np.uint16).tobytes()
 
 
-    def fill_conv_block(self, convblock, weights):
+    def fill_conv_block(self, convblock, weights, gammas):
         """Normalize and populate 16bit convblock in protobuf"""
-        self.fill_layer(convblock.bn_stddivs, weights)
-        self.fill_layer(convblock.bn_means, weights)
-        self.fill_layer(convblock.biases, weights)
-        self.fill_layer(convblock.weights, weights)
+        if gammas:
+            self.fill_layer(convblock.bn_stddivs, weights)
+            self.fill_layer(convblock.bn_means, weights)
+            self.fill_layer(convblock.bn_betas, weights)
+            self.fill_layer(convblock.bn_gammas, weights)
+            self.fill_layer(convblock.weights, weights)
+        else:
+            self.fill_layer(convblock.bn_stddivs, weights)
+            self.fill_layer(convblock.bn_means, weights)
+            self.fill_layer(convblock.biases, weights)
+            self.fill_layer(convblock.weights, weights)
+
+    def fill_se_unit(self, se_unit, weights):
+        self.fill_layer(se_unit.b2, weights)
+        self.fill_layer(se_unit.w2, weights)
+        self.fill_layer(se_unit.b1, weights)
+        self.fill_layer(se_unit.w1, weights)
 
 
     def denorm_layer(self, layer, weights):
@@ -56,15 +85,20 @@ class Net:
         self.denorm_layer(convblock.weights, weights)
 
 
-    def save_txt(self, filename):
+    def save_txt(self, filename, se=False):
         """Save weights as txt file"""
         weights = self.get_weights()
 
         if len(filename.split('.')) == 1:
             filename += ".txt.gz"
 
+        # Legacy .txt files are version 2, SE is version 3.
+        version = 2
+        if se:
+            version = 3
+
         with gzip.open(filename, 'wb') as f:
-            f.write("{}\n".format(2).encode('utf-8'))
+            f.write("{}\n".format(version).encode('utf-8'))
             for row in weights:
                 f.write((" ".join(map(str, row.tolist())) + "\n").encode('utf-8'))
 
@@ -103,23 +137,13 @@ class Net:
                 self.denorm_conv_block(res.conv1, self.weights)
 
             self.denorm_conv_block(self.pb.weights.input, self.weights)
-            
+
         return self.weights
 
 
     def filters(self):
         w = self.get_weights()
         return len(w[1])
-
-
-    def blocks(self):
-        w = self.get_weights()
-        blocks = len(w) - (4 + 14)
-
-        if blocks % 8 != 0:
-            raise ValueError("Inconsistent number of weights in the file")
-
-        return blocks // 8
 
 
     def parse_proto(self, filename):
@@ -131,32 +155,55 @@ class Net:
         weights = []
 
         with open(filename, 'r') as f:
-            f.readline()
+            try:
+                version = int(f.readline()[0])
+            except:
+                raise ValueError('Unable to read version.')
             for e, line in enumerate(f):
                 weights.append(list(map(float, line.split(' '))))
 
-        self.fill_net(weights)
+        if version == 3:
+            se = True
+            self.set_networkformat(se=True)
+        else:
+            se = False
+
+        self.fill_net(weights, se)
 
 
-    def fill_net(self, weights):
+    def fill_net(self, weights, se=True):
         self.weights = []
-        filters = len(weights[1])
-        blocks = len(weights) - (4 + 14)
+        # Batchnorm gammas in ConvBlock?
+        gammas = se
 
-        if blocks % 8 != 0:
+        if se:
+            self.set_networkformat(se=True)
+
+        if se:
+            input_weights = 5
+            residual_weights = 14
+            head_weights = 16
+        else:
+            input_weights = 4
+            residual_weights = 8
+            head_weights = 14
+
+        blocks = len(weights) - (input_weights + head_weights)
+
+        if blocks % residual_weights != 0:
             raise ValueError("Inconsistent number of weights in the file")
-        blocks //= 8
+        blocks //= residual_weights
 
         self.pb.format.weights_encoding = pb.Format.LINEAR16
         self.fill_layer(self.pb.weights.ip2_val_b, weights)
         self.fill_layer(self.pb.weights.ip2_val_w, weights)
         self.fill_layer(self.pb.weights.ip1_val_b, weights)
         self.fill_layer(self.pb.weights.ip1_val_w, weights)
-        self.fill_conv_block(self.pb.weights.value, weights)
+        self.fill_conv_block(self.pb.weights.value, weights, gammas)
 
         self.fill_layer(self.pb.weights.ip_pol_b, weights)
         self.fill_layer(self.pb.weights.ip_pol_w, weights)
-        self.fill_conv_block(self.pb.weights.policy, weights)
+        self.fill_conv_block(self.pb.weights.policy, weights, gammas)
 
         del self.pb.weights.residual[:]
         tower = []
@@ -164,30 +211,44 @@ class Net:
             tower.append(self.pb.weights.residual.add())
 
         for res in reversed(tower):
-            self.fill_conv_block(res.conv2, weights)
-            self.fill_conv_block(res.conv1, weights)
+            if se:
+                self.fill_se_unit(res.se, weights)
+            self.fill_conv_block(res.conv2, weights, gammas)
+            self.fill_conv_block(res.conv1, weights, gammas)
 
-        self.fill_conv_block(self.pb.weights.input, weights)
+        self.fill_conv_block(self.pb.weights.input, weights, gammas)
 
 
 def main(argv):
     net = Net()
 
     if argv.input.endswith(".txt"):
+        print('Found .txt network')
         net.parse_txt(argv.input)
-        net.save_txt(argv.output)
+        if argv.output == None:
+            argv.output = argv.input.replace('.txt', '.pb.gz')
+            assert argv.output.endswith('.pb.gz')
+            print('Writing output to: {}'.format(argv.output))
         net.save_proto(argv.output)
     elif argv.input.endswith(".pb.gz"):
+        print('Found .pb.gz network')
         net.parse_proto(argv.input)
-        net.save_txt(argv.output)
-
+        if argv.output == None:
+            argv.output = argv.input.replace('.pb.gz', '.txt')
+            print('Writing output to: {}'.format(argv.output))
+            assert argv.output.endswith('.txt')
+        se = net.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
+        net.save_txt(argv.output, se)
+    else:
+        print('Unable to detect the network format. '\
+              'Filename should end in ".txt" or ".pb.gz"')
 
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
     'Convert network textfile to proto.')
-    argparser.add_argument('-i', '--input', type=str, 
+    argparser.add_argument('-i', '--input', type=str,
         help='input network weight text file')
-    argparser.add_argument('-o', '--output', type=str, 
+    argparser.add_argument('-o', '--output', type=str,
         help='output filepath without extension')
     main(argparser.parse_args())
