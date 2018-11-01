@@ -29,6 +29,7 @@ class Net:
             self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_CLASSICAL
             self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
+
         if kwargs.get('se'):
             self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_SE
             self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
@@ -37,6 +38,12 @@ class Net:
             # SE needs at least lc0 version 19
             self.pb.min_version.major = 0
             self.pb.min_version.minor = 19
+
+    def get_weight_amounts(self):
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
+            return {"input": 5, "residual": 14, "head": 16}
+        else:
+            return {"input": 4, "residual": 8, "head": 14}
 
     def fill_layer(self, layer, weights):
         """Normalize and populate 16bit layer in protobuf"""
@@ -79,10 +86,30 @@ class Net:
 
     def denorm_conv_block(self, convblock, weights):
         """Denormalize a convblock from protobuf"""
-        self.denorm_layer(convblock.bn_stddivs, weights)
-        self.denorm_layer(convblock.bn_means, weights)
-        self.denorm_layer(convblock.biases, weights)
-        self.denorm_layer(convblock.weights, weights)
+        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
+
+        if se:
+            self.denorm_layer(convblock.bn_stddivs, weights)
+            self.denorm_layer(convblock.bn_means, weights)
+            self.denorm_layer(convblock.bn_betas, weights)
+            self.denorm_layer(convblock.bn_gammas, weights)
+            self.denorm_layer(convblock.weights, weights)
+        else:
+            self.denorm_layer(convblock.bn_stddivs, weights)
+            self.denorm_layer(convblock.bn_means, weights)
+            self.denorm_layer(convblock.biases, weights)
+            self.denorm_layer(convblock.weights, weights)
+
+    def denorm_se_unit(self, convblock, weights):
+        """Denormalize SE-unit from protobuf"""
+        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
+
+        assert se
+
+        self.denorm_layer(convblock.b2, weights)
+        self.denorm_layer(convblock.w2, weights)
+        self.denorm_layer(convblock.b1, weights)
+        self.denorm_layer(convblock.w1, weights)
 
 
     def save_txt(self, filename, se=False):
@@ -121,6 +148,7 @@ class Net:
 
     def get_weights(self):
         """Returns the weights as floats per layer"""
+        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
         if self.weights == []:
             self.denorm_layer(self.pb.weights.ip2_val_b, self.weights)
             self.denorm_layer(self.pb.weights.ip2_val_w, self.weights)
@@ -133,6 +161,8 @@ class Net:
             self.denorm_conv_block(self.pb.weights.policy, self.weights)
 
             for res in reversed(self.pb.weights.residual):
+                if se:
+                    self.denorm_se_unit(res.se, self.weights)
                 self.denorm_conv_block(res.conv2, self.weights)
                 self.denorm_conv_block(res.conv1, self.weights)
 
@@ -144,6 +174,18 @@ class Net:
     def filters(self):
         w = self.get_weights()
         return len(w[1])
+
+
+    def blocks(self):
+        w = self.get_weights()
+
+        ws = self.get_weight_amounts()
+        blocks = len(w) - (ws['input'] + ws['head'])
+
+        if blocks % ws['residual'] != 0:
+            raise ValueError("Inconsistent number of weights in the file")
+
+        return blocks // ws['residual']
 
 
     def parse_proto(self, filename):
@@ -179,20 +221,13 @@ class Net:
         if se:
             self.set_networkformat(se=True)
 
-        if se:
-            input_weights = 5
-            residual_weights = 14
-            head_weights = 16
-        else:
-            input_weights = 4
-            residual_weights = 8
-            head_weights = 14
+        ws = self.get_weight_amounts()
 
-        blocks = len(weights) - (input_weights + head_weights)
+        blocks = len(weights) - (ws['input'] + ws['head'])
 
-        if blocks % residual_weights != 0:
+        if blocks % ws['residual'] != 0:
             raise ValueError("Inconsistent number of weights in the file")
-        blocks //= residual_weights
+        blocks //= ws['residual']
 
         self.pb.format.weights_encoding = pb.Format.LINEAR16
         self.fill_layer(self.pb.weights.ip2_val_b, weights)
@@ -225,6 +260,8 @@ def main(argv):
     if argv.input.endswith(".txt"):
         print('Found .txt network')
         net.parse_txt(argv.input)
+        print("Blocks: {}".format(net.blocks()))
+        print("Filters: {}".format(net.filters()))
         if argv.output == None:
             argv.output = argv.input.replace('.txt', '.pb.gz')
             assert argv.output.endswith('.pb.gz')
@@ -233,10 +270,12 @@ def main(argv):
     elif argv.input.endswith(".pb.gz"):
         print('Found .pb.gz network')
         net.parse_proto(argv.input)
+        print("Blocks: {}".format(net.blocks()))
+        print("Filters: {}".format(net.filters()))
         if argv.output == None:
-            argv.output = argv.input.replace('.pb.gz', '.txt')
+            argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
-            assert argv.output.endswith('.txt')
+            assert argv.output.endswith('.txt.gz')
         se = net.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
         net.save_txt(argv.output, se)
     else:
