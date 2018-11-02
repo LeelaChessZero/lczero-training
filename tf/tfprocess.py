@@ -174,8 +174,9 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])), self.session.graph)
         self.train_writer = tf.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])), self.session.graph)
-        self.swa_writer = tf.summary.FileWriter(
-            os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
+        if self.swa_enabled:
+            self.swa_writer = tf.summary.FileWriter(
+                os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
         self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
@@ -348,7 +349,7 @@ class TFProcess:
             print("Model saved in file: {}".format(save_path))
             leela_path = path + "-" + str(steps) + ".txt"
             swa_path = path + "-swa-" + str(steps) + ".txt"
-            self.net.pb.training_params.training_steps = steps
+            #self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path)
             print("Weights saved in file: {}".format(leela_path))
             if self.swa_enabled:
@@ -382,10 +383,10 @@ class TFProcess:
         sum_policy /= test_batches
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
-        self.net.pb.training_params.learning_rate = self.lr
-        self.net.pb.training_params.mse_loss = sum_mse
-        self.net.pb.training_params.policy_loss = sum_policy
-        self.net.pb.training_params.accuracy = sum_accuracy
+        #self.net.pb.training_params.learning_rate = self.lr
+        #self.net.pb.training_params.mse_loss = sum_mse
+        #self.net.pb.training_params.policy_loss = sum_policy
+        #self.net.pb.training_params.accuracy = sum_accuracy
         test_summaries = tf.Summary(value=[
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
@@ -536,18 +537,20 @@ class TFProcess:
 
         net = tf.nn.relu(tf.add(tf.matmul(net, W_fc1), b_fc1))
 
-        W_fc2 = weight_variable([channels // ratio, channels], name='se_fc2_w')
-        b_fc2 = bias_variable([channels], name='se_fc2_b')
+        W_fc2 = weight_variable([channels // ratio, 2 * channels], name='se_fc2_w')
+        b_fc2 = bias_variable([2 * channels], name='se_fc2_b')
         self.weights.append(W_fc2)
         self.weights.append(b_fc2)
 
-        net = tf.nn.sigmoid(tf.add(tf.matmul(net, W_fc2), b_fc2))
+        net = tf.add(tf.matmul(net, W_fc2), b_fc2)
+        net = tf.reshape(net, [-1, 2 * channels, 1, 1])
 
-        net = tf.reshape(net, [-1, channels, 1, 1])
+        # Split to scale and bias
+        gammas, betas = tf.split(net, 2, axis=1)
 
-        scale = x * net
+        out = gammas * x + betas
 
-        return scale
+        return out
 
     def conv_block(self, inputs, filter_size, input_channels, output_channels):
         # The weights are internal to the batchnorm layer, so apply
