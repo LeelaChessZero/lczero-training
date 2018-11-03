@@ -54,7 +54,7 @@ from collections import defaultdict
 #
 VERSION3 = chunkparser.VERSION
 
-V3_BYTES = 8276
+V4_BYTES = 8280
 
 # Us   -- uppercase
 # Them -- lowercase
@@ -1969,10 +1969,11 @@ class TrainingStep:
         self.us_black = 0
         self.rule50_count = 0
         self.winner = None
+        self.q = None
 
     def init_structs(self):
-        self.v3_struct = self.parser.v3_struct
-        self.this_struct = self.v3_struct
+        self.v4_struct = self.parser.v4_struct
+        self.this_struct = self.v4_struct
 
     def init_move_map(self):
         self.new_white_move_map = defaultdict(lambda:-1)
@@ -2018,6 +2019,7 @@ class TrainingStep:
             s += " draw\n"
         else:
             raise Exception("Invalid winner: {}".format(self.winner))
+        s += "Q = {} (diff to result: {}) \n".format(self.q, abs(self.winner + self.q))
         if self.us_black:
             s += "(Note the black pieces are CAPS, black moves up, but A1 is in lower left)\n"
         s += "rule50_count {} b_ooo b_oo, w_ooo, w_oo {} {} {} {}\n".format(
@@ -2062,7 +2064,7 @@ class TrainingStep:
         return "".join([plane[x:x+2] for x in reversed(range(0, len(plane), 2))])
 
     def display_v2_or_v3(self, ply, content):
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner) = self.this_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, q) = self.this_struct.unpack(content)
         assert self.version == int.from_bytes(ver, byteorder="little")
         # Enforce move_count to 0
         move_count = 0
@@ -2082,6 +2084,7 @@ class TrainingStep:
         self.us_black = us_black
         self.rule50_count = rule50_count
         self.winner = winner
+        self.q = q
         for idx in range(0, len(probs), 4):
             self.probs.append(struct.unpack("f", probs[idx:idx+4])[0])
         print("ply {} move {} (Not actually part of training data)".format(
@@ -2097,16 +2100,16 @@ def main(args):
                 print("Invalid version")
             elif chunkdata[0:4] == VERSION3:
                 #print("debug Version3")
-                for i in range(0, len(chunkdata), V3_BYTES):
-                    ts = TrainingStep(3)
-                    ts.display_v2_or_v3(i//V3_BYTES, chunkdata[i:i+V3_BYTES])
+                for i in range(0, len(chunkdata), V4_BYTES):
+                    ts = TrainingStep(4)
+                    ts.display_v2_or_v3(i//V4_BYTES, chunkdata[i:i+V4_BYTES])
             else:
                 parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([chunkdata]), workers=1)
                 gen1 = parser.convert_chunkdata_to_v2(chunkdata)
                 ply = 1
                 for t1 in gen1:
                     ts = TrainingStep(2)
-                    ts.display_v2_or_v3(ply, t1)
+                    kts.display_v2_or_v3(ply, t1)
                     ply += 1
                     # TODO maybe detect new games and reset ply count
                     # It's informational only
