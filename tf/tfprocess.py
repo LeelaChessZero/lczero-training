@@ -104,7 +104,9 @@ class TFProcess:
         self.policy_loss = tf.reduce_mean(cross_entropy)
 
         # Loss on value head
-        target = self.q_
+        q_ratio = self.cfg['training']['q_ratio']
+        assert 0 <= q_ratio <= 1
+        target = self.q_ * q_ratio + self.z_ * (1 - q_ratio)
         self.mse_loss = \
             tf.reduce_mean(tf.squared_difference(target, self.z_conv))
 
