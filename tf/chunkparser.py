@@ -145,7 +145,7 @@ class ChunkParser:
         winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 1))
         q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 1))
 
-        return (planes, probs, q)
+        return (planes, probs, winner, q)
 
 
     def convert_v4_to_tuple(self, content):
