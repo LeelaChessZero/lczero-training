@@ -93,6 +93,7 @@ class TFProcess:
         self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
         self.y_ = next_batch[1] # tf.placeholder(tf.float32, [None, 1858])
         self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 1])
+        self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 1])
         self.batch_norm_count = 0
         self.y_conv, self.z_conv = self.construct_net(self.x)
 
@@ -103,8 +104,9 @@ class TFProcess:
         self.policy_loss = tf.reduce_mean(cross_entropy)
 
         # Loss on value head
+        target = self.q_
         self.mse_loss = \
-            tf.reduce_mean(tf.squared_difference(self.z_, self.z_conv))
+            tf.reduce_mean(tf.squared_difference(target, self.z_conv))
 
         # Regularizer
         regularizer = tf.contrib.layers.l2_regularizer(scale=0.0001)
