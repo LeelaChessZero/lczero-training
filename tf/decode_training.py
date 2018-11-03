@@ -2019,7 +2019,7 @@ class TrainingStep:
             s += " draw\n"
         else:
             raise Exception("Invalid winner: {}".format(self.winner))
-        s += "Q = {} (diff to result: {}) \n".format(self.q, abs(self.winner + self.q))
+        s += "Q = {} (diff to result: {}) \n".format(self.q, abs(self.winner - self.q))
         if self.us_black:
             s += "(Note the black pieces are CAPS, black moves up, but A1 is in lower left)\n"
         s += "rule50_count {} b_ooo b_oo, w_ooo, w_oo {} {} {} {}\n".format(
