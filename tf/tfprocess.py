@@ -97,6 +97,9 @@ class TFProcess:
         self.batch_norm_count = 0
         self.y_conv, self.z_conv = self.construct_net(self.x)
 
+        # y_ has -1 on illegal moves, flush them to 0 first
+        self.y_ = tf.nn.relu(self.y_)
+
         # Calculate loss on policy head
         cross_entropy = \
             tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,
