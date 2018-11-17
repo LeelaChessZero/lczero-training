@@ -548,7 +548,7 @@ class TFProcess:
         # Split to scale and bias
         gammas, betas = tf.split(net, 2, axis=1)
 
-        out = gammas * x + betas
+        out = tf.nn.sigmoid(gammas) * x + betas
 
         return out
 
