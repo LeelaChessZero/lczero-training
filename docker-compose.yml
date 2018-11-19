@@ -1,0 +1,8 @@
+version: '3'
+services:
+        trainer:
+                build: .
+                entrypoint: ./docker_entrypoint.sh
+                working_dir: /src
+                volumes:
+                        - .:/src:cached

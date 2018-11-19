@@ -4,7 +4,16 @@ The training pipeline resides in `tf`, this requires tensorflow running on linux
 
 ## Installation
 
-Install the requirements under `tf/requirements.txt`. And call `./init.sh` to compile the protobuf files.
+* Install the requirements under `tf/requirements.txt`
+* Get the protobufs with `git submodule update --init --recursive`
+* Call `./init.sh` to compile the protobuf files.
+
+You can also use a preconfigured Docker image if you have Docker Compose and nvidia-docker:
+* Put your training data in a top-level `data/` directory inside this repo
+* [Set the default Docker runtime to nvidia-docker](https://stackoverflow.com/questions/47465696/how-do-i-specify-nvidia-runtime-from-docker-compose-yml/47495905#47495905)
+* Run `docker-compose build && docker-compose run trainer`
+* This will open a bash shell with the source mounted under `/src`
+* Run `./init.sh` to compile protobufs.
 
 ## Data preparation
 
