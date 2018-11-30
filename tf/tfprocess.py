@@ -352,9 +352,9 @@ class TFProcess:
             path = os.path.join(self.root_dir, self.cfg['name'])
             save_path = self.saver.save(self.session, path, global_step=steps)
             print("Model saved in file: {}".format(save_path))
-            leela_path = path + "-" + str(steps) + ".txt"
-            swa_path = path + "-swa-" + str(steps) + ".txt"
-            #self.net.pb.training_params.training_steps = steps
+            leela_path = path + "-" + str(steps)
+            swa_path = path + "-swa-" + str(steps)
+            self.net.pb.training_params.training_steps = steps
             self.save_leelaz_weights(leela_path)
             print("Weights saved in file: {}".format(leela_path))
             if self.swa_enabled:
@@ -388,10 +388,10 @@ class TFProcess:
         sum_policy /= test_batches
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
-        #self.net.pb.training_params.learning_rate = self.lr
-        #self.net.pb.training_params.mse_loss = sum_mse
-        #self.net.pb.training_params.policy_loss = sum_policy
-        #self.net.pb.training_params.accuracy = sum_accuracy
+        self.net.pb.training_params.learning_rate = self.lr
+        self.net.pb.training_params.mse_loss = sum_mse
+        self.net.pb.training_params.policy_loss = sum_policy
+        self.net.pb.training_params.accuracy = sum_accuracy
         test_summaries = tf.Summary(value=[
             tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
             tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
