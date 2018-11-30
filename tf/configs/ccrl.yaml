@@ -1,6 +1,6 @@
 %YAML 1.2 
 ---
-name: '128x10-se2'
+name: '128x10-film'
 gpu: 0
 
 dataset:
@@ -28,6 +28,10 @@ training:
     policy_loss_weight: 1.0
     value_loss_weight: 1.0
     path: '/media/sda1/lc0/networks'
+    swa: False
+    swa_steps: 2000
+    swa_max_n: 8
+    warmup_steps: 100
 
 model:
   filters: 128
