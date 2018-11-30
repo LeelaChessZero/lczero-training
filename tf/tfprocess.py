@@ -122,6 +122,7 @@ class TFProcess:
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
+        self.lr = self.cfg['training']['lr_values'][0]
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
@@ -155,6 +156,9 @@ class TFProcess:
         with tf.control_dependencies(self.update_ops):
             gradients = opt_op.compute_gradients(loss)
         self.accum_op = [accum.assign_add(gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
+        # gradients are num_batch_splits times higher due to accumulation by summing, so the norm will be too
+        max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * self.cfg['training'].get('num_batch_splits', 1)
+        gradient_accum, self.grad_norm = tf.clip_by_global_norm(gradient_accum, max_grad_norm)
         self.train_op = opt_op.apply_gradients(
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
@@ -289,7 +293,7 @@ class TFProcess:
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         corrected_lr = self.lr / batch_splits
-        self.session.run(self.train_op,
+        _, grad_norm = self.session.run([self.train_op, self.grad_norm],
             feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
 
         # Update steps since training should have incremented it.
@@ -323,6 +327,7 @@ class TFProcess:
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
+                tf.Summary.Value(tag="Gradient norm", simple_value=grad_norm / batch_splits),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.train_writer.add_summary(update_ratio_summaries, steps)
@@ -478,44 +483,45 @@ class TFProcess:
         self.snap_restore()
 
     def save_leelaz_weights(self, filename):
-        with open(filename, 'w') as f:
-            f.write("3\n") # Version
-            for e, weights in enumerate(self.weights):
-                # Newline unless last line (single bias)
-                work_weights = None
-                if weights.shape.ndims == 4:
-                    # Convolution weights need a transpose
-                    #
-                    # TF (kYXInputOutput)
-                    # [filter_height, filter_width, in_channels, out_channels]
-                    #
-                    # Leela/cuDNN/Caffe (kOutputInputYX)
-                    # [output, input, filter_size, filter_size]
-                    work_weights = tf.transpose(weights, [3, 2, 0, 1])
-                elif weights.shape.ndims == 2:
-                    # Fully connected layers are [in, out] in TF
-                    #
-                    # [out, in] in Leela
-                    #
-                    work_weights = tf.transpose(weights, [1, 0])
-                else:
-                    # Biases, batchnorm etc
-                    work_weights = weights
-                nparray = work_weights.eval(session=self.session)
-                # Rescale rule50 related weights as clients do not normalize the input.
-                if e == 0:
-                    num_inputs = 112
-                    # 50 move rule is the 110th input, or 109 starting from 0.
-                    rule50_input = 109
-                    wt_flt = []
-                    for i, weight in enumerate(np.ravel(nparray)):
-                        if (i%(num_inputs*9))//9 == rule50_input:
-                            wt_flt.append(weight/99)
-                        else:
-                            wt_flt.append(weight)
-                else:
-                    wt_flt = [wt for wt in np.ravel(nparray)]
-                f.write(" ".join([str(x) for x in wt_flt]) + '\n')
+        all_weights = []
+        for e, weights in enumerate(self.weights):
+            work_weights = None
+            if weights.shape.ndims == 4:
+                # Convolution weights need a transpose
+                #
+                # TF (kYXInputOutput)
+                # [filter_height, filter_width, in_channels, out_channels]
+                #
+                # Leela/cuDNN/Caffe (kOutputInputYX)
+                # [output, input, filter_size, filter_size]
+                work_weights = tf.transpose(weights, [3, 2, 0, 1])
+            elif weights.shape.ndims == 2:
+                # Fully connected layers are [in, out] in TF
+                #
+                # [out, in] in Leela
+                #
+                work_weights = tf.transpose(weights, [1, 0])
+            else:
+                # Biases, batchnorm etc
+                work_weights = weights
+            nparray = work_weights.eval(session=self.session)
+            # Rescale rule50 related weights as clients do not normalize the input.
+            if e == 0:
+                num_inputs = 112
+                # 50 move rule is the 110th input, or 109 starting from 0.
+                rule50_input = 109
+                wt_flt = []
+                for i, weight in enumerate(np.ravel(nparray)):
+                    if (i%(num_inputs*9))//9 == rule50_input:
+                        wt_flt.append(weight/99)
+                    else:
+                        wt_flt.append(weight)
+            else:
+                wt_flt = [wt for wt in np.ravel(nparray)]
+            all_weights.append(wt_flt)
+
+        self.net.fill_net(all_weights)
+        self.net.save_proto(filename)
 
     def get_batchnorm_key(self):
         result = "bn" + str(self.batch_norm_count)
