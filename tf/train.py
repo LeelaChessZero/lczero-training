@@ -21,7 +21,7 @@ import os
 import yaml
 import sys
 import glob
-import gzip
+import lz4.frame
 import random
 import multiprocessing as mp
 import tensorflow as tf
@@ -32,7 +32,7 @@ SKIP = 32
 
 
 def get_chunks(data_prefix):
-    return glob.glob(data_prefix + "*.gz")
+    return glob.glob(data_prefix + "*.lz4")
 
 
 def get_latest_chunks(path, num_chunks):
@@ -69,7 +69,7 @@ class FileDataSrc:
         while len(self.chunks):
             filename = self.chunks.pop()
             try:
-                with gzip.open(filename, 'rb') as chunk_file:
+                with lz4.frame.open(filename, mode='rb') as chunk_file:
                     self.done.append(filename)
                     return chunk_file.read()
             except:

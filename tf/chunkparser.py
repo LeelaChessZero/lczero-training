@@ -79,7 +79,7 @@ class ChunkParser:
         self.shuffle_size = shuffle_size
         # Start worker processes, leave 2 for TensorFlow
         if workers is None:
-            workers = max(1, mp.cpu_count() - 2)
+            workers = max(1, mp.cpu_count()*2 - 2)
 
         print("Using {} worker processes.".format(workers))
 
