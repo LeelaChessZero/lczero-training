@@ -1,5 +1,7 @@
-# Training data
+# Training data, nets, and logs
 data/
+networks/
+tf/leelalogs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
