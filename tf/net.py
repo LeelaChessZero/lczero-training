@@ -35,9 +35,9 @@ class Net:
             self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
-            # SE needs at least lc0 version 19
+            # SE needs at least lc0 version 20
             self.pb.min_version.major = 0
-            self.pb.min_version.minor = 19
+            self.pb.min_version.minor = 20
 
     def get_weight_amounts(self):
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
