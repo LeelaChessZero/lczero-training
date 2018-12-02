@@ -1,0 +1,34 @@
+%YAML 1.2 
+---
+name: 'ccrl-64x6-base'
+gpu: 0
+
+dataset:
+  num_chunks: 2000000
+  train_ratio: 0.80
+  input_train: '/src/data/v3/train/'
+  input_test: '/src/data/v3/test/'
+training:
+    batch_size: 1024
+    num_batch_splits: 1
+    test_steps: 1000
+    train_avg_report_steps: 500
+    total_steps: 200000
+    checkpoint_steps: 10000
+    shuffle_size: 250000
+    lr_values:
+        - 0.1
+        - 0.01
+        - 0.001
+        - 0.0001
+    lr_boundaries:
+        - 80000
+        - 140000
+        - 180000
+    policy_loss_weight: 1.0
+    value_loss_weight: 0.01
+    path: '/src/networks/'
+
+model:
+  filters: 64
+  residual_blocks: 6
