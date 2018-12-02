@@ -62,6 +62,7 @@ class TFProcess:
         # Network structure
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
+        self.SE_ratio = self.cfg['model']['se_ratio']
 
         # For exporting
         self.weights = []
@@ -188,15 +189,7 @@ class TFProcess:
 
     def replace_weights(self, new_weights):
         for e, weights in enumerate(self.weights):
-            if weights.name.endswith('/batch_normalization/beta:0'):
-                # Batch norm beta is written as bias before the batch normalization
-                # in the weight file for backwards compatibility reasons.
-                bias = tf.constant(new_weights[e], shape=weights.shape)
-                # Weight file order: bias, means, variances
-                var = tf.constant(new_weights[e + 2], shape=weights.shape)
-                new_beta = tf.divide(bias, tf.sqrt(var + tf.constant(1e-5)))
-                self.session.run(tf.assign(weights, new_beta))
-            elif weights.shape.ndims == 4:
+            if weights.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
                 if e == 0:
                     num_inputs = 112
@@ -361,7 +354,7 @@ class TFProcess:
             leela_path = path + "-" + str(steps)
             swa_path = path + "-swa-" + str(steps)
             self.net.pb.training_params.training_steps = steps
-            self.save_leelaz_weights(leela_path) 
+            self.save_leelaz_weights(leela_path)
             print("Weights saved in file: {}".format(leela_path))
             if self.swa_enabled:
                 self.save_swa_weights(swa_path)
@@ -492,15 +485,8 @@ class TFProcess:
     def save_leelaz_weights(self, filename):
         all_weights = []
         for e, weights in enumerate(self.weights):
-            # Newline unless last line (single bias)
             work_weights = None
-            if weights.name.endswith('/batch_normalization/beta:0'):
-                # Batch norm beta needs to be converted to biases before
-                # the batch norm for backwards compatibility reasons
-                var_key = weights.name.replace('beta', 'moving_variance')
-                var = tf.get_default_graph().get_tensor_by_name(var_key)
-                work_weights = tf.multiply(weights, tf.sqrt(var + tf.constant(1e-5)))
-            elif weights.shape.ndims == 4:
+            if weights.shape.ndims == 4:
                 # Convolution weights need a transpose
                 #
                 # TF (kYXInputOutput)
@@ -542,6 +528,33 @@ class TFProcess:
         self.batch_norm_count += 1
         return result
 
+    def squeeze_excitation(self, x, channels, ratio):
+
+        assert channels % ratio == 0
+
+        # NCHW format reduced to NC
+        net = tf.reduce_mean(x, axis=[2, 3])
+
+        W_fc1 = weight_variable([channels, channels // ratio], name='se_fc1_w')
+        b_fc1 = bias_variable([channels // ratio], name='se_fc1_b')
+        self.weights.append(W_fc1)
+        self.weights.append(b_fc1)
+
+        net = tf.nn.relu(tf.add(tf.matmul(net, W_fc1), b_fc1))
+
+        W_fc2 = weight_variable([channels // ratio, channels], name='se_fc2_w')
+        b_fc2 = bias_variable([channels], name='se_fc2_b')
+        self.weights.append(W_fc2)
+        self.weights.append(b_fc2)
+
+        net = tf.nn.sigmoid(tf.add(tf.matmul(net, W_fc2), b_fc2))
+
+        net = tf.reshape(net, [-1, channels, 1, 1])
+
+        scale = x * net
+
+        return scale
+
     def conv_block(self, inputs, filter_size, input_channels, output_channels):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
@@ -556,20 +569,23 @@ class TFProcess:
                 tf.layers.batch_normalization(
                     conv2d(inputs, W_conv),
                     epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=False,
+                    center=True, scale=True,
                     virtual_batch_size=64,
                     training=self.training)
         h_conv = tf.nn.relu(h_bn)
 
+        gamma_key = weight_key + "/batch_normalization/gamma:0"
         beta_key = weight_key + "/batch_normalization/beta:0"
         mean_key = weight_key + "/batch_normalization/moving_mean:0"
         var_key = weight_key + "/batch_normalization/moving_variance:0"
 
+        gamma = tf.get_default_graph().get_tensor_by_name(gamma_key)
         beta = tf.get_default_graph().get_tensor_by_name(beta_key)
         mean = tf.get_default_graph().get_tensor_by_name(mean_key)
         var = tf.get_default_graph().get_tensor_by_name(var_key)
 
         self.weights.append(W_conv)
+        self.weights.append(gamma)
         self.weights.append(beta)
         self.weights.append(mean)
         self.weights.append(var)
@@ -579,13 +595,13 @@ class TFProcess:
     def residual_block(self, inputs, channels):
         # First convnet
         orig = tf.identity(inputs)
-        weight_key_1 = self.get_batchnorm_key()
-        conv_key_1 = weight_key_1 + "/conv_weight"
+        weight_key_1 = self.get_batchnorm_key() + "/"
+        conv_key_1 = weight_key_1 + "conv_weight"
         W_conv_1 = weight_variable([3, 3, channels, channels], name=conv_key_1)
 
         # Second convnet
-        weight_key_2 = self.get_batchnorm_key()
-        conv_key_2 = weight_key_2 + "/conv_weight"
+        weight_key_2 = self.get_batchnorm_key() + "/"
+        conv_key_2 = weight_key_2 + "conv_weight"
         W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2)
 
         with tf.variable_scope(weight_key_1):
@@ -593,7 +609,7 @@ class TFProcess:
                 tf.layers.batch_normalization(
                     conv2d(inputs, W_conv_1),
                     epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=False,
+                    center=True, scale=True,
                     virtual_batch_size=64,
                     training=self.training)
         h_out_1 = tf.nn.relu(h_bn1)
@@ -602,36 +618,46 @@ class TFProcess:
                 tf.layers.batch_normalization(
                     conv2d(h_out_1, W_conv_2),
                     epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=False,
+                    center=True, scale=True,
                     virtual_batch_size=64,
                     training=self.training)
-        h_out_2 = tf.nn.relu(tf.add(h_bn2, orig))
 
+        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma:0"
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
         mean_key_1 = weight_key_1 + "/batch_normalization/moving_mean:0"
         var_key_1 = weight_key_1 + "/batch_normalization/moving_variance:0"
 
+        gamma_1 = tf.get_default_graph().get_tensor_by_name(gamma_key_1)
         beta_1 = tf.get_default_graph().get_tensor_by_name(beta_key_1)
         mean_1 = tf.get_default_graph().get_tensor_by_name(mean_key_1)
         var_1 = tf.get_default_graph().get_tensor_by_name(var_key_1)
 
+        gamma_key_2 = weight_key_2 + "/batch_normalization/gamma:0"
         beta_key_2 = weight_key_2 + "/batch_normalization/beta:0"
         mean_key_2 = weight_key_2 + "/batch_normalization/moving_mean:0"
         var_key_2 = weight_key_2 + "/batch_normalization/moving_variance:0"
 
+        gamma_2 = tf.get_default_graph().get_tensor_by_name(gamma_key_2)
         beta_2 = tf.get_default_graph().get_tensor_by_name(beta_key_2)
         mean_2 = tf.get_default_graph().get_tensor_by_name(mean_key_2)
         var_2 = tf.get_default_graph().get_tensor_by_name(var_key_2)
 
         self.weights.append(W_conv_1)
+        self.weights.append(gamma_1)
         self.weights.append(beta_1)
         self.weights.append(mean_1)
         self.weights.append(var_1)
 
         self.weights.append(W_conv_2)
+        self.weights.append(gamma_2)
         self.weights.append(beta_2)
         self.weights.append(mean_2)
         self.weights.append(var_2)
+
+        # Must be after adding weights to self.weights
+        with tf.variable_scope(weight_key_2):
+            h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
+        h_out_2 = tf.nn.relu(tf.add(h_se, orig))
 
         return h_out_2
 
