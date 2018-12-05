@@ -122,6 +122,13 @@ class Net:
         return blocks // 8
 
 
+    def is_same_shape(self, other):
+        weights1, weights2 = self.get_weights(), other.get_weights()
+
+        return  len(weights1) == len(weights2) and \
+                all(len(w1) == len(w2) for w1, w2 in zip(weights1, weights2))
+
+
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
@@ -170,24 +177,47 @@ class Net:
         self.fill_conv_block(self.pb.weights.input, weights)
 
 
+def average(output_name, *nets):
+    assert all(nets[0].is_same_shape(other) for other in nets[1:])
+    averaged_weights = []
+    for components in zip(*(net.get_weights() for net in nets)):
+        components = np.array(components)
+        averaged_weights.append(np.mean(components, axis=0, dtype=np.float64))
+    averaged_net = Net()
+    averaged_net.fill_net(averaged_weights)
+    return averaged_net
+
+
 def main(argv):
-    net = Net()
+    nets = []
+    write_txt = False
+    for name in argv.input:
+        net = Net()
+        if name.endswith(".txt"):
+            net.parse_txt(name)
+        elif name.endswith(".pb.gz"):
+            if not argv.average: write_txt = True
+            net.parse_proto(name)
+        nets.append(net)
 
-    if argv.input.endswith(".txt"):
-        net.parse_txt(argv.input)
-        net.save_txt(argv.output)
-        net.save_proto(argv.output)
-    elif argv.input.endswith(".pb.gz"):
-        net.parse_proto(argv.input)
-        net.save_txt(argv.output)
+    if argv.average:
+        print('Read inputs {}, now averaging...'.format(argv.input))
+        out = average(argv.output, *nets)
+    else:
+        out = nets[0]
 
+    out.save_proto(argv.output)
+    if write_txt:
+        out.save_txt(argv.output)
 
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
     'Convert network textfile to proto.')
-    argparser.add_argument('-i', '--input', type=str, 
-        help='input network weight text file')
+    argparser.add_argument('-i', '--input', type=str, nargs='+',
+        help='input network weight file(s)')
+    argparser.add_argument('-a', '--average', action='store_true',
+        help='average all inputs into output file')
     argparser.add_argument('-o', '--output', type=str, 
         help='output filepath without extension')
     main(argparser.parse_args())
