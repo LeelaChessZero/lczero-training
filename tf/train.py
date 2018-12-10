@@ -137,7 +137,7 @@ def main(cmd):
     print("Using {} evaluation batches".format(num_evals))
 
     tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
-    
+
     if cmd.output is not None:
         tfprocess.save_leelaz_weights(cmd.output)
 
@@ -148,9 +148,9 @@ def main(cmd):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
     'Tensorflow pipeline for training Leela Chess.')
-    argparser.add_argument('--cfg', type=argparse.FileType('r'), 
+    argparser.add_argument('--cfg', type=argparse.FileType('r'),
         help='yaml configuration with training parameters')
-    argparser.add_argument('--output', type=str, 
+    argparser.add_argument('--output', type=str,
         help='file to store weights in')
 
     mp.set_start_method('spawn')
