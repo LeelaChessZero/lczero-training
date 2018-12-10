@@ -177,8 +177,9 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])), self.session.graph)
         self.train_writer = tf.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])), self.session.graph)
-        self.swa_writer = tf.summary.FileWriter(
-            os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
+        if self.swa_enabled:
+            self.swa_writer = tf.summary.FileWriter(
+                os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
         self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
