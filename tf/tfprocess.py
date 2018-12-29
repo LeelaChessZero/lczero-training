@@ -53,6 +53,29 @@ def conv2d(x, W):
     return tf.nn.conv2d(x, W, data_format='NCHW',
                         strides=[1, 1, 1, 1], padding='SAME')
 
+# Restore session from checkpoint. It silently ignore mis-matches
+# between the checkpoint and the graph. Specifically
+# 1. values in the checkpoint for which there is no corresponding variable.
+# 2. variables in the graph for which there is no specified value in the
+#    checkpoint.
+# 3. values where the checkpoint shape differs from the variable shape.
+# (variables without a value in the checkpoint are left at their default
+# initialized value)
+def optimistic_restore(session, save_file, graph=tf.get_default_graph()):
+    reader = tf.train.NewCheckpointReader(save_file)
+    saved_shapes = reader.get_variable_to_shape_map()
+    var_names = sorted(
+        [(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+         if var.name.split(':')[0] in saved_shapes])
+    restore_vars = []
+    for var_name, saved_var_name in var_names:
+        curr_var = graph.get_tensor_by_name(var_name)
+        var_shape = curr_var.get_shape().as_list()
+        if var_shape == saved_shapes[saved_var_name]:
+            restore_vars.append(curr_var)
+    opt_saver = tf.train.Saver(restore_vars)
+    opt_saver.restore(session, save_file)
+
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
