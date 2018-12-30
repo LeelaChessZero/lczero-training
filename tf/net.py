@@ -12,7 +12,7 @@ LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
 class Net:
-    def __init__(self):
+    def __init__(self, wdl):
         self.pb = pb.Net()
         self.pb.magic = WEIGHTS_MAGIC
         self.pb.min_version.major = LC0_MAJOR
@@ -23,6 +23,12 @@ class Net:
         self.set_networkformat(classical=True)
 
         self.weights = []
+        self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_CLASSICAL
+        self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+        self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
+
+        if wdl:
+            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_WDL
 
     def set_networkformat(self, **kwargs):
         if kwargs.get('classical'):
