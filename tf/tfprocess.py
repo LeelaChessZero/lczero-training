@@ -80,7 +80,7 @@ class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
         self.wdl = self.cfg['model'].get('wdl', True)
-        self.net = Net(self.wdl)
+        self.net = Net(se=True, wdl=self.wdl)
         self.root_dir = os.path.join(self.cfg['training']['path'], self.cfg['name'])
 
         # Network structure

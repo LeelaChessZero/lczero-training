@@ -12,7 +12,7 @@ LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
 class Net:
-    def __init__(self, wdl):
+    def __init__(self, se, wdl):
         self.pb = pb.Net()
         self.pb.magic = WEIGHTS_MAGIC
         self.pb.min_version.major = LC0_MAJOR
@@ -20,26 +20,26 @@ class Net:
         self.pb.min_version.patch = LC0_PATCH
         self.pb.format.weights_encoding = pb.Format.LINEAR16
 
-        self.set_networkformat(classical=True)
-
         self.weights = []
-        self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_CLASSICAL
+
+        if se:
+            self.set_networkformat(se=True)
+        else:
+            self.set_networkformat(classical=True)
+
         self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
-        self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
         if wdl:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_WDL
+        else:
+            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
     def set_networkformat(self, **kwargs):
         if kwargs.get('classical'):
             self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_CLASSICAL
-            self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
-            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
         if kwargs.get('se'):
             self.pb.format.network_format.network = pb.NetworkFormat.NETWORK_SE
-            self.pb.format.network_format.input = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
-            self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
             # SE needs at least lc0 version 20
             self.pb.min_version.major = 0
@@ -118,7 +118,7 @@ class Net:
         self.denorm_layer(convblock.w1, weights)
 
 
-    def save_txt(self, filename, se=False):
+    def save_txt(self, filename):
         """Save weights as txt file"""
         weights = self.get_weights()
 
@@ -126,8 +126,9 @@ class Net:
             filename += ".txt.gz"
 
         # Legacy .txt files are version 2, SE is version 3.
+
         version = 2
-        if se:
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
             version = 3
 
         with gzip.open(filename, 'wb') as f:
@@ -211,21 +212,16 @@ class Net:
                 weights.append(list(map(float, line.split(' '))))
 
         if version == 3:
-            se = True
             self.set_networkformat(se=True)
-        else:
-            se = False
 
-        self.fill_net(weights, se)
+        self.fill_net(weights)
 
 
-    def fill_net(self, weights, se=True):
+    def fill_net(self, weights):
         self.weights = []
         # Batchnorm gammas in ConvBlock?
+        se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
         gammas = se
-
-        if se:
-            self.set_networkformat(se=True)
 
         ws = self.get_weight_amounts()
 
@@ -261,7 +257,7 @@ class Net:
 
 
 def main(argv):
-    net = Net()
+    net = Net(se=False, wdl=False)
 
     if argv.input.endswith(".txt"):
         print('Found .txt network')
@@ -282,8 +278,7 @@ def main(argv):
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
-        se = net.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE
-        net.save_txt(argv.output, se)
+        net.save_txt(argv.output)
     else:
         print('Unable to detect the network format. '\
               'Filename should end in ".txt" or ".pb.gz"')
