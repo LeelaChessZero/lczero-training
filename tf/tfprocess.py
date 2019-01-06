@@ -63,6 +63,7 @@ class TFProcess:
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
+        self.policy_channels = self.cfg['model'].get('policy_channels', 32)
 
         # For exporting
         self.weights = []
@@ -680,9 +681,9 @@ class TFProcess:
         # Policy head
         conv_pol = self.conv_block(flow, filter_size=1,
                                    input_channels=self.RESIDUAL_FILTERS,
-                                   output_channels=32)
-        h_conv_pol_flat = tf.reshape(conv_pol, [-1, 32*8*8])
-        W_fc1 = weight_variable([32*8*8, 1858], name='fc1/weight')
+                                   output_channels=self.policy_channels)
+        h_conv_pol_flat = tf.reshape(conv_pol, [-1, self.policy_channels*8*8])
+        W_fc1 = weight_variable([self.policy_channels*8*8, 1858], name='fc1/weight')
         b_fc1 = bias_variable([1858], name='fc1/bias')
         self.weights.append(W_fc1)
         self.weights.append(b_fc1)
