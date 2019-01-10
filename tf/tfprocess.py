@@ -22,6 +22,7 @@ import random
 import tensorflow as tf
 import time
 import bisect
+import lc0_az_policy_map
 
 from net import Net
 
@@ -722,18 +723,18 @@ class TFProcess:
                                    input_channels=self.RESIDUAL_FILTERS,
                                    output_channels=self.RESIDUAL_FILTERS)
         W_pol_conv = weight_variable([3, 3,
-                                  self.RESIDUAL_FILTERS, 73], name='W_pol_conv2')
-        b_pol_conv = bias_variable([73], name='b_pol_conv2')
+                                  self.RESIDUAL_FILTERS, 80], name='W_pol_conv2')
+        b_pol_conv = bias_variable([80], name='b_pol_conv2')
         self.weights.append(W_pol_conv)
         self.weights.append(b_pol_conv)
         conv_pol2 = tf.nn.bias_add(conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
 
-        h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 73*8*8])
-        W_fc1 = weight_variable([73*8*8, 1858], name='fc1/weight')
-        b_fc1 = bias_variable([1858], name='fc1/bias')
-        self.weights.append(W_fc1)
-        self.weights.append(b_fc1)
-        h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1), b_fc1, name='policy_head')
+        h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
+        fc1_init = tf.constant(lc0_az_policy_map.make_map())
+        W_fc1 = tf.get_variable("policy_map",
+                                 initializer=fc1_init,
+                                 trainable=False)
+        h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
 
         # Value head
         conv_val = self.conv_block(flow, filter_size=1,
