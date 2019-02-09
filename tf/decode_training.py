@@ -52,7 +52,8 @@ from collections import defaultdict
 # Also note "0002" is actually b'\0x30\0x30\0x30\0x32' (or maybe reversed?)
 # so it doesn't collide with VERSION2.
 #
-VERSION3 = chunkparser.VERSION
+VERSION3 = chunkparser.V3_VERSION
+VERSION4 = chunkparser.V4_VERSION
 
 V4_BYTES = 8284
 
@@ -2041,7 +2042,7 @@ class TrainingStep:
         top_moves = {}
         for idx, prob in enumerate(self.probs):
             # Include all moves with at least 1 visit.
-            if prob > 0.0:
+            if prob >= 0.0:
                 top_moves[idx] = prob
             sum += prob
         for idx, prob in sorted(top_moves.items(), key=lambda x:-x[1]):
@@ -2100,7 +2101,7 @@ def main(args):
             chunkdata = f.read()
             if chunkdata[0:4] == b'\1\0\0\0':
                 print("Invalid version")
-            elif chunkdata[0:4] == VERSION3:
+            elif chunkdata[0:4] in {VERSION4, VERSION3}:
                 #print("debug Version3")
                 for i in range(0, len(chunkdata), V4_BYTES):
                     ts = TrainingStep(4)
