@@ -2019,7 +2019,8 @@ class TrainingStep:
             s += " draw\n"
         else:
             raise Exception("Invalid winner: {}".format(self.winner))
-        s += "Q = {} (diff to result: {}) \n".format(self.q, abs(self.winner - self.q))
+        s += "Root Q = {} (diff to result: {}) \n".format(self.root_q, abs(self.winner - self.root_q))
+        s += "Best Q = {} (diff to result: {}) \n".format(self.best_q, abs(self.winner - self.best_q))
         if self.us_black:
             s += "(Note the black pieces are CAPS, black moves up, but A1 is in lower left)\n"
         s += "rule50_count {} b_ooo b_oo, w_ooo, w_oo {} {} {} {}\n".format(
@@ -2064,7 +2065,7 @@ class TrainingStep:
         return "".join([plane[x:x+2] for x in reversed(range(0, len(plane), 2))])
 
     def display_v2_or_v3(self, ply, content):
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, q) = self.this_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, root_q, best_q) = self.this_struct.unpack(content)
         assert self.version == int.from_bytes(ver, byteorder="little")
         # Enforce move_count to 0
         move_count = 0
@@ -2084,7 +2085,8 @@ class TrainingStep:
         self.us_black = us_black
         self.rule50_count = rule50_count
         self.winner = winner
-        self.q = q
+        self.root_q = root_q
+        self.best_q = best_q
         for idx in range(0, len(probs), 4):
             self.probs.append(struct.unpack("f", probs[idx:idx+4])[0])
         print("ply {} move {} (Not actually part of training data)".format(
