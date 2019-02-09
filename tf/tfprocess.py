@@ -65,6 +65,7 @@ class TFProcess:
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
+        self.policy_channels = self.cfg['model'].get('policy_channels', 32)
 
         policy_head = self.cfg['model'].get('policy', 'convolution')
 
