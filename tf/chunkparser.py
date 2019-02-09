@@ -209,17 +209,24 @@ class ChunkParser:
         """
         Randomly sample through the v4 chunk data and select records
         """
-        if chunkdata[0:4] in {V4_VERSION, V3_VERSION}:
-            for i in range(0, len(chunkdata), self.v4_struct.size):
-                if self.sample > 1:
-                    # Downsample, using only 1/Nth of the items.
-                    if random.randint(0, self.sample-1) != 0:
-                        continue  # Skip this record.
-                record = chunkdata[i:i+self.v4_struct.size]
-                if chunkdata[0:4] == V3_VERSION:
-                    # add 8 bytes of fake root_q and best_q to match V4 format
-                    chunkdata += 8 * b'\x00'
-                yield record
+        version = chunkdata[0:4]
+        if version == V4_VERSION:
+            record_size = self.v4_struct.size
+        elif version == V3_VERSION:
+            record_size = self.v3_struct.size
+        else:
+            return
+
+        for i in range(0, len(chunkdata), record_size):
+            if self.sample > 1:
+                # Downsample, using only 1/Nth of the items.
+                if random.randint(0, self.sample-1) != 0:
+                    continue  # Skip this record.
+            record = chunkdata[i:i+self.v4_struct.size]
+            if version == V3_VERSION:
+                # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
+                chunkdata += 16 * b'\x00'
+            yield record
 
 
     def task(self, chunkdatasrc, writer):
