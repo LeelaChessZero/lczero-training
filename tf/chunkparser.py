@@ -28,7 +28,7 @@ import unittest
 
 V3_VERSION = struct.pack('i', 3)
 V4_VERSION = struct.pack('i', 4)
-V4_STRUCT_STRING = '4s7432s832sBBBBBBBbff'
+V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
 # Interface for a chunk data source.
@@ -127,7 +127,10 @@ class ChunkParser:
             uint8 rule50_count (1 byte)
             uint8 move_count (1 byte)
             int8 result (1 byte)
-            float32 q (4 bytes)
+            float32 root_q (4 bytes)
+            float32 best_q (4 bytes)
+            float32 root_d (4 bytes)
+            float32 best_d (4 bytes)
         """
         self.v4_struct = struct.Struct(V4_STRUCT_STRING)
         self.v3_struct = struct.Struct(V3_STRUCT_STRING)
@@ -169,8 +172,10 @@ class ChunkParser:
             int8 result (1 byte)
             float32 root_q (4 bytes)
             float32 best_q (4 bytes)
+            float32 root_d (4 bytes)
+            float32 best_d (4 bytes)
         """
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q) = self.v4_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
         # Enforce move_count to 0
         move_count = 0
 

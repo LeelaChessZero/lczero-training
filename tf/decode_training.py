@@ -2066,7 +2066,7 @@ class TrainingStep:
         return "".join([plane[x:x+2] for x in reversed(range(0, len(plane), 2))])
 
     def display_v2_or_v3(self, ply, content):
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, root_q, best_q) = self.this_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.this_struct.unpack(content)
         assert self.version == int.from_bytes(ver, byteorder="little")
         # Enforce move_count to 0
         move_count = 0
