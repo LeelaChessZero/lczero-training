@@ -252,7 +252,7 @@ class ChunkParser:
         Read v4 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v4_struct.size, self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
