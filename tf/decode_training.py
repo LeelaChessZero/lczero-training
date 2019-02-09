@@ -55,7 +55,8 @@ from collections import defaultdict
 VERSION3 = chunkparser.V3_VERSION
 VERSION4 = chunkparser.V4_VERSION
 
-V4_BYTES = 8284
+V3_BYTES = 8276
+V4_BYTES = 8292
 
 # Us   -- uppercase
 # Them -- lowercase
@@ -2042,7 +2043,8 @@ class TrainingStep:
         top_moves = {}
         for idx, prob in enumerate(self.probs):
             # Include all moves with at least 1 visit.
-            if prob >= 0.0:
+            condition = prob > 0 if self.version == 3 else prob >= 0
+            if condition:
                 top_moves[idx] = prob
             sum += prob
         for idx, prob in sorted(top_moves.items(), key=lambda x:-x[1]):
@@ -2102,10 +2104,17 @@ def main(args):
             if chunkdata[0:4] == b'\1\0\0\0':
                 print("Invalid version")
             elif chunkdata[0:4] in {VERSION4, VERSION3}:
-                #print("debug Version3")
-                for i in range(0, len(chunkdata), V4_BYTES):
-                    ts = TrainingStep(4)
-                    ts.display_v2_or_v3(i//V4_BYTES, chunkdata[i:i+V4_BYTES])
+                version = chunkdata[0:4]
+                if version == VERSION3:
+                    record_size = V3_BYTES
+                else:
+                    record_size = V4_BYTES
+                for i in range(0, len(chunkdata), record_size):
+                    ts = TrainingStep(4 if version == VERSION4 else 3)
+                    record = chunkdata[i:i+record_size]
+                    if chunkdata[0:4] == VERSION3:
+                        record += 16 * b'\x00'
+                    ts.display_v2_or_v3(i//record_size, record)
             else:
                 parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([chunkdata]), workers=1)
                 gen1 = parser.convert_chunkdata_to_v2(chunkdata)
