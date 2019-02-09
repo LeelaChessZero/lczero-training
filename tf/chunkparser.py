@@ -27,7 +27,7 @@ import tensorflow as tf
 import unittest
 
 VERSION = struct.pack('i', 4)
-STRUCT_STRING = '4s7432s832sBBBBBBBbf'
+STRUCT_STRING = '4s7432s832sBBBBBBBbff'
 
 # Interface for a chunk data source.
 class ChunkDataSrc:
@@ -165,7 +165,7 @@ class ChunkParser:
             uint8 move_count (1 byte)
             int8 result (1 byte)
         """
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, q) = self.v4_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q) = self.v4_struct.unpack(content)
         # Enforce move_count to 0
         move_count = 0
 
@@ -190,9 +190,9 @@ class ChunkParser:
         assert winner == 1.0 or winner == -1.0 or winner == 0.0
         winner = struct.pack('f', winner)
 
-        q = struct.pack('f', q)
+        best_q = struct.pack('f', best_q)
 
-        return (planes, probs, winner, q)
+        return (planes, probs, winner, best_q)
 
 
     def sample_record(self, chunkdata):

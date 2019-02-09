@@ -54,7 +54,7 @@ from collections import defaultdict
 #
 VERSION3 = chunkparser.VERSION
 
-V4_BYTES = 8280
+V4_BYTES = 8284
 
 # Us   -- uppercase
 # Them -- lowercase
