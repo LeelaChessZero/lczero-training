@@ -115,7 +115,7 @@ class ChunkParser:
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
 
-        V3 Format (8292 bytes total)
+        V4 Format (8292 bytes total)
             int32 version (4 bytes)
             1858 float32 probabilities (7432 bytes)  (removed 66*4 = 264 bytes unused under-promotions)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)  (no rep2 plane)

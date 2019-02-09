@@ -2067,7 +2067,7 @@ class TrainingStep:
         # This causes a vertical flip
         return "".join([plane[x:x+2] for x in reversed(range(0, len(plane), 2))])
 
-    def display_v2_or_v3(self, ply, content):
+    def display_v4(self, ply, content):
         (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.this_struct.unpack(content)
         assert self.version == int.from_bytes(ver, byteorder="little")
         # Enforce move_count to 0
@@ -2101,9 +2101,7 @@ def main(args):
         #print("Parsing {}".format(filename))
         with gzip.open(filename, 'rb') as f:
             chunkdata = f.read()
-            if chunkdata[0:4] == b'\1\0\0\0':
-                print("Invalid version")
-            elif chunkdata[0:4] in {VERSION4, VERSION3}:
+            if chunkdata[0:4] in {VERSION4, VERSION3}:
                 version = chunkdata[0:4]
                 if version == VERSION3:
                     record_size = V3_BYTES
@@ -2114,21 +2112,9 @@ def main(args):
                     record = chunkdata[i:i+record_size]
                     if chunkdata[0:4] == VERSION3:
                         record += 16 * b'\x00'
-                    ts.display_v2_or_v3(i//record_size, record)
+                    ts.display_v4(i//record_size, record)
             else:
-                parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([chunkdata]), workers=1)
-                gen1 = parser.convert_chunkdata_to_v2(chunkdata)
-                ply = 1
-                for t1 in gen1:
-                    ts = TrainingStep(2)
-                    ts.display_v2_or_v3(ply, t1)
-                    ply += 1
-                    # TODO maybe detect new games and reset ply count
-                    # It's informational only
-                for _ in parser.parse():
-                    # TODO: What is happening here?
-                    #print("debug drain", len(_))
-                    pass
+                print("Invalid version")
 
 if __name__ == '__main__':
     usage_str = """
