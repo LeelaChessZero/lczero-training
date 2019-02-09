@@ -20,21 +20,18 @@ import random
 import unittest
 
 class ShuffleBuffer:
-    def __init__(self, elem_size, elem_count):
+    def __init__(self, elem_count):
         """
             A shuffle buffer for fixed sized elements.
 
             Manages 'elem_count' items in a fixed buffer, each item being exactly
             'elem_size' bytes.
         """
-        assert elem_size > 0, elem_size
         assert elem_count > 0, elem_count
-        # Size of each element.
-        self.elem_size = elem_size
         # Number of elements in the buffer.
         self.elem_count = elem_count
         # Fixed size buffer used to hold all the element.
-        self.buffer = bytearray(elem_size * elem_count)
+        self.buffer = [None for _ in range(elem_count)]
         # Number of elements actually contained in the buffer.
         self.used = 0
 
@@ -50,7 +47,7 @@ class ShuffleBuffer:
         # so returning the last item is sufficient.
         self.used -= 1
         i = self.used
-        return self.buffer[i * self.elem_size : (i+1) * self.elem_size]
+        return self.buffer[i]
 
     def insert_or_replace(self, item):
         """
@@ -59,21 +56,18 @@ class ShuffleBuffer:
 
             If the buffer is not yet full, returns None
         """
-        assert len(item) == self.elem_size, len(item)
         # putting the new item in a random location, and appending
         # the displaced item to the end of the buffer achieves a full
         # random shuffle (Fisher-Yates)
         if self.used > 0:
             # swap 'item' with random item in buffer.
             i = random.randint(0, self.used-1)
-            old_item = self.buffer[i * self.elem_size : (i+1) * self.elem_size]
-            self.buffer[i * self.elem_size : (i+1) * self.elem_size] = item
-            item = old_item
+            item, self.buffer[i] = self.buffer[i], item
         # If the buffer isn't yet full, append 'item' to the end of the buffer.
         if self.used < self.elem_count:
             # Not yet full, so place the returned item at the end of the buffer.
             i = self.used
-            self.buffer[i * self.elem_size : (i+1) * self.elem_size] = item
+            self.buffer[i] = item
             self.used += 1
             return None
         return item

@@ -26,8 +26,10 @@ import struct
 import tensorflow as tf
 import unittest
 
-VERSION = struct.pack('i', 4)
-STRUCT_STRING = '4s7432s832sBBBBBBBbff'
+V3_VERSION = struct.pack('i', 3)
+V4_VERSION = struct.pack('i', 4)
+V4_STRUCT_STRING = '4s7432s832sBBBBBBBbff'
+V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
 # Interface for a chunk data source.
 class ChunkDataSrc:
@@ -127,7 +129,8 @@ class ChunkParser:
             int8 result (1 byte)
             float32 q (4 bytes)
         """
-        self.v4_struct = struct.Struct(STRUCT_STRING)
+        self.v4_struct = struct.Struct(V4_STRUCT_STRING)
+        self.v3_struct = struct.Struct(V3_STRUCT_STRING)
 
 
     @staticmethod
@@ -164,6 +167,8 @@ class ChunkParser:
             uint8 rule50_count (1 byte)
             uint8 move_count (1 byte)
             int8 result (1 byte)
+            float32 root_q (4 bytes)
+            float32 best_q (4 bytes)
         """
         (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q) = self.v4_struct.unpack(content)
         # Enforce move_count to 0
@@ -199,13 +204,17 @@ class ChunkParser:
         """
         Randomly sample through the v4 chunk data and select records
         """
-        if chunkdata[0:4] == VERSION:
+        if chunkdata[0:4] in {V4_VERSION, V3_VERSION}:
             for i in range(0, len(chunkdata), self.v4_struct.size):
                 if self.sample > 1:
                     # Downsample, using only 1/Nth of the items.
                     if random.randint(0, self.sample-1) != 0:
                         continue  # Skip this record.
-                yield chunkdata[i:i+self.v4_struct.size]
+                record = chunkdata[i:i+self.v4_struct.size]
+                if chunkdata[0:4] == V3_VERSION:
+                    # add 8 bytes of fake root_q and best_q to match V4 format
+                    chunkdata += 8 * b'\x00'
+                yield record
 
 
     def task(self, chunkdatasrc, writer):
@@ -231,7 +240,7 @@ class ChunkParser:
         Read v4 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v4_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
@@ -292,7 +301,7 @@ class ChunkParser:
 # Tests to check that records parse correctly
 class ChunkParserTest(unittest.TestCase):
     def setUp(self):
-        self.v4_struct = struct.Struct(STRUCT_STRING)
+        self.v4_struct = struct.Struct(V4_STRUCT_STRING)
 
     def generate_fake_pos(self):
         """
@@ -322,7 +331,7 @@ class ChunkParserTest(unittest.TestCase):
             pl.append(np.packbits(plane))
         pl = np.array(pl).flatten().tobytes()
         pi = probs.tobytes()
-        return self.v4_struct.pack(VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner)
+        return self.v4_struct.pack(V4_VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner)
 
 
     def test_structsize(self):
