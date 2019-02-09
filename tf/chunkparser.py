@@ -318,7 +318,7 @@ class ChunkParserTest(unittest.TestCase):
     def generate_fake_pos(self):
         """
         Generate a random game position.
-        Result is ([[64] * 104], [1]*5, [1858], [1])
+        Result is ([[64] * 104], [1]*5, [1858], [1], [1])
         """
         # 0. 104 binary planes of length 64
         planes = [np.random.randint(2, size=64).tolist() for plane in range(104)]
@@ -334,16 +334,20 @@ class ChunkParserTest(unittest.TestCase):
 
         # 3. And a winner: 1, 0, -1
         winner = np.random.randint(3) - 1
-        return (planes, integer, probs, winner)
+
+        # 4. evaluation after search
+        best_q = np.random.uniform(-1, 1)
+        return (planes, integer, probs, winner, best_q)
 
 
-    def v4_record(self, planes, i, probs, winner):
+    def v4_record(self, planes, i, probs, winner, best_q):
         pl = []
         for plane in planes:
             pl.append(np.packbits(plane))
         pl = np.array(pl).flatten().tobytes()
         pi = probs.tobytes()
-        return self.v4_struct.pack(V4_VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner)
+        root_q, root_d, best_d = 0.0, 0.0, 0.0
+        return self.v4_struct.pack(V4_VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner, root_q, best_q, root_d, best_d)
 
 
     def test_structsize(self):
@@ -372,16 +376,18 @@ class ChunkParserTest(unittest.TestCase):
         
         batch = ( np.reshape(np.frombuffer(data[0], dtype=np.float32), (batch_size, 112, 64)),
                   np.reshape(np.frombuffer(data[1], dtype=np.int32), (batch_size, 1858)),
-                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 1)) )
+                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 1)),
+                  np.reshape(np.frombuffer(data[3], dtype=np.float32), (batch_size, 1)) )
 
         fltplanes = truth[1].astype(np.float32)
         fltplanes[5] /= 99
         for i in range(batch_size):
-            data = (batch[0][i][:104], np.array([batch[0][i][j][0] for j in range(104,111)]), batch[1][i], batch[2][i])
+            data = (batch[0][i][:104], np.array([batch[0][i][j][0] for j in range(104,111)]), batch[1][i], batch[2][i], batch[3][i])
             self.assertTrue((data[0] == truth[0]).all())
             self.assertTrue((data[1] == fltplanes).all())
             self.assertTrue((data[2] == truth[2]).all())
             self.assertEqual(data[3][0], truth[3])
+            self.assertEqual(data[4], truth[4])
             
         parser.shutdown()
 
@@ -409,16 +415,18 @@ class ChunkParserTest(unittest.TestCase):
         probs = np.frombuffer(data[1], dtype=np.float32, count=1858*batch_size)
         probs = probs.reshape(batch_size, 1858)
         winner = np.frombuffer(data[2], dtype=np.float32, count=1*batch_size)
+        best_q = np.frombuffer(data[3], dtype=np.float32, count=1*batch_size)
 
         # Pass it through tensorflow
         with tf.Session() as sess:
-            graph = ChunkParser.parse_function(data[0], data[1], data[2])
-            tf_planes, tf_probs, tf_winner = sess.run(graph)
+            graph = ChunkParser.parse_function(data[0], data[1], data[2], data[3])
+            tf_planes, tf_probs, tf_winner, tf_q = sess.run(graph)
 
             for i in range(batch_size):
                 self.assertTrue((probs[i] == tf_probs[i]).all())
                 self.assertTrue((planes[i] == tf_planes[i]).all())
                 self.assertTrue((winner[i] == tf_winner[i]).all())
+                self.assertTrue((best_q[i] == tf_q[i]).all())
 
         parser.shutdown()
 
