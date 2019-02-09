@@ -115,7 +115,7 @@ class ChunkParser:
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
 
-        V3 Format (8276 bytes total)
+        V3 Format (8292 bytes total)
             int32 version (4 bytes)
             1858 float32 probabilities (7432 bytes)  (removed 66*4 = 264 bytes unused under-promotions)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)  (no rep2 plane)
@@ -158,7 +158,7 @@ class ChunkParser:
         """
         Unpack a v4 binary record to 4-tuple (state, policy pi, result, q)
 
-        v4 struct format is (8280 bytes total)
+        v4 struct format is (8292 bytes total)
             int32 version (4 bytes)
             1858 float32 probabilities (7432 bytes)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)
@@ -350,7 +350,7 @@ class ChunkParserTest(unittest.TestCase):
         """
         Test struct size
         """
-        self.assertEqual(self.v4_struct.size, 8280)
+        self.assertEqual(self.v4_struct.size, 8292)
 
 
     def test_parsing(self):
