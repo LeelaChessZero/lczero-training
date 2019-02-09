@@ -11,12 +11,13 @@ LC0_MINOR = 21
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
+
 class Net:
     def __init__(self,
-            net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
-            input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
-            value=pb.NetworkFormat.VALUE_CLASSICAL,
-            policy=pb.NetworkFormat.POLICY_CLASSICAL):
+                 net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
+                 input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
+                 value=pb.NetworkFormat.VALUE_CLASSICAL,
+                 policy=pb.NetworkFormat.POLICY_CLASSICAL):
 
         if net == pb.NetworkFormat.NETWORK_SE:
             net = pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
@@ -46,20 +47,18 @@ class Net:
     def set_valueformat(self, value):
         self.pb.format.network_format.value = value
 
-        # OutputFormat is for search to know which kind of
-        # value the net returns
+        # OutputFormat is for search to know which kind of value the net returns.
         if value == pb.NetworkFormat.VALUE_WDL:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_WDL
         else:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
-
 
     def get_weight_amounts(self):
         value_weights = 8
         policy_weights = 6
         head_weights = value_weights + policy_weights
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
-            # Batch norm gammas in head convolutions
+            # Batch norm gammas in head convolutions.
             head_weights += 2
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
             return {"input": 5, "residual": 14, "head": head_weights}
@@ -71,14 +70,14 @@ class Net:
         params = np.array(weights.pop(), dtype=np.float32)
         layer.min_val = 0 if len(params) == 1 else float(np.min(params))
         layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else float(np.max(params))
-        if abs(layer.max_val - layer.min_val) < 1e-9:
+        if layer.max_val == layer.min_val:
+            # Avoid division by zero if max == min.
             params = (params - layer.min_val)
         else:
             params = (params - layer.min_val) / (layer.max_val - layer.min_val)
         params *= 0xffff
         params = np.round(params)
         layer.params = params.astype(np.uint16).tobytes()
-
 
     def fill_conv_block(self, convblock, weights, gammas):
         """Normalize and populate 16bit convblock in protobuf"""
@@ -105,13 +104,11 @@ class Net:
         self.fill_layer(se_unit.b1, weights)
         self.fill_layer(se_unit.w1, weights)
 
-
     def denorm_layer(self, layer, weights):
         """Denormalize a layer from protobuf"""
         params = np.frombuffer(layer.params, np.uint16).astype(np.float32)
         params /= 0xffff
         weights.insert(0, params * (layer.max_val - layer.min_val) + layer.min_val)
-
 
     def denorm_conv_block(self, convblock, weights):
         """Denormalize a convblock from protobuf"""
@@ -145,7 +142,6 @@ class Net:
         self.denorm_layer(convblock.b1, weights)
         self.denorm_layer(convblock.w1, weights)
 
-
     def save_txt(self, filename):
         """Save weights as txt file"""
         weights = self.get_weights()
@@ -170,7 +166,6 @@ class Net:
         size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
 
-
     def save_proto(self, filename):
         """Save weights gzipped protobuf file"""
         if len(filename.split('.')) == 1:
@@ -182,7 +177,6 @@ class Net:
 
         size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
-
 
     def get_weights(self):
         """Returns the weights as floats per layer"""
@@ -212,11 +206,9 @@ class Net:
 
         return self.weights
 
-
     def filters(self):
         w = self.get_weights()
         return len(w[1])
-
 
     def blocks(self):
         w = self.get_weights()
@@ -229,11 +221,9 @@ class Net:
 
         return blocks // ws['residual']
 
-
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
-
 
     def parse_txt(self, filename):
         weights = []
@@ -254,7 +244,6 @@ class Net:
             self.set_policyformat(pb.NetworkFormat.POLICY_CONVOLUTION)
 
         self.fill_net(weights)
-
 
     def fill_net(self, weights):
         self.weights = []
@@ -323,15 +312,15 @@ def main(argv):
             assert argv.output.endswith('.txt.gz')
         net.save_txt(argv.output)
     else:
-        print('Unable to detect the network format. '\
+        print('Unable to detect the network format. '
               'Filename should end in ".txt" or ".pb.gz"')
 
 
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description=\
-    'Convert network textfile to proto.')
+    argparser = argparse.ArgumentParser(
+        description='Convert network textfile to proto.')
     argparser.add_argument('-i', '--input', type=str,
-        help='input network weight text file')
+                           help='input network weight text file')
     argparser.add_argument('-o', '--output', type=str,
-        help='output filepath without extension')
+                           help='output filepath without extension')
     main(argparser.parse_args())
