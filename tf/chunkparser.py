@@ -222,7 +222,7 @@ class ChunkParser:
                 # Downsample, using only 1/Nth of the items.
                 if random.randint(0, self.sample-1) != 0:
                     continue  # Skip this record.
-            record = chunkdata[i:i+self.v4_struct.size]
+            record = chunkdata[i:i+record_size]
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 chunkdata += 16 * b'\x00'
