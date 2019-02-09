@@ -2121,7 +2121,7 @@ def main(args):
                 ply = 1
                 for t1 in gen1:
                     ts = TrainingStep(2)
-                    kts.display_v2_or_v3(ply, t1)
+                    ts.display_v2_or_v3(ply, t1)
                     ply += 1
                     # TODO maybe detect new games and reset ply count
                     # It's informational only
