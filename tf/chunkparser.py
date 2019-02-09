@@ -225,7 +225,7 @@ class ChunkParser:
             record = chunkdata[i:i+record_size]
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
-                chunkdata += 16 * b'\x00'
+                record += 16 * b'\x00'
             yield record
 
 
