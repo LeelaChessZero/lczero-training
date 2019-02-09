@@ -26,8 +26,8 @@ import struct
 import tensorflow as tf
 import unittest
 
-V3_VERSION = struct.pack('i', 3)
 V4_VERSION = struct.pack('i', 4)
+V3_VERSION = struct.pack('i', 3)
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
