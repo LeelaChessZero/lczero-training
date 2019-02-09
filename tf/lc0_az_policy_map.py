@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+import sys
 import numpy as np
 from policy_index import policy_index
 
@@ -41,7 +43,7 @@ def knight_move(start, direction, steps):
         return None
     return index_to_position(i)
 
-def make_map():
+def make_map(kind='matrix'):
     # 56 planes of queen moves
     moves = []
     for direction in ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
@@ -87,17 +89,68 @@ def make_map():
             raise ValueError('Missing move: {}'.format(m))
 
     az_to_lc0 = np.zeros((80*8*8, len(policy_index)), dtype=np.float32)
+    indices = []
     legal_moves = 0
     for e, m in enumerate(moves):
         if m == 'illegal':
+            indices.append(-1)
             continue
         legal_moves += 1
         # Check for missing moves
         if m not in policy_index:
             raise ValueError('Missing move: {}'.format(m))
         i = policy_index.index(m)
+        indices.append(i)
         az_to_lc0[e][i] = 1
 
     assert legal_moves == len(policy_index)
     assert np.sum(az_to_lc0) == legal_moves
-    return az_to_lc0
+    for e in range(80*8*8):
+        for i in range(len(policy_index)):
+            pass
+    if kind == 'matrix':
+        return az_to_lc0
+    elif kind == 'index':
+        return indices
+
+if __name__ == "__main__":
+    # Generate policy map include file for lc0
+    if len(sys.argv) != 2:
+        raise ValueError("Output filename is needed as a command line argument")
+
+    az_to_lc0 = np.ravel(make_map('index'))
+    header = \
+"""/*
+ This file is part of Leela Chess Zero.
+ Copyright (C) 2019 The LCZero Authors
+
+ Leela Chess is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ Leela Chess is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with Leela Chess.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+namespace lczero {
+"""
+    line_length = 12
+    with open(sys.argv[1], 'w') as f:
+        f.write(header+'\n')
+        f.write('const short kConvPolicyMap[] = {\\\n')
+        for e, i in enumerate(az_to_lc0):
+            if e % line_length == 0 and e > 0:
+                f.write('\n')
+            f.write(str(i).rjust(5))
+            if e != len(az_to_lc0)-1:
+                f.write(',')
+        f.write('};\n\n')
+        f.write('}  // namespace lczero')
