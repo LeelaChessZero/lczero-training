@@ -26,8 +26,10 @@ import struct
 import tensorflow as tf
 import unittest
 
-VERSION = struct.pack('i', 3)
-STRUCT_STRING = '4s7432s832sBBBBBBBb'
+V4_VERSION = struct.pack('i', 4)
+V3_VERSION = struct.pack('i', 3)
+V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
+V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
 # Interface for a chunk data source.
 class ChunkDataSrc:
@@ -57,8 +59,8 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v3 format where each record
-        consists of (state, policy, result)
+        chunkdata: type Bytes. Multiple records of v4 format where each record
+        consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
         used to pass data from the workers to the parent. Exists because
@@ -113,7 +115,7 @@ class ChunkParser:
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
 
-        V3 Format (8276 bytes total)
+        V4 Format (8292 bytes total)
             int32 version (4 bytes)
             1858 float32 probabilities (7432 bytes)  (removed 66*4 = 264 bytes unused under-promotions)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)  (no rep2 plane)
@@ -125,31 +127,38 @@ class ChunkParser:
             uint8 rule50_count (1 byte)
             uint8 move_count (1 byte)
             int8 result (1 byte)
+            float32 root_q (4 bytes)
+            float32 best_q (4 bytes)
+            float32 root_d (4 bytes)
+            float32 best_d (4 bytes)
         """
-        self.v3_struct = struct.Struct(STRUCT_STRING)
+        self.v4_struct = struct.Struct(V4_STRUCT_STRING)
+        self.v3_struct = struct.Struct(V3_STRUCT_STRING)
 
 
     @staticmethod
-    def parse_function(planes, probs, winner):
+    def parse_function(planes, probs, winner, q):
         """
         Convert unpacked record batches to tensors for tensorflow training
         """
         planes = tf.decode_raw(planes, tf.float32)
         probs = tf.decode_raw(probs, tf.float32)
         winner = tf.decode_raw(winner, tf.float32)
+        q = tf.decode_raw(q, tf.float32)
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
         winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 1))
+        q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 1))
 
-        return (planes, probs, winner)
+        return (planes, probs, winner, q)
 
 
-    def convert_v3_to_tuple(self, content):
+    def convert_v4_to_tuple(self, content):
         """
-        Unpack a v3 binary record to 3-tuple (state, policy pi, result)
+        Unpack a v4 binary record to 4-tuple (state, policy pi, result, q)
 
-        v3 struct format is (8276 bytes total)
+        v4 struct format is (8292 bytes total)
             int32 version (4 bytes)
             1858 float32 probabilities (7432 bytes)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)
@@ -161,8 +170,12 @@ class ChunkParser:
             uint8 rule50_count (1 byte)
             uint8 move_count (1 byte)
             int8 result (1 byte)
+            float32 root_q (4 bytes)
+            float32 best_q (4 bytes)
+            float32 root_d (4 bytes)
+            float32 best_d (4 bytes)
         """
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner) = self.v3_struct.unpack(content)
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
         # Enforce move_count to 0
         move_count = 0
 
@@ -187,26 +200,39 @@ class ChunkParser:
         assert winner == 1.0 or winner == -1.0 or winner == 0.0
         winner = struct.pack('f', winner)
 
-        return (planes, probs, winner)
+        best_q = struct.pack('f', best_q)
+
+        return (planes, probs, winner, best_q)
 
 
     def sample_record(self, chunkdata):
         """
-        Randomly sample through the v3 chunk data and select records
+        Randomly sample through the v4 chunk data and select records
         """
-        if chunkdata[0:4] == VERSION:
-            for i in range(0, len(chunkdata), self.v3_struct.size):
-                if self.sample > 1:
-                    # Downsample, using only 1/Nth of the items.
-                    if random.randint(0, self.sample-1) != 0:
-                        continue  # Skip this record.
-                yield chunkdata[i:i+self.v3_struct.size]
+        version = chunkdata[0:4]
+        if version == V4_VERSION:
+            record_size = self.v4_struct.size
+        elif version == V3_VERSION:
+            record_size = self.v3_struct.size
+        else:
+            return
+
+        for i in range(0, len(chunkdata), record_size):
+            if self.sample > 1:
+                # Downsample, using only 1/Nth of the items.
+                if random.randint(0, self.sample-1) != 0:
+                    continue  # Skip this record.
+            record = chunkdata[i:i+record_size]
+            if version == V3_VERSION:
+                # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
+                record += 16 * b'\x00'
+            yield record
 
 
     def task(self, chunkdatasrc, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
-        sending v3 data through pipe back to main process.
+        sending v4 data through pipe back to main process.
         """
         self.init_structs()
         while True:
@@ -221,12 +247,12 @@ class ChunkParser:
                 writer.send_bytes(item)
 
 
-    def v3_gen(self):
+    def v4_gen(self):
         """
-        Read v3 records from child workers, shuffle, and yield
+        Read v4 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v3_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v4_struct.size, self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
@@ -249,11 +275,11 @@ class ChunkParser:
 
     def tuple_gen(self, gen):
         """
-        Take a generator producing v3 records and convert them to tuples.
+        Take a generator producing v4 records and convert them to tuples.
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v3_to_tuple(r)
+            yield self.convert_v4_to_tuple(r)
 
 
     def batch_gen(self, gen):
@@ -268,15 +294,16 @@ class ChunkParser:
                 return
             yield ( b''.join([x[0] for x in s]),
                     b''.join([x[1] for x in s]),
-                    b''.join([x[2] for x in s]) )
+                    b''.join([x[2] for x in s]),
+                    b''.join([x[3] for x in s]))
 
 
     def parse(self):
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v3_gen()        # read from workers
-        gen = self.tuple_gen(gen)  # convert v3->tuple
+        gen = self.v4_gen()        # read from workers
+        gen = self.tuple_gen(gen)  # convert v4->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
             yield b
@@ -286,12 +313,12 @@ class ChunkParser:
 # Tests to check that records parse correctly
 class ChunkParserTest(unittest.TestCase):
     def setUp(self):
-        self.v3_struct = struct.Struct(STRUCT_STRING)
+        self.v4_struct = struct.Struct(V4_STRUCT_STRING)
 
     def generate_fake_pos(self):
         """
         Generate a random game position.
-        Result is ([[64] * 104], [1]*5, [1858], [1])
+        Result is ([[64] * 104], [1]*5, [1858], [1], [1])
         """
         # 0. 104 binary planes of length 64
         planes = [np.random.randint(2, size=64).tolist() for plane in range(104)]
@@ -307,23 +334,27 @@ class ChunkParserTest(unittest.TestCase):
 
         # 3. And a winner: 1, 0, -1
         winner = np.random.randint(3) - 1
-        return (planes, integer, probs, winner)
+
+        # 4. evaluation after search
+        best_q = np.random.uniform(-1, 1)
+        return (planes, integer, probs, winner, best_q)
 
 
-    def v3_record(self, planes, i, probs, winner):
+    def v4_record(self, planes, i, probs, winner, best_q):
         pl = []
         for plane in planes:
             pl.append(np.packbits(plane))
         pl = np.array(pl).flatten().tobytes()
         pi = probs.tobytes()
-        return self.v3_struct.pack(VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner)
+        root_q, root_d, best_d = 0.0, 0.0, 0.0
+        return self.v4_struct.pack(V4_VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner, root_q, best_q, root_d, best_d)
 
 
     def test_structsize(self):
         """
         Test struct size
         """
-        self.assertEqual(self.v3_struct.size, 8276)
+        self.assertEqual(self.v4_struct.size, 8292)
 
 
     def test_parsing(self):
@@ -336,7 +367,7 @@ class ChunkParserTest(unittest.TestCase):
         for i in range(batch_size):
             record = b''
             for j in range(2):
-                record += self.v3_record(*truth)
+                record += self.v4_record(*truth)
             records.append(record)
 
         parser = ChunkParser(ChunkDataSrc(records), shuffle_size=1, workers=1, batch_size=batch_size)
@@ -345,16 +376,18 @@ class ChunkParserTest(unittest.TestCase):
         
         batch = ( np.reshape(np.frombuffer(data[0], dtype=np.float32), (batch_size, 112, 64)),
                   np.reshape(np.frombuffer(data[1], dtype=np.int32), (batch_size, 1858)),
-                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 1)) )
+                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 1)),
+                  np.reshape(np.frombuffer(data[3], dtype=np.float32), (batch_size, 1)) )
 
         fltplanes = truth[1].astype(np.float32)
         fltplanes[5] /= 99
         for i in range(batch_size):
-            data = (batch[0][i][:104], np.array([batch[0][i][j][0] for j in range(104,111)]), batch[1][i], batch[2][i])
+            data = (batch[0][i][:104], np.array([batch[0][i][j][0] for j in range(104,111)]), batch[1][i], batch[2][i], batch[3][i])
             self.assertTrue((data[0] == truth[0]).all())
             self.assertTrue((data[1] == fltplanes).all())
             self.assertTrue((data[2] == truth[2]).all())
             self.assertEqual(data[3][0], truth[3])
+            self.assertEqual(data[4], truth[4])
             
         parser.shutdown()
 
@@ -370,7 +403,7 @@ class ChunkParserTest(unittest.TestCase):
         for i in range(batch_size):
             record = b''
             for j in range(2):
-                record += self.v3_record(*truth)
+                record += self.v4_record(*truth)
             records.append(record)
 
         parser = ChunkParser(ChunkDataSrc(records), shuffle_size=1, workers=1, batch_size=batch_size)
@@ -382,16 +415,18 @@ class ChunkParserTest(unittest.TestCase):
         probs = np.frombuffer(data[1], dtype=np.float32, count=1858*batch_size)
         probs = probs.reshape(batch_size, 1858)
         winner = np.frombuffer(data[2], dtype=np.float32, count=1*batch_size)
+        best_q = np.frombuffer(data[3], dtype=np.float32, count=1*batch_size)
 
         # Pass it through tensorflow
         with tf.Session() as sess:
-            graph = ChunkParser.parse_function(data[0], data[1], data[2])
-            tf_planes, tf_probs, tf_winner = sess.run(graph)
+            graph = ChunkParser.parse_function(data[0], data[1], data[2], data[3])
+            tf_planes, tf_probs, tf_winner, tf_q = sess.run(graph)
 
             for i in range(batch_size):
                 self.assertTrue((probs[i] == tf_probs[i]).all())
                 self.assertTrue((planes[i] == tf_planes[i]).all())
                 self.assertTrue((winner[i] == tf_winner[i]).all())
+                self.assertTrue((best_q[i] == tf_q[i]).all())
 
         parser.shutdown()
 

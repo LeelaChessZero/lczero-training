@@ -52,9 +52,11 @@ from collections import defaultdict
 # Also note "0002" is actually b'\0x30\0x30\0x30\0x32' (or maybe reversed?)
 # so it doesn't collide with VERSION2.
 #
-VERSION3 = chunkparser.VERSION
+VERSION3 = chunkparser.V3_VERSION
+VERSION4 = chunkparser.V4_VERSION
 
 V3_BYTES = 8276
+V4_BYTES = 8292
 
 # Us   -- uppercase
 # Them -- lowercase
@@ -1969,10 +1971,11 @@ class TrainingStep:
         self.us_black = 0
         self.rule50_count = 0
         self.winner = None
+        self.q = None
 
     def init_structs(self):
-        self.v3_struct = self.parser.v3_struct
-        self.this_struct = self.v3_struct
+        self.v4_struct = self.parser.v4_struct
+        self.this_struct = self.v4_struct
 
     def init_move_map(self):
         self.new_white_move_map = defaultdict(lambda:-1)
@@ -2018,6 +2021,8 @@ class TrainingStep:
             s += " draw\n"
         else:
             raise Exception("Invalid winner: {}".format(self.winner))
+        s += "Root Q = {} (diff to result: {}) \n".format(self.root_q, abs(self.winner - self.root_q))
+        s += "Best Q = {} (diff to result: {}) \n".format(self.best_q, abs(self.winner - self.best_q))
         if self.us_black:
             s += "(Note the black pieces are CAPS, black moves up, but A1 is in lower left)\n"
         s += "rule50_count {} b_ooo b_oo, w_ooo, w_oo {} {} {} {}\n".format(
@@ -2038,7 +2043,8 @@ class TrainingStep:
         top_moves = {}
         for idx, prob in enumerate(self.probs):
             # Include all moves with at least 1 visit.
-            if prob > 0.0:
+            condition = prob > 0 if self.version == 3 else prob >= 0
+            if condition:
                 top_moves[idx] = prob
             sum += prob
         for idx, prob in sorted(top_moves.items(), key=lambda x:-x[1]):
@@ -2061,8 +2067,8 @@ class TrainingStep:
         # This causes a vertical flip
         return "".join([plane[x:x+2] for x in reversed(range(0, len(plane), 2))])
 
-    def display_v2_or_v3(self, ply, content):
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner) = self.this_struct.unpack(content)
+    def display_v4(self, ply, content):
+        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, us_black, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.this_struct.unpack(content)
         assert self.version == int.from_bytes(ver, byteorder="little")
         # Enforce move_count to 0
         move_count = 0
@@ -2082,6 +2088,8 @@ class TrainingStep:
         self.us_black = us_black
         self.rule50_count = rule50_count
         self.winner = winner
+        self.root_q = root_q
+        self.best_q = best_q
         for idx in range(0, len(probs), 4):
             self.probs.append(struct.unpack("f", probs[idx:idx+4])[0])
         print("ply {} move {} (Not actually part of training data)".format(
@@ -2093,27 +2101,20 @@ def main(args):
         #print("Parsing {}".format(filename))
         with gzip.open(filename, 'rb') as f:
             chunkdata = f.read()
-            if chunkdata[0:4] == b'\1\0\0\0':
-                print("Invalid version")
-            elif chunkdata[0:4] == VERSION3:
-                #print("debug Version3")
-                for i in range(0, len(chunkdata), V3_BYTES):
-                    ts = TrainingStep(3)
-                    ts.display_v2_or_v3(i//V3_BYTES, chunkdata[i:i+V3_BYTES])
+            version = chunkdata[0:4]
+            if version in {VERSION4, VERSION3}:
+                if version == VERSION3:
+                    record_size = V3_BYTES
+                else:
+                    record_size = V4_BYTES
+                for i in range(0, len(chunkdata), record_size):
+                    ts = TrainingStep(4 if version == VERSION4 else 3)
+                    record = chunkdata[i:i+record_size]
+                    if chunkdata[0:4] == VERSION3:
+                        record += 16 * b'\x00'
+                    ts.display_v4(i//record_size, record)
             else:
-                parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([chunkdata]), workers=1)
-                gen1 = parser.convert_chunkdata_to_v2(chunkdata)
-                ply = 1
-                for t1 in gen1:
-                    ts = TrainingStep(2)
-                    ts.display_v2_or_v3(ply, t1)
-                    ply += 1
-                    # TODO maybe detect new games and reset ply count
-                    # It's informational only
-                for _ in parser.parse():
-                    # TODO: What is happening here?
-                    #print("debug drain", len(_))
-                    pass
+                print("Invalid version")
 
 if __name__ == '__main__':
     usage_str = """
