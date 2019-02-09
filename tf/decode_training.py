@@ -2101,8 +2101,8 @@ def main(args):
         #print("Parsing {}".format(filename))
         with gzip.open(filename, 'rb') as f:
             chunkdata = f.read()
-            if chunkdata[0:4] in {VERSION4, VERSION3}:
-                version = chunkdata[0:4]
+            version = chunkdata[0:4]
+            if version in {VERSION4, VERSION3}:
                 if version == VERSION3:
                     record_size = V3_BYTES
                 else:
