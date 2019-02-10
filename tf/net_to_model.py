@@ -63,7 +63,8 @@ print(yaml.dump(cfg, default_flow_style=False))
 x = [
     tf.placeholder(tf.float32, [None, 112, 8*8]),
     tf.placeholder(tf.float32, [None, 1858]),
-    tf.placeholder(tf.float32, [None, 1])
+    tf.placeholder(tf.float32, [None, 1]),
+    tf.placeholder(tf.float32, [None, 1]),
     ]
 
 tfp = tfprocess.TFProcess(cfg)
