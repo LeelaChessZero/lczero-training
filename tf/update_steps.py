@@ -19,8 +19,8 @@ def main(cmd):
     x = [
         tf.placeholder(tf.float32, [None, 112, 8*8]),
         tf.placeholder(tf.float32, [None, 1858]),
-        tf.placeholder(tf.float32, [None, 1]),
-        tf.placeholder(tf.float32, [None, 1]),
+        tf.placeholder(tf.float32, [None, 3]),
+        tf.placeholder(tf.float32, [None, 3]),
     ]
 
     tfprocess = TFProcess(cfg)

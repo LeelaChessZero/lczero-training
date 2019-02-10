@@ -148,8 +148,8 @@ class ChunkParser:
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
-        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 1))
-        q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 1))
+        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
+        q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 3))
 
         return (planes, probs, winner, q)
 
@@ -198,9 +198,11 @@ class ChunkParser:
         assert len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)
         winner = float(winner)
         assert winner == 1.0 or winner == -1.0 or winner == 0.0
-        winner = struct.pack('f', winner)
+        winner = struct.pack('fff', winner == 1.0, winner == 0.0, winner == -1.0)
 
-        best_q = struct.pack('f', best_q)
+        best_q_w = 0.5 * (1.0 - best_d + best_q)
+        best_q_l = 0.5 * (1.0 - best_d - best_q)
+        best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q)
 
@@ -337,16 +339,17 @@ class ChunkParserTest(unittest.TestCase):
 
         # 4. evaluation after search
         best_q = np.random.uniform(-1, 1)
-        return (planes, integer, probs, winner, best_q)
+        best_d = np.random.uniform(0, 1 - np.abs(best_q))
+        return (planes, integer, probs, winner, best_q, best_d)
 
 
-    def v4_record(self, planes, i, probs, winner, best_q):
+    def v4_record(self, planes, i, probs, winner, best_q, best_d):
         pl = []
         for plane in planes:
             pl.append(np.packbits(plane))
         pl = np.array(pl).flatten().tobytes()
         pi = probs.tobytes()
-        root_q, root_d, best_d = 0.0, 0.0, 0.0
+        root_q, root_d = 0.0, 0.0
         return self.v4_struct.pack(V4_VERSION, pi, pl, i[0], i[1], i[2], i[3], i[4], i[5], i[6], winner, root_q, best_q, root_d, best_d)
 
 
@@ -376,8 +379,8 @@ class ChunkParserTest(unittest.TestCase):
         
         batch = ( np.reshape(np.frombuffer(data[0], dtype=np.float32), (batch_size, 112, 64)),
                   np.reshape(np.frombuffer(data[1], dtype=np.int32), (batch_size, 1858)),
-                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 1)),
-                  np.reshape(np.frombuffer(data[3], dtype=np.float32), (batch_size, 1)) )
+                  np.reshape(np.frombuffer(data[2], dtype=np.float32), (batch_size, 3)),
+                  np.reshape(np.frombuffer(data[3], dtype=np.float32), (batch_size, 3)) )
 
         fltplanes = truth[1].astype(np.float32)
         fltplanes[5] /= 99
@@ -386,9 +389,11 @@ class ChunkParserTest(unittest.TestCase):
             self.assertTrue((data[0] == truth[0]).all())
             self.assertTrue((data[1] == fltplanes).all())
             self.assertTrue((data[2] == truth[2]).all())
-            self.assertEqual(data[3][0], truth[3])
-            self.assertEqual(data[4], truth[4])
-            
+            scalar_win = data[3][0] - data[3][-1]
+            self.assertTrue(np.abs(scalar_win - truth[3]) < 1e-6)
+            scalar_q = data[4][0] - data[4][-1]
+            self.assertTrue(np.abs(scalar_q - truth[4]) < 1e-6)
+
         parser.shutdown()
 
 
@@ -414,8 +419,10 @@ class ChunkParserTest(unittest.TestCase):
         planes = planes.reshape(batch_size, 112, 8*8)
         probs = np.frombuffer(data[1], dtype=np.float32, count=1858*batch_size)
         probs = probs.reshape(batch_size, 1858)
-        winner = np.frombuffer(data[2], dtype=np.float32, count=1*batch_size)
-        best_q = np.frombuffer(data[3], dtype=np.float32, count=1*batch_size)
+        winner = np.frombuffer(data[2], dtype=np.float32, count=3*batch_size)
+        winner = winner.reshape(batch_size, 3)
+        best_q = np.frombuffer(data[3], dtype=np.float32, count=3*batch_size)
+        best_q = best_q.reshape(batch_size, 3)
 
         # Pass it through tensorflow
         with tf.Session() as sess:
