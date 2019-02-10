@@ -154,8 +154,12 @@ class TFProcess:
         self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
         self.y_ = next_batch[1] # tf.placeholder(tf.float32, [None, 1858])
         self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 3])
+        self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 3])
         self.batch_norm_count = 0
         self.y_conv, self.z_conv = self.construct_net(self.x)
+
+        # y_ has -1 on illegal moves, flush them to 0 first
+        self.y_ = tf.nn.relu(self.y_)
 
         # Calculate loss on policy head
         policy_cross_entropy = \
@@ -163,23 +167,27 @@ class TFProcess:
                                                     logits=self.y_conv)
         self.policy_loss = tf.reduce_mean(policy_cross_entropy)
 
+        q_ratio = self.cfg['training'].get('q_ratio', 0)
+        assert 0 <= q_ratio <= 1
+        target = self.q_ * q_ratio + self.z_ * (1 - q_ratio)
+
         # Linear conversion to scalar to compute MSE with, for comparison to old values
         wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
-        scalar_z = tf.matmul(self.z_, wdl)
+        scalar_target = tf.matmul(target, wdl)
 
         # Loss on value head
         if self.wdl:
             value_cross_entropy = \
-                tf.nn.softmax_cross_entropy_with_logits(labels=self.z_,
+                tf.nn.softmax_cross_entropy_with_logits(labels=target,
                                                     logits=self.z_conv)
             self.value_loss = tf.reduce_mean(value_cross_entropy)
             scalar_z_conv = tf.matmul(tf.nn.softmax(self.z_conv), wdl)
             self.mse_loss = \
-                tf.reduce_mean(tf.squared_difference(scalar_z, scalar_z_conv))
+                tf.reduce_mean(tf.squared_difference(scalar_target, scalar_z_conv))
         else:
             self.value_loss = tf.constant(0)
             self.mse_loss = \
-                tf.reduce_mean(tf.squared_difference(scalar_z, self.z_conv))
+                tf.reduce_mean(tf.squared_difference(scalar_target, self.z_conv))
 
         # Regularizer
         regularizer = tf.contrib.layers.l2_regularizer(scale=0.0001)
