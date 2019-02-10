@@ -59,29 +59,6 @@ def conv2d(x, W):
     return tf.nn.conv2d(x, W, data_format='NCHW',
                         strides=[1, 1, 1, 1], padding='SAME')
 
-# Restore session from checkpoint. It silently ignore mis-matches
-# between the checkpoint and the graph. Specifically
-# 1. values in the checkpoint for which there is no corresponding variable.
-# 2. variables in the graph for which there is no specified value in the
-#    checkpoint.
-# 3. values where the checkpoint shape differs from the variable shape.
-# (variables without a value in the checkpoint are left at their default
-# initialized value)
-def optimistic_restore(session, save_file, graph=tf.get_default_graph()):
-    reader = tf.train.NewCheckpointReader(save_file)
-    saved_shapes = reader.get_variable_to_shape_map()
-    var_names = sorted(
-        [(var.name, var.name.split(':')[0]) for var in tf.global_variables()
-         if var.name.split(':')[0] in saved_shapes])
-    restore_vars = []
-    for var_name, saved_var_name in var_names:
-        curr_var = graph.get_tensor_by_name(var_name)
-        var_shape = curr_var.get_shape().as_list()
-        if var_shape == saved_shapes[saved_var_name]:
-            restore_vars.append(curr_var)
-    opt_saver = tf.train.Saver(restore_vars)
-    opt_saver.restore(session, save_file)
-
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -329,7 +306,7 @@ class TFProcess:
 
     def restore(self, file):
         print("Restoring from {0}".format(file))
-        optimistic_restore(self.session, file)
+        self.saver.restore(self.session, file)
 
     def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
@@ -853,5 +830,7 @@ class TFProcess:
         self.weights.append(W_fc3)
         self.weights.append(b_fc3)
         h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
+        if not self.wdl:
+            h_fc3 = tf.nn.tanh(h_fc3)
 
         return h_fc1, h_fc3
