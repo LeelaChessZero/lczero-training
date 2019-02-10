@@ -177,6 +177,7 @@ class TFProcess:
             self.mse_loss = \
                 tf.reduce_mean(tf.squared_difference(scalar_z, scalar_z_conv))
         else:
+            self.value_loss = tf.constant(0)
             self.mse_loss = \
                 tf.reduce_mean(tf.squared_difference(scalar_z, self.z_conv))
 
@@ -383,7 +384,8 @@ class TFProcess:
             # get comparable values.
             mse_loss /= 4.0
             self.avg_policy_loss.append(policy_loss)
-            self.avg_value_loss.append(value_loss)
+            if self.wdl:
+                self.avg_value_loss.append(value_loss)
             self.avg_mse_loss.append(mse_loss)
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
@@ -477,16 +479,18 @@ class TFProcess:
                 feed_dict={self.training: False,
                            self.handle: self.test_handle})
             sum_policy_accuracy += test_policy_accuracy
-            sum_value_accuracy += test_value_accuracy
             sum_mse += test_mse
             sum_policy += test_policy
-            sum_value += test_value
+            if self.wdl:
+                sum_value_accuracy += test_value_accuracy
+                sum_value += test_value
         sum_policy_accuracy /= test_batches
         sum_policy_accuracy *= 100
-        sum_value_accuracy /= test_batches
-        sum_value_accuracy *= 100
         sum_policy /= test_batches
         sum_value /= test_batches
+        if self.wdl:
+            sum_value_accuracy /= test_batches
+            sum_value_accuracy *= 100
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
         self.net.pb.training_params.learning_rate = self.lr
@@ -494,12 +498,18 @@ class TFProcess:
         self.net.pb.training_params.policy_loss = sum_policy
         # TODO store value and value accuracy in pb
         self.net.pb.training_params.accuracy = sum_policy_accuracy
-        test_summaries = tf.Summary(value=[
-            tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-            tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
-            tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-            tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
-            tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        if self.wdl:
+            test_summaries = tf.Summary(value=[
+                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
+                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
+                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        else:
+            test_summaries = tf.Summary(value=[
+                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         test_summaries = tf.summary.merge(
             [test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
