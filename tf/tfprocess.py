@@ -22,8 +22,11 @@ import random
 import tensorflow as tf
 import time
 import bisect
+import lc0_az_policy_map
+import proto.net_pb2 as pb
 
 from net import Net
+
 
 def weight_variable(shape, name=None):
     """Xavier initialization"""
@@ -34,7 +37,7 @@ def weight_variable(shape, name=None):
     else:
         fan_in = shape[0]
         fan_out = shape[1]
-    # truncated normal has lower stddev than a regular normal distribution, so need to correct for that 
+    # truncated normal has lower stddev than a regular normal distribution, so need to correct for that
     trunc_correction = np.sqrt(1.3)
     stddev = trunc_correction * np.sqrt(2.0 / (fan_in + fan_out))
     initial = tf.truncated_normal(shape, stddev=stddev)
@@ -45,9 +48,12 @@ def weight_variable(shape, name=None):
 # Bias weights for layers not followed by BatchNorm
 # We do not regularlize biases, so they are not
 # added to the regularlizer collection
+
+
 def bias_variable(shape, name=None):
     initial = tf.constant(0.0, shape=shape)
     return tf.Variable(initial, name=name)
+
 
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, data_format='NCHW',
@@ -57,13 +63,42 @@ class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
         self.net = Net()
-        self.root_dir = os.path.join(self.cfg['training']['path'], self.cfg['name'])
+        self.root_dir = os.path.join(
+            self.cfg['training']['path'], self.cfg['name'])
 
         # Network structure
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
+
+        policy_head = self.cfg['model'].get('policy', 'convolution')
+        value_head  = self.cfg['model'].get('value', 'wdl')
+
+        self.POLICY_HEAD = None
+        self.VALUE_HEAD = None
+
+        if policy_head == "classical":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
+        elif policy_head == "convolution":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_CONVOLUTION
+        else:
+            raise ValueError(
+                "Unknown policy head format: {}".format(policy_head))
+
+        self.net.set_policyformat(self.POLICY_HEAD)
+
+        if value_head == "classical":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_CLASSICAL
+            self.wdl = False
+        elif value_head == "wdl":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_WDL
+            self.wdl = True
+        else:
+            raise ValueError(
+                "Unknown value head format: {}".format(value_head))
+
+        self.net.set_valueformat(self.VALUE_HEAD)
 
         # For exporting
         self.weights = []
@@ -73,7 +108,8 @@ class TFProcess:
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
         self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
 
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90, allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90,
+                                    allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
         self.session = tf.Session(config=config)
 
@@ -94,8 +130,8 @@ class TFProcess:
     def init_net(self, next_batch):
         self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
         self.y_ = next_batch[1] # tf.placeholder(tf.float32, [None, 1858])
-        self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 1])
-        self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 1])
+        self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 3])
+        self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 3])
         self.batch_norm_count = 0
         self.y_conv, self.z_conv = self.construct_net(self.x)
 
@@ -108,17 +144,32 @@ class TFProcess:
             self.y_conv = tf.where(move_is_legal, self.y_conv, illegal_filler)
         # y_ still has -1 on illegal moves, flush them to 0
         self.y_ = tf.nn.relu(self.y_)
-        cross_entropy = \
+        policy_cross_entropy = \
             tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,
                                                     logits=self.y_conv)
-        self.policy_loss = tf.reduce_mean(cross_entropy)
+        self.policy_loss = tf.reduce_mean(policy_cross_entropy)
 
-        # Loss on value head
         q_ratio = self.cfg['training'].get('q_ratio', 0)
         assert 0 <= q_ratio <= 1
         target = self.q_ * q_ratio + self.z_ * (1 - q_ratio)
-        self.mse_loss = \
-            tf.reduce_mean(tf.squared_difference(target, self.z_conv))
+
+        # Linear conversion to scalar to compute MSE with, for comparison to old values
+        wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
+        scalar_target = tf.matmul(target, wdl)
+
+        # Loss on value head
+        if self.wdl:
+            value_cross_entropy = \
+                tf.nn.softmax_cross_entropy_with_logits(labels=target,
+                                                    logits=self.z_conv)
+            self.value_loss = tf.reduce_mean(value_cross_entropy)
+            scalar_z_conv = tf.matmul(tf.nn.softmax(self.z_conv), wdl)
+            self.mse_loss = \
+                tf.reduce_mean(tf.squared_difference(scalar_target, scalar_z_conv))
+        else:
+            self.value_loss = tf.constant(0)
+            self.mse_loss = \
+                tf.reduce_mean(tf.squared_difference(scalar_target, self.z_conv))
 
         # Regularizer
         regularizer = tf.contrib.layers.l2_regularizer(scale=0.0001)
@@ -130,7 +181,12 @@ class TFProcess:
         # want to reduce the factor in front of self.mse_loss here.
         pol_loss_w = self.cfg['training']['policy_loss_weight']
         val_loss_w = self.cfg['training']['value_loss_weight']
-        loss = pol_loss_w * self.policy_loss + val_loss_w * self.mse_loss + self.reg_term
+        if self.wdl:
+            value_loss = self.value_loss
+        else:
+            value_loss = self.mse_loss
+        loss = pol_loss_w * self.policy_loss + \
+            val_loss_w * value_loss + self.reg_term
 
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
@@ -162,25 +218,35 @@ class TFProcess:
             self.swa_load_op = tf.group(*load)
 
         # Accumulate (possibly multiple) gradient updates to simulate larger batch sizes than can be held in GPU memory.
-        gradient_accum = [tf.Variable(tf.zeros_like(var.initialized_value()), trainable=False) for var in tf.trainable_variables()]
-        self.zero_op = [var.assign(tf.zeros_like(var)) for var in gradient_accum]
+        gradient_accum = [tf.Variable(tf.zeros_like(
+            var.initialized_value()), trainable=False) for var in tf.trainable_variables()]
+        self.zero_op = [var.assign(tf.zeros_like(var))
+                        for var in gradient_accum]
 
         self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(self.update_ops):
             gradients = opt_op.compute_gradients(loss)
-        self.accum_op = [accum.assign_add(gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
+        self.accum_op = [accum.assign_add(
+            gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
         # gradients are num_batch_splits times higher due to accumulation by summing, so the norm will be too
-        max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * self.cfg['training'].get('num_batch_splits', 1)
-        gradient_accum, self.grad_norm = tf.clip_by_global_norm(gradient_accum, max_grad_norm)
+        max_grad_norm = self.cfg['training'].get(
+            'max_grad_norm', 10000.0) * self.cfg['training'].get('num_batch_splits', 1)
+        gradient_accum, self.grad_norm = tf.clip_by_global_norm(
+            gradient_accum, max_grad_norm)
         self.train_op = opt_op.apply_gradients(
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
-        correct_prediction = \
+        correct_policy_prediction = \
             tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y_, 1))
-        correct_prediction = tf.cast(correct_prediction, tf.float32)
-        self.accuracy = tf.reduce_mean(correct_prediction)
+        correct_policy_prediction = tf.cast(correct_policy_prediction, tf.float32)
+        self.policy_accuracy = tf.reduce_mean(correct_policy_prediction)
+        correct_value_prediction = \
+            tf.equal(tf.argmax(self.z_conv, 1), tf.argmax(self.z_, 1))
+        correct_value_prediction = tf.cast(correct_value_prediction, tf.float32)
+        self.value_accuracy = tf.reduce_mean(correct_value_prediction)
 
         self.avg_policy_loss = []
+        self.avg_value_loss = []
         self.avg_mse_loss = []
         self.avg_reg_term = []
         self.time_start = None
@@ -194,7 +260,8 @@ class TFProcess:
         if self.swa_enabled:
             self.swa_writer = tf.summary.FileWriter(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])), self.session.graph)
-        self.histograms = [tf.summary.histogram(weight.name, weight) for weight in self.weights]
+        self.histograms = [tf.summary.histogram(
+            weight.name, weight) for weight in self.weights]
 
         self.init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
@@ -210,7 +277,7 @@ class TFProcess:
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109
                     for i in range(len(new_weights[e])):
-                        if (i%(num_inputs*9))//9 == rule50_input:
+                        if (i % (num_inputs*9))//9 == rule50_input:
                             new_weights[e][i] = new_weights[e][i]*99
 
                 # Convolution weights need a transpose
@@ -223,7 +290,8 @@ class TFProcess:
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [3, 2, 0, 1]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
-                self.session.run(weights.assign(tf.transpose(new_weight, [2, 3, 1, 0])))
+                self.session.run(weights.assign(
+                    tf.transpose(new_weight, [2, 3, 1, 0])))
             elif weights.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
@@ -232,13 +300,14 @@ class TFProcess:
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [1, 0]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
-                self.session.run(weights.assign(tf.transpose(new_weight, [1, 0])))
+                self.session.run(weights.assign(
+                    tf.transpose(new_weight, [1, 0])))
             else:
                 # Biases, batchnorm etc
                 new_weight = tf.constant(new_weights[e], shape=weights.shape)
                 self.session.run(tf.assign(weights, new_weight))
-        #This should result in identical file to the starting one
-        #self.save_leelaz_weights('restored.txt')
+        # This should result in identical file to the starting one
+        # self.save_leelaz_weights('restored.txt')
 
     def restore(self, file):
         print("Restoring from {0}".format(file))
@@ -276,8 +345,10 @@ class TFProcess:
         # Make sure that ghost batch norm can be applied
         if batch_size % 64 != 0:
             # Adjust required batch size for batch splitting.
-            required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
-            raise ValueError('batch_size must be a multiple of {}'.format(required_factor))
+            required_factor = 64 * \
+                self.cfg['training'].get('num_batch_splits', 1)
+            raise ValueError(
+                'batch_size must be a multiple of {}'.format(required_factor))
 
         # Determine learning rate
         lr_values = self.cfg['training']['lr_values']
@@ -285,7 +356,7 @@ class TFProcess:
         steps_total = steps % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
         if self.warmup_steps > 0 and steps < self.warmup_steps:
-             self.lr = self.lr * (steps + 1) / self.warmup_steps
+            self.lr = self.lr * (steps + 1) / self.warmup_steps
 
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
@@ -294,8 +365,8 @@ class TFProcess:
         # Run training for this batch
         self.session.run(self.zero_op)
         for _ in range(batch_splits):
-            policy_loss, mse_loss, reg_term, _, _ = self.session.run(
-                [self.policy_loss, self.mse_loss, self.reg_term, self.accum_op,
+            policy_loss, value_loss, mse_loss, reg_term, _, _ = self.session.run(
+                [self.policy_loss, self.value_loss, self.mse_loss, self.reg_term, self.accum_op,
                     self.next_batch],
                 feed_dict={self.training: True, self.handle: self.train_handle})
             # Keep running averages
@@ -303,12 +374,14 @@ class TFProcess:
             # get comparable values.
             mse_loss /= 4.0
             self.avg_policy_loss.append(policy_loss)
+            if self.wdl:
+                self.avg_value_loss.append(value_loss)
             self.avg_mse_loss.append(mse_loss)
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         corrected_lr = self.lr / batch_splits
         _, grad_norm = self.session.run([self.train_op, self.grad_norm],
-            feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
+                                        feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
 
         # Update steps since training should have incremented it.
         steps = tf.train.global_step(self.session, self.global_step)
@@ -323,31 +396,31 @@ class TFProcess:
                 steps_elapsed = steps - self.last_steps
                 speed = batch_size * (steps_elapsed / elapsed)
             avg_policy_loss = np.mean(self.avg_policy_loss or [0])
+            avg_value_loss = np.mean(self.avg_value_loss or [0])
             avg_mse_loss = np.mean(self.avg_mse_loss or [0])
             avg_reg_term = np.mean(self.avg_reg_term or [0])
-            print("step {}, lr={:g} policy={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
-                steps, self.lr, avg_policy_loss, avg_mse_loss, avg_reg_term,
-                # Scale mse_loss back to the original to reflect the actual
-                # value being optimized.
-                # If you changed the factor in the loss formula above, you need
-                # to change it here as well for correct outputs.
-                pol_loss_w * avg_policy_loss + val_loss_w * 4.0 * avg_mse_loss + avg_reg_term,
+            print("step {}, lr={:g} policy={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
+                steps, self.lr, avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
+                pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
                 speed))
 
             after_weights = self.session.run(self.weights)
-            update_ratio_summaries = self.compute_update_ratio(before_weights, after_weights)
+            update_ratio_summaries = self.compute_update_ratio(
+                before_weights, after_weights)
 
             train_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
+                tf.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
-                tf.Summary.Value(tag="Gradient norm", simple_value=grad_norm / batch_splits),
+                tf.Summary.Value(tag="Gradient norm",
+                                 simple_value=grad_norm / batch_splits),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.train_writer.add_summary(update_ratio_summaries, steps)
             self.time_start = time_end
             self.last_steps = steps
-            self.avg_policy_loss, self.avg_mse_loss, self.avg_reg_term = [], [], []
+            self.avg_policy_loss, self.avg_value_loss, self.avg_mse_loss, self.avg_reg_term = [], [], [], []
 
         if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
             self.update_swa()
@@ -384,35 +457,54 @@ class TFProcess:
         self.snap_restore()
 
     def calculate_test_summaries(self, test_batches, steps):
-        sum_accuracy = 0
+        sum_policy_accuracy = 0
+        sum_value_accuracy = 0
         sum_mse = 0
         sum_policy = 0
+        sum_value = 0
         for _ in range(0, test_batches):
-            test_policy, test_accuracy, test_mse, _ = self.session.run(
-                [self.policy_loss, self.accuracy, self.mse_loss,
+            test_policy, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
+                [self.policy_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
                  self.next_batch],
                 feed_dict={self.training: False,
                            self.handle: self.test_handle})
-            sum_accuracy += test_accuracy
+            sum_policy_accuracy += test_policy_accuracy
             sum_mse += test_mse
             sum_policy += test_policy
-        sum_accuracy /= test_batches
-        sum_accuracy *= 100
+            if self.wdl:
+                sum_value_accuracy += test_value_accuracy
+                sum_value += test_value
+        sum_policy_accuracy /= test_batches
+        sum_policy_accuracy *= 100
         sum_policy /= test_batches
+        sum_value /= test_batches
+        if self.wdl:
+            sum_value_accuracy /= test_batches
+            sum_value_accuracy *= 100
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
         self.net.pb.training_params.learning_rate = self.lr
         self.net.pb.training_params.mse_loss = sum_mse
         self.net.pb.training_params.policy_loss = sum_policy
-        self.net.pb.training_params.accuracy = sum_accuracy
-        test_summaries = tf.Summary(value=[
-            tf.Summary.Value(tag="Accuracy", simple_value=sum_accuracy),
-            tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-            tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
-        test_summaries = tf.summary.merge([test_summaries] + self.histograms).eval(session=self.session)
+        # TODO store value and value accuracy in pb
+        self.net.pb.training_params.accuracy = sum_policy_accuracy
+        if self.wdl:
+            test_summaries = tf.Summary(value=[
+                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
+                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
+                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        else:
+            test_summaries = tf.Summary(value=[
+                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        test_summaries = tf.summary.merge(
+            [test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
-        print("step {}, policy={:g} training accuracy={:g}%, mse={:g}".\
-            format(steps, sum_policy, sum_accuracy, sum_mse))
+        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
@@ -433,36 +525,36 @@ class TFProcess:
         return tf.Summary(value=all_summaries)
 
     def log_histogram(self, tag, values, bins=1000):
-            """Logs the histogram of a list/vector of values.
+        """Logs the histogram of a list/vector of values.
 
-            From https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
-            """
-            # Convert to a numpy array
-            values = np.array(values)
+        From https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
+        """
+        # Convert to a numpy array
+        values = np.array(values)
 
-            # Create histogram using numpy
-            counts, bin_edges = np.histogram(values, bins=bins)
+        # Create histogram using numpy
+        counts, bin_edges = np.histogram(values, bins=bins)
 
-            # Fill fields of histogram proto
-            hist = tf.HistogramProto()
-            hist.min = float(np.min(values))
-            hist.max = float(np.max(values))
-            hist.num = int(np.prod(values.shape))
-            hist.sum = float(np.sum(values))
-            hist.sum_squares = float(np.sum(values**2))
+        # Fill fields of histogram proto
+        hist = tf.HistogramProto()
+        hist.min = float(np.min(values))
+        hist.max = float(np.max(values))
+        hist.num = int(np.prod(values.shape))
+        hist.sum = float(np.sum(values))
+        hist.sum_squares = float(np.sum(values**2))
 
-            # Requires equal number as bins, where the first goes from -DBL_MAX to bin_edges[1]
-            # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/summary.proto#L30
-            # Thus, we drop the start of the first bin
-            bin_edges = bin_edges[1:]
+        # Requires equal number as bins, where the first goes from -DBL_MAX to bin_edges[1]
+        # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/summary.proto#L30
+        # Thus, we drop the start of the first bin
+        bin_edges = bin_edges[1:]
 
-            # Add bin edges and counts
-            for edge in bin_edges:
-                hist.bucket_limit.append(edge)
-            for c in counts:
-                hist.bucket.append(c)
+        # Add bin edges and counts
+        for edge in bin_edges:
+            hist.bucket_limit.append(edge)
+        for c in counts:
+            hist.bucket.append(c)
 
-            return tf.Summary.Value(tag=tag, histo=hist)
+        return tf.Summary.Value(tag=tag, histo=hist)
 
     def update_swa(self):
         # Add the current weight vars to the running average.
@@ -526,7 +618,7 @@ class TFProcess:
                 rule50_input = 109
                 wt_flt = []
                 for i, weight in enumerate(np.ravel(nparray)):
-                    if (i%(num_inputs*9))//9 == rule50_input:
+                    if (i % (num_inputs*9))//9 == rule50_input:
                         wt_flt.append(weight/99)
                     else:
                         wt_flt.append(weight)
@@ -556,7 +648,8 @@ class TFProcess:
 
         net = tf.nn.relu(tf.add(tf.matmul(net, W_fc1), b_fc1))
 
-        W_fc2 = weight_variable([channels // ratio, 2 * channels], name='se_fc2_w')
+        W_fc2 = weight_variable(
+            [channels // ratio, 2 * channels], name='se_fc2_w')
         b_fc2 = bias_variable([2 * channels], name='se_fc2_b')
         self.weights.append(W_fc2)
         self.weights.append(b_fc2)
@@ -691,15 +784,40 @@ class TFProcess:
             flow = self.residual_block(flow, self.RESIDUAL_FILTERS)
 
         # Policy head
-        conv_pol = self.conv_block(flow, filter_size=1,
-                                   input_channels=self.RESIDUAL_FILTERS,
-                                   output_channels=self.policy_channels)
-        h_conv_pol_flat = tf.reshape(conv_pol, [-1, self.policy_channels*8*8])
-        W_fc1 = weight_variable([self.policy_channels*8*8, 1858], name='fc1/weight')
-        b_fc1 = bias_variable([1858], name='fc1/bias')
-        self.weights.append(W_fc1)
-        self.weights.append(b_fc1)
-        h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1), b_fc1, name='policy_head')
+        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
+            conv_pol = self.conv_block(flow, filter_size=3,
+                                       input_channels=self.RESIDUAL_FILTERS,
+                                       output_channels=self.RESIDUAL_FILTERS)
+            W_pol_conv = weight_variable([3, 3,
+                                          self.RESIDUAL_FILTERS, 80], name='W_pol_conv2')
+            b_pol_conv = bias_variable([80], name='b_pol_conv2')
+            self.weights.append(W_pol_conv)
+            self.weights.append(b_pol_conv)
+            conv_pol2 = tf.nn.bias_add(
+                conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
+
+            h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
+            fc1_init = tf.constant(lc0_az_policy_map.make_map())
+            W_fc1 = tf.get_variable("policy_map",
+                                    initializer=fc1_init,
+                                    trainable=False)
+            h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
+        elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
+            conv_pol = self.conv_block(flow, filter_size=1,
+                                       input_channels=self.RESIDUAL_FILTERS,
+                                       output_channels=self.policy_channels)
+            h_conv_pol_flat = tf.reshape(
+                conv_pol, [-1, self.policy_channels*8*8])
+            W_fc1 = weight_variable(
+                [self.policy_channels*8*8, 1858], name='fc1/weight')
+            b_fc1 = bias_variable([1858], name='fc1/bias')
+            self.weights.append(W_fc1)
+            self.weights.append(b_fc1)
+            h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
+                           b_fc1, name='policy_head')
+        else:
+            raise ValueError(
+                "Unknown policy head type {}".format(self.POLICY_HEAD))
 
         # Value head
         conv_val = self.conv_block(flow, filter_size=1,
@@ -711,10 +829,13 @@ class TFProcess:
         self.weights.append(W_fc2)
         self.weights.append(b_fc2)
         h_fc2 = tf.nn.relu(tf.add(tf.matmul(h_conv_val_flat, W_fc2), b_fc2))
-        W_fc3 = weight_variable([128, 1], name='fc3/weight')
-        b_fc3 = bias_variable([1], name='fc3/bias')
+        value_outputs = 3 if self.wdl else 1
+        W_fc3 = weight_variable([128, value_outputs], name='fc3/weight')
+        b_fc3 = bias_variable([value_outputs], name='fc3/bias')
         self.weights.append(W_fc3)
         self.weights.append(b_fc3)
-        h_fc3 = tf.nn.tanh(tf.add(tf.matmul(h_fc2, W_fc3), b_fc3), name='value_head')
+        h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
+        if not self.wdl:
+            h_fc3 = tf.nn.tanh(h_fc3)
 
         return h_fc1, h_fc3
