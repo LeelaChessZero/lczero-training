@@ -140,7 +140,7 @@ class TFProcess:
             # extract mask for legal moves from target policy
             move_is_legal = tf.greater_equal(self.y_, 0)
             # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
-            illegal_filler = tf.zeros_like(self.y_conv) - 1.0e-10
+            illegal_filler = tf.zeros_like(self.y_conv) - 1.0e10
             self.y_conv = tf.where(move_is_legal, self.y_conv, illegal_filler)
         # y_ still has -1 on illegal moves, flush them to 0
         self.y_ = tf.nn.relu(self.y_)
