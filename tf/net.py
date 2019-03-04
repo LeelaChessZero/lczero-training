@@ -158,10 +158,13 @@ class Net:
         if self.pb.format.network_format.policy == pb.NetworkFormat.POLICY_CONVOLUTION:
             version = 4
 
+        def format_x(x):
+            return '{:.4g}'.format(x)
+
         with gzip.open(filename, 'wb') as f:
             f.write("{}\n".format(version).encode('utf-8'))
             for row in weights:
-                f.write((" ".join(map(str, row.tolist())) + "\n").encode('utf-8'))
+                f.write((" ".join(map(format_x, row.tolist())) + "\n").encode('utf-8'))
 
         size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
@@ -224,6 +227,9 @@ class Net:
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
+
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
 
     def parse_txt(self, filename):
         weights = []
