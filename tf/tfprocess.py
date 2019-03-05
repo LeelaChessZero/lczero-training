@@ -585,6 +585,7 @@ class TFProcess:
 
     def save_leelaz_weights(self, filename):
         all_weights = []
+        all_evals = []
         for e, weights in enumerate(self.weights):
             work_weights = None
             if weights.shape.ndims == 4:
@@ -605,7 +606,9 @@ class TFProcess:
             else:
                 # Biases, batchnorm etc
                 work_weights = weights
-            nparray = work_weights.eval(session=self.session)
+            all_evals.append(work_weights)
+        nparrays = self.session.run(all_evals)
+        for e, nparray in enumerate(nparrays):
             # Rescale rule50 related weights as clients do not normalize the input.
             if e == 0:
                 num_inputs = 112
