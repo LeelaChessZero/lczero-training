@@ -221,9 +221,25 @@ class Net:
 
         return blocks // ws['residual']
 
+    def print_stats(self):
+        print("Blocks: {}".format(self.blocks()))
+        print("Filters: {}".format(self.filters()))
+        print_pb_stats(self.pb)
+        print()
+
     def parse_proto(self, filename):
         with gzip.open(filename, 'rb') as f:
             self.pb = self.pb.FromString(f.read())
+        # Populate policyFormat and valueFormat fields in old protobufs
+        # without these fields.
+        if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+        elif self.pb.format.network_forma.network  == pb.NetworkFormat.NETWORK_CLASSICAL:
+            self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
 
     def parse_txt(self, filename):
         weights = []
@@ -287,15 +303,28 @@ class Net:
 
         self.fill_conv_block(self.pb.weights.input, weights, gammas)
 
+def print_pb_stats(obj, parent=None):
+    for descriptor in obj.DESCRIPTOR.fields:
+        value = getattr(obj, descriptor.name)
+        if descriptor.name == "weights": return
+        if descriptor.type == descriptor.TYPE_MESSAGE:
+            if descriptor.label == descriptor.LABEL_REPEATED:
+                map(print_pb_stats, value)
+            else:
+                print_pb_stats(value, obj)
+        elif descriptor.type == descriptor.TYPE_ENUM:
+            enum_name = descriptor.enum_type.values[value].name
+            print("%s: %s" % (descriptor.full_name, enum_name))
+        else:
+            print("%s: %s" % (descriptor.full_name, value))
 
 def main(argv):
-    net = Net(net=pb.NetworkFormat.NETWORK_CLASSICAL)
+    net = Net()
 
     if argv.input.endswith(".txt"):
         print('Found .txt network')
         net.parse_txt(argv.input)
-        print("Blocks: {}".format(net.blocks()))
-        print("Filters: {}".format(net.filters()))
+        net.print_stats()
         if argv.output == None:
             argv.output = argv.input.replace('.txt', '.pb.gz')
             assert argv.output.endswith('.pb.gz')
@@ -304,13 +333,15 @@ def main(argv):
     elif argv.input.endswith(".pb.gz"):
         print('Found .pb.gz network')
         net.parse_proto(argv.input)
-        print("Blocks: {}".format(net.blocks()))
-        print("Filters: {}".format(net.filters()))
+        net.print_stats()
         if argv.output == None:
             argv.output = argv.input.replace('.pb.gz', '.txt.gz')
             print('Writing output to: {}'.format(argv.output))
             assert argv.output.endswith('.txt.gz')
-        net.save_txt(argv.output)
+        if argv.output.endswith(".pb.gz"):
+            net.save_proto(argv.output)
+        else:
+            net.save_txt(argv.output)
     else:
         print('Unable to detect the network format. '
               'Filename should end in ".txt" or ".pb.gz"')
