@@ -236,7 +236,7 @@ class Net:
             self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
             self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
             self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
-        elif self.pb.format.network_forma.network  == pb.NetworkFormat.NETWORK_CLASSICAL:
+        elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
             self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
             self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
             self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
