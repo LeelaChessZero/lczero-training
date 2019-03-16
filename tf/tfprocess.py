@@ -692,6 +692,7 @@ class TFProcess:
         var = tf.get_default_graph().get_tensor_by_name(var_key)
 
         self.weights.append(W_conv)
+        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma)
         self.weights.append(gamma)
         self.weights.append(beta)
         self.weights.append(mean)
@@ -750,12 +751,14 @@ class TFProcess:
         var_2 = tf.get_default_graph().get_tensor_by_name(var_key_2)
 
         self.weights.append(W_conv_1)
+        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma_1)
         self.weights.append(gamma_1)
         self.weights.append(beta_1)
         self.weights.append(mean_1)
         self.weights.append(var_1)
 
         self.weights.append(W_conv_2)
+        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma_2)
         self.weights.append(gamma_2)
         self.weights.append(beta_2)
         self.weights.append(mean_2)
@@ -790,6 +793,7 @@ class TFProcess:
                                           self.RESIDUAL_FILTERS, 80], name='W_pol_conv2')
             b_pol_conv = bias_variable([80], name='b_pol_conv2')
             self.weights.append(W_pol_conv)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
             self.weights.append(b_pol_conv)
             conv_pol2 = tf.nn.bias_add(
                 conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
@@ -810,6 +814,7 @@ class TFProcess:
                 [self.policy_channels*8*8, 1858], name='fc1/weight')
             b_fc1 = bias_variable([1858], name='fc1/bias')
             self.weights.append(W_fc1)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
             self.weights.append(b_fc1)
             h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
                            b_fc1, name='policy_head')
@@ -835,5 +840,8 @@ class TFProcess:
         h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
         if not self.wdl:
             h_fc3 = tf.nn.tanh(h_fc3)
+        else:
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
+
 
         return h_fc1, h_fc3
