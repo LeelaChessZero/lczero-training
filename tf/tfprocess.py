@@ -108,6 +108,10 @@ class TFProcess:
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
         self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
 
+        self.renorm_enabled = self.cfg['training'].get('renorm', False)
+        self.renorm_max_r = self.cfg['training'].get('renorm_max_r', 1)
+        self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
+
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90,
                                     allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
@@ -662,6 +666,25 @@ class TFProcess:
 
         return out
 
+    def batch_norm(self, inputs):
+        if self.renorm_enabled:
+            clipping = {
+                "rmin": 1.0/self.renorm_max_r,
+                "rmax": self.renorm_max_r,
+                "dmax": self.renorm_max_d
+                }
+            return tf.layers.batch_normalization(
+                inputs, epsilon=1e-5, axis=1, fused=True,
+                center=True, scale=True,
+                renorm=True, renorm_clipping=clipping,
+                training=self.training)
+        else:
+            return tf.layers.batch_normalization(
+                inputs, epsilon=1e-5, axis=1, fused=True,
+                center=True, scale=True,
+                virtual_batch_size=64,
+                training=self.training)
+
     def conv_block(self, inputs, filter_size, input_channels, output_channels):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
@@ -672,13 +695,7 @@ class TFProcess:
                                   input_channels, output_channels], name=conv_key)
 
         with tf.variable_scope(weight_key):
-            h_bn = \
-                tf.layers.batch_normalization(
-                    conv2d(inputs, W_conv),
-                    epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=True,
-                    virtual_batch_size=64,
-                    training=self.training)
+            h_bn = self.batch_norm(conv2d(inputs, W_conv))
         h_conv = tf.nn.relu(h_bn)
 
         gamma_key = weight_key + "/batch_normalization/gamma:0"
@@ -712,22 +729,10 @@ class TFProcess:
         W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2)
 
         with tf.variable_scope(weight_key_1):
-            h_bn1 = \
-                tf.layers.batch_normalization(
-                    conv2d(inputs, W_conv_1),
-                    epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=True,
-                    virtual_batch_size=64,
-                    training=self.training)
+            h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1))
         h_out_1 = tf.nn.relu(h_bn1)
         with tf.variable_scope(weight_key_2):
-            h_bn2 = \
-                tf.layers.batch_normalization(
-                    conv2d(h_out_1, W_conv_2),
-                    epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=True,
-                    virtual_batch_size=64,
-                    training=self.training)
+            h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2))
 
         gamma_key_1 = weight_key_1 + "/batch_normalization/gamma:0"
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
