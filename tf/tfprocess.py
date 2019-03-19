@@ -667,7 +667,7 @@ class TFProcess:
 
         return out
 
-    def batch_norm(self, inputs):
+    def batch_norm(self, inputs, scale=False):
         if self.renorm_enabled:
             clipping = {
                 "rmin": 1.0/self.renorm_max_r,
@@ -676,14 +676,14 @@ class TFProcess:
                 }
             return tf.layers.batch_normalization(
                 inputs, epsilon=1e-5, axis=1, fused=True,
-                center=True, scale=True,
+                center=True, scale=scale,
                 renorm=True, renorm_clipping=clipping,
                 renorm_momentum=self.renorm_momentum,
                 training=self.training)
         else:
             return tf.layers.batch_normalization(
                 inputs, epsilon=1e-5, axis=1, fused=True,
-                center=True, scale=True,
+                center=True, scale=scale,
                 virtual_batch_size=64,
                 training=self.training)
 
@@ -700,18 +700,18 @@ class TFProcess:
             h_bn = self.batch_norm(conv2d(inputs, W_conv))
         h_conv = tf.nn.relu(h_bn)
 
-        gamma_key = weight_key + "/batch_normalization/gamma:0"
+        gamma_key = weight_key + "/batch_normalization/gamma"
         beta_key = weight_key + "/batch_normalization/beta:0"
         mean_key = weight_key + "/batch_normalization/moving_mean:0"
         var_key = weight_key + "/batch_normalization/moving_variance:0"
 
-        gamma = tf.get_default_graph().get_tensor_by_name(gamma_key)
+        gamma = tf.Variable(tf.ones(shape=[output_channels]),
+                            name=gamma_key, trainable=False)
         beta = tf.get_default_graph().get_tensor_by_name(beta_key)
         mean = tf.get_default_graph().get_tensor_by_name(mean_key)
         var = tf.get_default_graph().get_tensor_by_name(var_key)
 
         self.weights.append(W_conv)
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma)
         self.weights.append(gamma)
         self.weights.append(beta)
         self.weights.append(mean)
@@ -735,14 +735,15 @@ class TFProcess:
             h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1))
         h_out_1 = tf.nn.relu(h_bn1)
         with tf.variable_scope(weight_key_2):
-            h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2))
+            h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), scale=True)
 
-        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma:0"
+        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma"
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
         mean_key_1 = weight_key_1 + "/batch_normalization/moving_mean:0"
         var_key_1 = weight_key_1 + "/batch_normalization/moving_variance:0"
 
-        gamma_1 = tf.get_default_graph().get_tensor_by_name(gamma_key_1)
+        gamma_1 = tf.Variable(tf.ones(shape=[channels]),
+                              name=gamma_key_1, trainable=False)
         beta_1 = tf.get_default_graph().get_tensor_by_name(beta_key_1)
         mean_1 = tf.get_default_graph().get_tensor_by_name(mean_key_1)
         var_1 = tf.get_default_graph().get_tensor_by_name(var_key_1)
@@ -758,14 +759,12 @@ class TFProcess:
         var_2 = tf.get_default_graph().get_tensor_by_name(var_key_2)
 
         self.weights.append(W_conv_1)
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma_1)
         self.weights.append(gamma_1)
         self.weights.append(beta_1)
         self.weights.append(mean_1)
         self.weights.append(var_1)
 
         self.weights.append(W_conv_2)
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, gamma_2)
         self.weights.append(gamma_2)
         self.weights.append(beta_2)
         self.weights.append(mean_2)
