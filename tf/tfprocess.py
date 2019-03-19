@@ -111,6 +111,7 @@ class TFProcess:
         self.renorm_enabled = self.cfg['training'].get('renorm', False)
         self.renorm_max_r = self.cfg['training'].get('renorm_max_r', 1)
         self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
+        self.renorm_momentum = self.cfg['training'].get('renorm_momentum', 0.99)
 
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90,
                                     allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
@@ -677,6 +678,7 @@ class TFProcess:
                 inputs, epsilon=1e-5, axis=1, fused=True,
                 center=True, scale=True,
                 renorm=True, renorm_clipping=clipping,
+                renorm_momentum=self.renorm_momentum,
                 training=self.training)
         else:
             return tf.layers.batch_normalization(
