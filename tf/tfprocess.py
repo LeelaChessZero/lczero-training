@@ -667,7 +667,7 @@ class TFProcess:
 
         return out
 
-    def batch_norm(self, inputs):
+    def batch_norm(self, inputs, scale=False):
         if self.renorm_enabled:
             clipping = {
                 "rmin": 1.0/self.renorm_max_r,
@@ -676,18 +676,18 @@ class TFProcess:
                 }
             return tf.layers.batch_normalization(
                 inputs, epsilon=1e-5, axis=1, fused=True,
-                center=True, scale=True,
+                center=True, scale=scale,
                 renorm=True, renorm_clipping=clipping,
                 renorm_momentum=self.renorm_momentum,
                 training=self.training)
         else:
             return tf.layers.batch_normalization(
                 inputs, epsilon=1e-5, axis=1, fused=True,
-                center=True, scale=True,
+                center=True, scale=scale,
                 virtual_batch_size=64,
                 training=self.training)
 
-    def conv_block(self, inputs, filter_size, input_channels, output_channels):
+    def conv_block(self, inputs, filter_size, input_channels, output_channels, bn_scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
@@ -697,15 +697,21 @@ class TFProcess:
                                   input_channels, output_channels], name=conv_key)
 
         with tf.variable_scope(weight_key):
-            h_bn = self.batch_norm(conv2d(inputs, W_conv))
+            h_bn = self.batch_norm(conv2d(inputs, W_conv), scale=bn_scale)
         h_conv = tf.nn.relu(h_bn)
 
-        gamma_key = weight_key + "/batch_normalization/gamma:0"
+        gamma_key = weight_key + "/batch_normalization/gamma"
+        if bn_scale:
+            gamma_key = gamma_key + ":0"
         beta_key = weight_key + "/batch_normalization/beta:0"
         mean_key = weight_key + "/batch_normalization/moving_mean:0"
         var_key = weight_key + "/batch_normalization/moving_variance:0"
 
-        gamma = tf.get_default_graph().get_tensor_by_name(gamma_key)
+        if bn_scale:
+            gamma = tf.get_default_graph().get_tensor_by_name(gamma_key)
+        else:
+            gamma = tf.Variable(tf.ones(shape=[output_channels]),
+                                name=gamma_key, trainable=False)
         beta = tf.get_default_graph().get_tensor_by_name(beta_key)
         mean = tf.get_default_graph().get_tensor_by_name(mean_key)
         var = tf.get_default_graph().get_tensor_by_name(var_key)
@@ -734,14 +740,15 @@ class TFProcess:
             h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1))
         h_out_1 = tf.nn.relu(h_bn1)
         with tf.variable_scope(weight_key_2):
-            h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2))
+            h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), scale=True)
 
-        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma:0"
+        gamma_key_1 = weight_key_1 + "/batch_normalization/gamma"
         beta_key_1 = weight_key_1 + "/batch_normalization/beta:0"
         mean_key_1 = weight_key_1 + "/batch_normalization/moving_mean:0"
         var_key_1 = weight_key_1 + "/batch_normalization/moving_variance:0"
 
-        gamma_1 = tf.get_default_graph().get_tensor_by_name(gamma_key_1)
+        gamma_1 = tf.Variable(tf.ones(shape=[channels]),
+                              name=gamma_key_1, trainable=False)
         beta_1 = tf.get_default_graph().get_tensor_by_name(beta_key_1)
         mean_1 = tf.get_default_graph().get_tensor_by_name(mean_key_1)
         var_1 = tf.get_default_graph().get_tensor_by_name(var_key_1)
@@ -783,7 +790,8 @@ class TFProcess:
         # Input convolution
         flow = self.conv_block(x_planes, filter_size=3,
                                input_channels=112,
-                               output_channels=self.RESIDUAL_FILTERS)
+                               output_channels=self.RESIDUAL_FILTERS,
+                               bn_scale=True)
         # Residual tower
         for _ in range(0, self.RESIDUAL_BLOCKS):
             flow = self.residual_block(flow, self.RESIDUAL_FILTERS)
@@ -797,6 +805,7 @@ class TFProcess:
                                           self.RESIDUAL_FILTERS, 80], name='W_pol_conv2')
             b_pol_conv = bias_variable([80], name='b_pol_conv2')
             self.weights.append(W_pol_conv)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
             self.weights.append(b_pol_conv)
             conv_pol2 = tf.nn.bias_add(
                 conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
@@ -817,6 +826,7 @@ class TFProcess:
                 [self.policy_channels*8*8, 1858], name='fc1/weight')
             b_fc1 = bias_variable([1858], name='fc1/bias')
             self.weights.append(W_fc1)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
             self.weights.append(b_fc1)
             h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
                            b_fc1, name='policy_head')
@@ -842,5 +852,8 @@ class TFProcess:
         h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
         if not self.wdl:
             h_fc3 = tf.nn.tanh(h_fc3)
+        else:
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
+
 
         return h_fc1, h_fc3
