@@ -687,7 +687,7 @@ class TFProcess:
                 virtual_batch_size=64,
                 training=self.training)
 
-    def conv_block(self, inputs, filter_size, input_channels, output_channels):
+    def conv_block(self, inputs, filter_size, input_channels, output_channels, bn_scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
@@ -697,16 +697,21 @@ class TFProcess:
                                   input_channels, output_channels], name=conv_key)
 
         with tf.variable_scope(weight_key):
-            h_bn = self.batch_norm(conv2d(inputs, W_conv))
+            h_bn = self.batch_norm(conv2d(inputs, W_conv), scale=bn_scale)
         h_conv = tf.nn.relu(h_bn)
 
         gamma_key = weight_key + "/batch_normalization/gamma"
+        if bn_scale:
+            gamma_key = gamm_key + ":0"
         beta_key = weight_key + "/batch_normalization/beta:0"
         mean_key = weight_key + "/batch_normalization/moving_mean:0"
         var_key = weight_key + "/batch_normalization/moving_variance:0"
 
-        gamma = tf.Variable(tf.ones(shape=[output_channels]),
-                            name=gamma_key, trainable=False)
+        if bn_scale:
+            gamma = tf.get_default_graph().get_tensor_by_name(gamma_key)
+        else:
+            gamma = tf.Variable(tf.ones(shape=[output_channels]),
+                                name=gamma_key, trainable=False)
         beta = tf.get_default_graph().get_tensor_by_name(beta_key)
         mean = tf.get_default_graph().get_tensor_by_name(mean_key)
         var = tf.get_default_graph().get_tensor_by_name(var_key)
@@ -785,7 +790,8 @@ class TFProcess:
         # Input convolution
         flow = self.conv_block(x_planes, filter_size=3,
                                input_channels=112,
-                               output_channels=self.RESIDUAL_FILTERS)
+                               output_channels=self.RESIDUAL_FILTERS,
+                               bn_scale=True)
         # Residual tower
         for _ in range(0, self.RESIDUAL_BLOCKS):
             flow = self.residual_block(flow, self.RESIDUAL_FILTERS)
