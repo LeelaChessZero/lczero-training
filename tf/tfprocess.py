@@ -702,7 +702,7 @@ class TFProcess:
 
         gamma_key = weight_key + "/batch_normalization/gamma"
         if bn_scale:
-            gamma_key = gamm_key + ":0"
+            gamma_key = gamma_key + ":0"
         beta_key = weight_key + "/batch_normalization/beta:0"
         mean_key = weight_key + "/batch_normalization/moving_mean:0"
         var_key = weight_key + "/batch_normalization/moving_variance:0"
