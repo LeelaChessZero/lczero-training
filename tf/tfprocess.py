@@ -140,10 +140,15 @@ class TFProcess:
         self.batch_norm_count = 0
         self.y_conv, self.z_conv = self.construct_net(self.x)
 
-        # y_ has -1 on illegal moves, flush them to 0 first
-        self.y_ = tf.nn.relu(self.y_)
-
         # Calculate loss on policy head
+        if self.cfg['training'].get('mask_legal_moves'):
+            # extract mask for legal moves from target policy
+            move_is_legal = tf.greater_equal(self.y_, 0)
+            # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
+            illegal_filler = tf.zeros_like(self.y_conv) - 1.0e10
+            self.y_conv = tf.where(move_is_legal, self.y_conv, illegal_filler)
+        # y_ still has -1 on illegal moves, flush them to 0
+        self.y_ = tf.nn.relu(self.y_)
         policy_cross_entropy = \
             tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,
                                                     logits=self.y_conv)
