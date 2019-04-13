@@ -414,6 +414,8 @@ class TFProcess:
                 before_weights, after_weights)
 
             train_summaries = tf.Summary(value=[
+                tf.Summary.Value(tag="Total Loss WDL", simple_value = pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term),
+                tf.Summary.Value(tag="Total Loss classical", simple_value = pol_loss_w * avg_policy_loss + val_loss_w * avg_mse_loss + avg_reg_term),
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
