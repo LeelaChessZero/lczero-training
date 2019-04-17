@@ -103,6 +103,7 @@ class TFProcess:
         # For exporting
         self.weights = []
 
+        self.clr_enabled = self.cfg['training'].get('lr_cyclical', False)
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
@@ -197,6 +198,9 @@ class TFProcess:
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
         self.lr = self.cfg['training']['lr_values'][0]
+        self.clr_steps = self.cfg['training'].get('lr_cyclical_steps', 0)
+        self.clr_max = self.cfg['training'].get('lr_cyclical_max', 0)
+        self.clr_min = self.cfg['training'].get('lr_cyclical_min', 0)
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
@@ -385,6 +389,13 @@ class TFProcess:
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         corrected_lr = self.lr / batch_splits
+        if self.clr_enabled:
+            x = steps % self.clr_steps
+            if x <= (self.clr_steps / 2):
+                corrected_lr = (self.clr_min + (x / (self.clr_steps / 2)) * (self.clr_max - self.clr_min)) / batch_splits
+            else:
+                corrected_lr = (self.clr_max - ((x - (self.clr_steps / 2)) / (self.clr_steps / 2)) * (self.clr_max - self.clr_min)) / batch_splits
+
         _, grad_norm = self.session.run([self.train_op, self.grad_norm],
                                         feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
 
@@ -405,7 +416,7 @@ class TFProcess:
             avg_mse_loss = np.mean(self.avg_mse_loss or [0])
             avg_reg_term = np.mean(self.avg_reg_term or [0])
             print("step {}, lr={:g} policy={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
-                steps, self.lr, avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
+                steps, (corrected_lr * batch_splits), avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
                 pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
                 speed))
 
@@ -417,7 +428,7 @@ class TFProcess:
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
                 tf.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
-                tf.Summary.Value(tag="LR", simple_value=self.lr),
+                tf.Summary.Value(tag="LR", simple_value=(corrected_lr * batch_splits)),
                 tf.Summary.Value(tag="Gradient norm",
                                  simple_value=grad_norm / batch_splits),
                 tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
