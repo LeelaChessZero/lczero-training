@@ -597,7 +597,7 @@ class TFProcess:
         all_weights = []
         if not hasattr(self, 'pb_save_op'):
             all_evals = []
-            for e, weights in enumerate(self.weights):
+            for weights in self.weights:
                 work_weights = None
                 if weights.shape.ndims == 4:
                     # Convolution weights need a transpose
