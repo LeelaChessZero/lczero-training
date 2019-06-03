@@ -58,7 +58,6 @@ def bias_variable(shape, name=None, dtype=tf.float32):
     return tf.get_variable(name, shape, dtype=dtype,
             initializer=tf.zeros_initializer())
 
-
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, data_format='NCHW',
                         strides=[1, 1, 1, 1], padding='SAME')
@@ -124,6 +123,11 @@ class TFProcess:
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
         self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
 
+        self.renorm_enabled = self.cfg['training'].get('renorm', False)
+        self.renorm_max_r = self.cfg['training'].get('renorm_max_r', 1)
+        self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
+        self.renorm_momentum = self.cfg['training'].get('renorm_momentum', 0.99)
+
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90,
                                     allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.ConfigProto(gpu_options=gpu_options)
@@ -158,10 +162,16 @@ class TFProcess:
             self.y_conv = tf.cast(self.y_conv, tf.float32)
             self.z_conv = tf.cast(self.z_conv, tf.float32)
 
-        # y_ has -1 on illegal moves, flush them to 0 first
+        # Calculate loss on policy head
+        if self.cfg['training'].get('mask_legal_moves'):
+            # extract mask for legal moves from target policy
+            move_is_legal = tf.greater_equal(self.y_, 0)
+            # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
+            illegal_filler = tf.zeros_like(self.y_conv) - 1.0e10
+            self.y_conv = tf.where(move_is_legal, self.y_conv, illegal_filler)
+        # y_ still has -1 on illegal moves, flush them to 0
         self.y_ = tf.nn.relu(self.y_)
 
-        # Calculate loss on policy head
         policy_cross_entropy = \
             tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,
                                                     logits=self.y_conv)
@@ -587,7 +597,7 @@ class TFProcess:
 
     def snap_save(self):
         # Save a snapshot of all the variables in the current graph.
-        if not hasattr(self, 'save_op'):
+        if not hasattr(self, 'snap_save_op'):
             save_ops = []
             rest_ops = []
             for var in self.weights:
@@ -613,27 +623,32 @@ class TFProcess:
 
     def save_leelaz_weights(self, filename):
         all_weights = []
-        for e, weights in enumerate(self.weights):
-            work_weights = None
-            if weights.shape.ndims == 4:
-                # Convolution weights need a transpose
-                #
-                # TF (kYXInputOutput)
-                # [filter_height, filter_width, in_channels, out_channels]
-                #
-                # Leela/cuDNN/Caffe (kOutputInputYX)
-                # [output, input, filter_size, filter_size]
-                work_weights = tf.transpose(weights, [3, 2, 0, 1])
-            elif weights.shape.ndims == 2:
-                # Fully connected layers are [in, out] in TF
-                #
-                # [out, in] in Leela
-                #
-                work_weights = tf.transpose(weights, [1, 0])
-            else:
-                # Biases, batchnorm etc
-                work_weights = weights
-            nparray = work_weights.eval(session=self.session)
+        if not hasattr(self, 'pb_save_op'):
+            all_evals = []
+            for weights in self.weights:
+                work_weights = None
+                if weights.shape.ndims == 4:
+                    # Convolution weights need a transpose
+                    #
+                    # TF (kYXInputOutput)
+                    # [filter_height, filter_width, in_channels, out_channels]
+                    #
+                    # Leela/cuDNN/Caffe (kOutputInputYX)
+                    # [output, input, filter_size, filter_size]
+                    work_weights = tf.transpose(weights, [3, 2, 0, 1])
+                elif weights.shape.ndims == 2:
+                    # Fully connected layers are [in, out] in TF
+                    #
+                    # [out, in] in Leela
+                    #
+                    work_weights = tf.transpose(weights, [1, 0])
+                else:
+                    # Biases, batchnorm etc
+                    work_weights = weights
+                all_evals.append(work_weights)
+            self.pb_save_op = all_evals
+        nparrays = self.session.run(self.pb_save_op)
+        for e, nparray in enumerate(nparrays):
             # Rescale rule50 related weights as clients do not normalize the input.
             if e == 0:
                 num_inputs = 112
@@ -665,20 +680,43 @@ class TFProcess:
         assert var.dtype.base_dtype == tf.float32
         self.weights.append(var)
 
-    def batch_norm(self, net, scope):
+    def batch_norm(self, net, scope, scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
+
         with tf.variable_scope(scope, custom_getter=float32_variable_storage_getter):
-            net = tf.layers.batch_normalization(
-                    net,
-                    epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=True,
+            if self.renorm_enabled:
+                clipping = {
+                    "rmin": 1.0/self.renorm_max_r,
+                    "rmax": self.renorm_max_r,
+                    "dmax": self.renorm_max_d
+                    }
+                net = tf.layers.batch_normalization(
+                    tf.cast(net, tf.float32), epsilon=1e-5, axis=1, fused=True,
+                    center=True, scale=scale,
+                    renorm=True, renorm_clipping=clipping,
+                    renorm_momentum=self.renorm_momentum,
+                    training=self.training)
+                if self.model_dtype != tf.float32:
+                    net = tf.cast(net, tf.float32)
+            else:
+                # Virtual batch doesn't work with fp16
+                virtual_batch = 64 if self.model_dtype == tf.float32 else None
+                net = tf.layers.batch_normalization(
+                    net, epsilon=1e-5, axis=1, fused=True,
+                    center=True, scale=scale,
+                    virtual_batch_size=virtual_batch,
                     training=self.training)
 
         for v in ['gamma', 'beta', 'moving_mean', 'moving_variance' ]:
-            name = "fp32_storage/" + scope + '/batch_normalization/' + v + ':0'
-            var = tf.get_default_graph().get_tensor_by_name(name)
+            if v == 'gamma' and not scale:
+                var = tf.Variable(tf.ones(shape=[net.shape[1]]),
+                                    name=scope + '/fixed_gamma', trainable=False,
+                                    dtype=tf.float32)
+            else:
+                name = "fp32_storage/" + scope + '/batch_normalization/' + v + ':0'
+                var = tf.get_default_graph().get_tensor_by_name(name)
             self.add_weights(var)
         return net
 
@@ -716,7 +754,7 @@ class TFProcess:
 
         return out
 
-    def conv_block(self, inputs, filter_size, input_channels, output_channels):
+    def conv_block(self, inputs, filter_size, input_channels, output_channels, bn_scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
@@ -727,7 +765,7 @@ class TFProcess:
                                   dtype=self.model_dtype)
 
         self.add_weights(W_conv)
-        h_bn = self.batch_norm(conv2d(inputs, W_conv), weight_key)
+        h_bn = self.batch_norm(conv2d(inputs, W_conv), weight_key, scale=bn_scale)
         h_conv = tf.nn.relu(h_bn)
 
         return h_conv
@@ -747,11 +785,11 @@ class TFProcess:
                 dtype=self.model_dtype)
 
         self.add_weights(W_conv_1)
-        h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1), weight_key_1)
+        h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1), weight_key_1, scale=False)
         h_out_1 = tf.nn.relu(h_bn1)
 
         self.add_weights(W_conv_2)
-        h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), weight_key_2)
+        h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), weight_key_2, scale=True)
 
         with tf.variable_scope(weight_key_2):
             h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
@@ -768,7 +806,8 @@ class TFProcess:
         # Input convolution
         flow = self.conv_block(x_planes, filter_size=3,
                                input_channels=112,
-                               output_channels=self.RESIDUAL_FILTERS)
+                               output_channels=self.RESIDUAL_FILTERS,
+                               bn_scale=True)
         # Residual tower
         for _ in range(0, self.RESIDUAL_BLOCKS):
             flow = self.residual_block(flow, self.RESIDUAL_FILTERS)
@@ -785,7 +824,9 @@ class TFProcess:
                                           dtype=self.model_dtype)
 
             self.add_weights(W_pol_conv)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
             self.add_weights(b_pol_conv)
+
             conv_pol2 = tf.nn.bias_add(
                 conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
 
@@ -795,6 +836,7 @@ class TFProcess:
                                     initializer=fc1_init,
                                     trainable=False,
                                     dtype=self.model_dtype)
+
             h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
             conv_pol = self.conv_block(flow, filter_size=1,
@@ -808,6 +850,7 @@ class TFProcess:
             b_fc1 = bias_variable([1858], name='fc1/bias',
                                   dtype=self.model_dtype)
             self.add_weights(W_fc1)
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
             self.add_weights(b_fc1)
             h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
                            b_fc1, name='policy_head')
@@ -836,5 +879,8 @@ class TFProcess:
         h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
         if not self.wdl:
             h_fc3 = tf.nn.tanh(h_fc3)
+        else:
+            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
 
-        return tf.cast(h_fc1, tf.float32), tf.cast(h_fc3, tf.float32)
+
+        return h_fc1, h_fc3
