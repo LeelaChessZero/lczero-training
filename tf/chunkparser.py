@@ -45,7 +45,10 @@ class ChunkDataSrc:
 class ChunkParser:
     # static batch size
     BATCH_SIZE = 8
-    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, buffer_size=1, batch_size=256, workers=None):
+    v4_struct = struct.Struct(V4_STRUCT_STRING)
+    v3_struct = struct.Struct(V3_STRUCT_STRING)
+    sample = 32
+    def __init__(self, chunkdatasrc, shuffle_size=1, buffer_size=1, batch_size=256, workers=None):
         """
         Read data and yield batches of raw tensors.
 
@@ -73,8 +76,6 @@ class ChunkParser:
         for i in range(2):
             self.flat_planes.append(np.zeros(64, dtype=np.float32) + i)
 
-        # set the down-sampling rate
-        self.sample = sample
         # set the mini-batch size
         self.batch_size = batch_size
         # set number of elements in the shuffle buffer.
@@ -96,7 +97,6 @@ class ChunkParser:
             p.start()
             self.readers.append(read)
             self.writers.append(write)
-        self.init_structs()
 
 
     def shutdown(self):
@@ -108,32 +108,6 @@ class ChunkParser:
             self.processes[i].join()
             self.readers[i].close()
             self.writers[i].close()
-
-
-    def init_structs(self):
-        """
-        struct.Struct doesn't pickle, so it needs to be separately
-        constructed in workers.
-
-        V4 Format (8292 bytes total)
-            int32 version (4 bytes)
-            1858 float32 probabilities (7432 bytes)  (removed 66*4 = 264 bytes unused under-promotions)
-            104 (13*8) packed bit planes of 8 bytes each (832 bytes)  (no rep2 plane)
-            uint8 castling us_ooo (1 byte)
-            uint8 castling us_oo (1 byte)
-            uint8 castling them_ooo (1 byte)
-            uint8 castling them_oo (1 byte)
-            uint8 side_to_move (1 byte) aka us_black
-            uint8 rule50_count (1 byte)
-            uint8 move_count (1 byte)
-            int8 result (1 byte)
-            float32 root_q (4 bytes)
-            float32 best_q (4 bytes)
-            float32 root_d (4 bytes)
-            float32 best_d (4 bytes)
-        """
-        self.v4_struct = struct.Struct(V4_STRUCT_STRING)
-        self.v3_struct = struct.Struct(V3_STRUCT_STRING)
 
 
     @staticmethod
@@ -207,22 +181,23 @@ class ChunkParser:
         return (planes, probs, winner, best_q)
 
 
-    def sample_record(self, chunkdata):
+    @staticmethod
+    def sample_record(chunkdata):
         """
         Randomly sample through the v4 chunk data and select records
         """
         version = chunkdata[0:4]
         if version == V4_VERSION:
-            record_size = self.v4_struct.size
+            record_size = ChunkParser.v4_struct.size
         elif version == V3_VERSION:
-            record_size = self.v3_struct.size
+            record_size = ChunkParser.v3_struct.size
         else:
             return
 
         for i in range(0, len(chunkdata), record_size):
-            if self.sample > 1:
+            if ChunkParser.sample > 1:
                 # Downsample, using only 1/Nth of the items.
-                if random.randint(0, self.sample-1) != 0:
+                if random.randint(0, ChunkParser.sample-1) != 0:
                     continue  # Skip this record.
             record = chunkdata[i:i+record_size]
             if version == V3_VERSION:
@@ -231,17 +206,18 @@ class ChunkParser:
             yield record
 
 
-    def task(self, chunkdatasrc, writer):
+    @staticmethod
+    def task(chunkdatasrc, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
         sending v4 data through pipe back to main process.
         """
-        self.init_structs()
+        #self.init_structs()
         while True:
             chunkdata = chunkdatasrc.next()
             if chunkdata is None:
                 break
-            for item in self.sample_record(chunkdata):
+            for item in ChunkParser.sample_record(chunkdata):
                 # NOTE: This requires some more thinking, we can't just apply a
                 # reflection along the horizontal or vertical axes as we would
                 # also have to apply the reflection to the move probabilities
