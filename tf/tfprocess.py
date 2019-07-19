@@ -370,7 +370,10 @@ class TFProcess:
         lr_boundaries = self.cfg['training']['lr_boundaries']
         steps_total = steps % self.cfg['training']['total_steps']
         self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
+        lr_search = self.cfg['training'].get('lr_search', False)        
+        lr_searching = lr_search and steps % self.cfg['training']['lr_search_freq'] == 0 and steps != 0
         if lr_search:            
+            if self.last_lr_cached is None:
                 self.last_lr_cached = self.session.run(self.last_lr)
             if self.last_lr_cached > 0:
                 self.lr = self.last_lr_cached
