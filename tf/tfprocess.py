@@ -422,7 +422,6 @@ class TFProcess:
             best_reg_term = None
             best_x = 0
             for x in np.arange(-1, 1, 0.1):
-                self.session.run(self.opt_restore_op)
                 corrected_lr = raw_lr*(2**x) / batch_splits
                 _, grad_norm = self.session.run([self.quiet_train_op, self.grad_norm],
                                                 feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
@@ -431,6 +430,7 @@ class TFProcess:
                     best_reg_term = new_reg
                     best_x = x
                 print("LR Search {} {}".format(raw_lr*(2**x), new_reg))
+                self.session.run(self.opt_restore_op)
             self.last_lr_cached = raw_lr
             self.session.run(self.last_lr.assign(raw_lr))
             best_x = best_x / 5
