@@ -250,6 +250,8 @@ class TFProcess:
             gradient_accum, max_grad_norm)
         self.train_op = self.opt_op.apply_gradients(
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
+        self.quiet_train_op = self.opt_op.apply_gradients(
+            [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)])
 
         correct_policy_prediction = \
             tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y_, 1))
@@ -422,7 +424,7 @@ class TFProcess:
             for x in np.arange(-1, 1, 0.1):
                 self.session.run(self.opt_restore_op)
                 corrected_lr = raw_lr*(2**x) / batch_splits
-                _, grad_norm = self.session.run([self.train_op, self.grad_norm],
+                _, grad_norm = self.session.run([self.quiet_train_op, self.grad_norm],
                                                 feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
                 new_reg = self.session.run(self.reg_term)
                 if best_reg_term is None or new_reg < best_reg_term:
