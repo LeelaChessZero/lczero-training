@@ -490,7 +490,7 @@ class TFProcess:
                 self.calculate_swa_summaries(test_batches, steps)
 
         if lr_search and steps % self.cfg['training']['total_steps'] == 0:
-            self.session.run(self.last_lr.assign(target_lr))
+            self.session.run(self.last_lr.assign(self.target_lr))
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
