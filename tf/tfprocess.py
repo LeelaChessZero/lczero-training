@@ -421,19 +421,19 @@ class TFProcess:
             best_x = 0
             for x in np.arange(-1, 1, 0.1):
                 self.session.run(self.opt_restore_op)
-                corrected_lr = raw_lr*(10**x) / batch_splits
+                corrected_lr = raw_lr*(2**x) / batch_splits
                 _, grad_norm = self.session.run([self.train_op, self.grad_norm],
                                                 feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
                 new_reg = self.session.run(self.reg_term)
                 if best_reg_term is None or new_reg < best_reg_term:
                     best_reg_term = new_reg
                     best_x = x
-                print("LR Search {} {}".format(raw_lr*(10**x), new_reg))
+                print("LR Search {} {}".format(raw_lr*(2**x), new_reg))
             self.last_lr_cached = raw_lr
             self.session.run(self.last_lr.assign(raw_lr))
-            best_x = best_x / 3
-            self.target_lr = raw_lr*(10**best_x)
-            print("LR Target {} {}".format(raw_lr*(10**best_x), best_reg_term))
+            best_x = best_x / 5
+            self.target_lr = raw_lr*(2**best_x)
+            print("LR Target {} {}".format(raw_lr*(2**best_x), best_reg_term))
             
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         corrected_lr = self.lr / batch_splits
