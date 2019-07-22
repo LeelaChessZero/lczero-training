@@ -202,7 +202,7 @@ class ChunkParser:
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
-        assert best_q >= -1.0 and best_d >= 0.0 and best_q <= 1.0 and best_d <= 1.0
+        assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q)
