@@ -98,6 +98,9 @@ def main(cmd):
         test_chunks = get_latest_chunks(cfg['dataset']['input_test'], num_test, allow_less)
     else:
         chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks, allow_less)
+        if allow_less:
+            num_train = int(len(chunks)*train_ratio)
+            num_test = len(chunks) - num_train            
         train_chunks = chunks[:num_train]
         test_chunks = chunks[num_train:]
 
@@ -143,7 +146,7 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = cfg['training'].get('num_test_positions', num_test * 10)
+    num_evals = cfg['training'].get('num_test_positions', len(test_chunks) * 10)
     num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
     print("Using {} evaluation batches".format(num_evals))
 
