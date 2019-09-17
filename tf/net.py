@@ -17,7 +17,8 @@ class Net:
                  net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
                  input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
                  value=pb.NetworkFormat.VALUE_CLASSICAL,
-                 policy=pb.NetworkFormat.POLICY_CLASSICAL):
+                 policy=pb.NetworkFormat.POLICY_CLASSICAL,
+                 moves_left=pb.NetworkFormat.MOVES_LEFT_V1):
 
         if net == pb.NetworkFormat.NETWORK_SE:
             net = pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
@@ -53,13 +54,24 @@ class Net:
         else:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
 
+    def set_movesleftformat(self, moves_left):
+        self.pb.format.network_format.moves_left = moves_left
+
     def get_weight_amounts(self):
         value_weights = 8
         policy_weights = 6
-        head_weights = value_weights + policy_weights
+        moves_left_weights = 0
+        if self.pb.format.network_format.moves_left == pb.NetworkFormat.MOVES_LEFT_V1:
+            moves_left_weights = 8
+            if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
+                # Batch norm gamma
+                moves_left_weights += 1
+
+        head_weights = value_weights + policy_weights + moves_left_weights
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
             # Batch norm gammas in head convolutions.
             head_weights += 2
+
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT:
             return {"input": 5, "residual": 14, "head": head_weights}
         else:
@@ -182,6 +194,14 @@ class Net:
         """Returns the weights as floats per layer"""
         se = self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
         if self.weights == []:
+
+            if self.pb.format.network_format.moves_left == pb.NetworkFormat.MOVES_LEFT_V1:
+                self.denorm_layer(self.pb.weights.ip2_mov_b, self.weights)
+                self.denorm_layer(self.pb.weights.ip2_mov_w, self.weights)
+                self.denorm_layer(self.pb.weights.ip1_mov_b, self.weights)
+                self.denorm_layer(self.pb.weights.ip1_mov_w, self.weights)
+                self.denorm_conv_block(self.pb.weights.moves_left, self.weights)
+
             self.denorm_layer(self.pb.weights.ip2_val_b, self.weights)
             self.denorm_layer(self.pb.weights.ip2_val_w, self.weights)
             self.denorm_layer(self.pb.weights.ip1_val_b, self.weights)
@@ -234,12 +254,12 @@ class Net:
         # without these fields.
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
             self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
         elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
             self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
 
     def parse_txt(self, filename):
         weights = []
@@ -276,6 +296,13 @@ class Net:
         blocks //= ws['residual']
 
         self.pb.format.weights_encoding = pb.Format.LINEAR16
+        if self.pb.format.network_format.moves_left == pb.NetworkFormat.MOVES_LEFT_V1:
+            self.fill_layer(self.pb.weights.ip2_mov_b, weights)
+            self.fill_layer(self.pb.weights.ip2_mov_w, weights)
+            self.fill_layer(self.pb.weights.ip1_mov_b, weights)
+            self.fill_layer(self.pb.weights.ip1_mov_w, weights)
+            self.fill_conv_block(self.pb.weights.moves_left, weights, gammas)
+
         self.fill_layer(self.pb.weights.ip2_val_b, weights)
         self.fill_layer(self.pb.weights.ip2_val_w, weights)
         self.fill_layer(self.pb.weights.ip1_val_b, weights)

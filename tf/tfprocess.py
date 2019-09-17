@@ -78,6 +78,22 @@ class TFProcess:
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
 
+        self.MAX_MOVES_LEFT = 256
+
+        moves_left_head = self.cfg['model'].get('moves_left', False)
+
+        if moves_left_head == "v1":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_V1
+            self.moves_left = True
+        elif moves_left_head == "none":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_NONE
+            self.moves_left = False
+        else:
+            raise ValueError(
+                "Unknown moves left head format: {}".format(moves_left_head))
+
+        self.net.set_movesleftformat(self.MOVES_LEFT_HEAD)
+
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
         elif policy_head == "convolution":
@@ -137,8 +153,9 @@ class TFProcess:
         self.y_ = next_batch[1] # tf.placeholder(tf.float32, [None, 1858])
         self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 3])
         self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 3])
+        self.m_ = next_batch[4] # tf.placeholder(tf.float32, [None, 1])
         self.batch_norm_count = 0
-        self.y_conv, self.z_conv = self.construct_net(self.x)
+        self.y_conv, self.z_conv, self.m_conv = self.construct_net(self.x)
 
         # Calculate loss on policy head
         if self.cfg['training'].get('mask_legal_moves'):
@@ -176,6 +193,17 @@ class TFProcess:
             self.mse_loss = \
                 tf.reduce_mean(tf.squared_difference(scalar_target, self.z_conv))
 
+        if self.moves_left:
+            #moves = tf.constant(np.arange(self.MAX_MOVES_LEFT), dtype=tf.float32)
+            #m_dot = tf.tensordot(moves, tf.nn.softmax(self.m_conv), axes=[[0],[1]])
+            #moves_left_mse = tf.square(((tf.cast(self.m_, tf.float32) - m_dot) / self.MAX_MOVES_LEFT))
+            #self.moves_left_loss = tf.reduce_mean(moves_left_mse)
+            m_one_hot = tf.one_hot(self.m_, self.MAX_MOVES_LEFT)
+            self.moves_left_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                                    labels=m_one_hot, logits=self.m_conv))
+        else:
+            self.moves_left_loss = tf.constant(0.0, dtype=tf.float32)
+
         # Regularizer
         regularizer = tf.contrib.layers.l2_regularizer(scale=0.0001)
         reg_variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -186,12 +214,17 @@ class TFProcess:
         # want to reduce the factor in front of self.mse_loss here.
         pol_loss_w = self.cfg['training']['policy_loss_weight']
         val_loss_w = self.cfg['training']['value_loss_weight']
+        if self.moves_left:
+            moves_loss_w = self.cfg['training']['moves_left_loss_weight']
+        else:
+            moves_loss_w = tf.constant(0.0, dtype=tf.float32)
+
         if self.wdl:
             value_loss = self.value_loss
         else:
             value_loss = self.mse_loss
-        loss = pol_loss_w * self.policy_loss + \
-            val_loss_w * value_loss + self.reg_term
+        loss = pol_loss_w * self.policy_loss + val_loss_w * value_loss \
+               + moves_loss_w * self.moves_left_loss + self.reg_term
 
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
@@ -251,6 +284,7 @@ class TFProcess:
         self.value_accuracy = tf.reduce_mean(correct_value_prediction)
 
         self.avg_policy_loss = []
+        self.avg_moves_left_loss = []
         self.avg_value_loss = []
         self.avg_mse_loss = []
         self.avg_reg_term = []
@@ -372,8 +406,8 @@ class TFProcess:
         # Run training for this batch
         self.session.run(self.zero_op)
         for _ in range(batch_splits):
-            policy_loss, value_loss, mse_loss, reg_term, _, _ = self.session.run(
-                [self.policy_loss, self.value_loss, self.mse_loss, self.reg_term, self.accum_op,
+            policy_loss, value_loss, moves_left_loss, mse_loss, reg_term, _, _ = self.session.run(
+                [self.policy_loss, self.value_loss, self.moves_left_loss, self.mse_loss, self.reg_term, self.accum_op,
                     self.next_batch],
                 feed_dict={self.training: True, self.handle: self.train_handle})
             # Keep running averages
@@ -381,6 +415,8 @@ class TFProcess:
             # get comparable values.
             mse_loss /= 4.0
             self.avg_policy_loss.append(policy_loss)
+            if self.moves_left:
+                self.avg_moves_left_loss.append(moves_left_loss)
             if self.wdl:
                 self.avg_value_loss.append(value_loss)
             self.avg_mse_loss.append(mse_loss)
@@ -403,11 +439,12 @@ class TFProcess:
                 steps_elapsed = steps - self.last_steps
                 speed = batch_size * (steps_elapsed / elapsed)
             avg_policy_loss = np.mean(self.avg_policy_loss or [0])
+            avg_moves_left_loss = np.mean(self.avg_moves_left_loss or [0])
             avg_value_loss = np.mean(self.avg_value_loss or [0])
             avg_mse_loss = np.mean(self.avg_mse_loss or [0])
             avg_reg_term = np.mean(self.avg_reg_term or [0])
-            print("step {}, lr={:g} policy={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
-                steps, self.lr, avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
+            print("step {}, lr={:g} policy={:g} moves={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
+                steps, self.lr, avg_policy_loss, avg_moves_left_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
                 pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
                 speed))
 
@@ -417,6 +454,7 @@ class TFProcess:
 
             train_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
+                tf.Summary.Value(tag="Moves Left Loss", simple_value=avg_moves_left_loss),
                 tf.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
                 tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
                 tf.Summary.Value(tag="LR", simple_value=self.lr),
@@ -440,7 +478,7 @@ class TFProcess:
                 self.calculate_swa_summaries(test_batches, steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
-        if steps % self.cfg['training']['total_steps'] == 0 or (
+        if steps == 1 or steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             path = os.path.join(self.root_dir, self.cfg['name'])
             save_path = self.saver.save(self.session, path, global_step=steps)
@@ -468,22 +506,26 @@ class TFProcess:
         sum_value_accuracy = 0
         sum_mse = 0
         sum_policy = 0
+        sum_moves_left = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            test_policy, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
-                [self.policy_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
+            test_policy, test_moves_left, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
+                [self.policy_loss, self.moves_left_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
                  self.next_batch],
                 feed_dict={self.training: False,
                            self.handle: self.test_handle})
             sum_policy_accuracy += test_policy_accuracy
             sum_mse += test_mse
             sum_policy += test_policy
+            if self.moves_left:
+                sum_moves_left += test_moves_left
             if self.wdl:
                 sum_value_accuracy += test_value_accuracy
                 sum_value += test_value
         sum_policy_accuracy /= test_batches
         sum_policy_accuracy *= 100
         sum_policy /= test_batches
+        sum_moves_left /= test_batches
         sum_value /= test_batches
         if self.wdl:
             sum_value_accuracy /= test_batches
@@ -498,6 +540,7 @@ class TFProcess:
         if self.wdl:
             test_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.Summary.Value(tag="Moves Left Loss", simple_value=sum_moves_left),
                 tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
                 tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
                 tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
@@ -510,8 +553,8 @@ class TFProcess:
         test_summaries = tf.summary.merge(
             [test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
-        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
+        print("step {}, policy={:g} moves={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
+            format(steps, sum_policy, sum_moves_left, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
@@ -864,5 +907,23 @@ class TFProcess:
         else:
             tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
 
+        # Moves left head
+        if self.moves_left:
+            conv_mov = self.conv_block(flow, filter_size=1,
+                                       input_channels=self.RESIDUAL_FILTERS,
+                                       output_channels=8)
+            h_conv_mov_flat = tf.reshape(conv_mov, [-1, 8*8*8])
+            W_fc4 = weight_variable([8 * 8 * 8, 512], name='fc4/weight')
+            b_fc4 = bias_variable([512], name='fc4/bias')
+            self.weights.append(W_fc4)
+            self.weights.append(b_fc4)
+            h_fc4 = tf.nn.relu(tf.add(tf.matmul(h_conv_mov_flat, W_fc4), b_fc4))
+            W_fc5 = weight_variable([512, self.MAX_MOVES_LEFT], name='fc5/weight')
+            b_fc5 = bias_variable([self.MAX_MOVES_LEFT], name='fc5/bias')
+            self.weights.append(W_fc5)
+            self.weights.append(b_fc5)
+            h_fc5 = tf.add(tf.matmul(h_fc4, W_fc5), b_fc5, name='moves_head')
+        else:
+            h_fc5 = None
 
-        return h_fc1, h_fc3
+        return h_fc1, h_fc3, h_fc5

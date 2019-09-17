@@ -137,7 +137,7 @@ class ChunkParser:
 
 
     @staticmethod
-    def parse_function(planes, probs, winner, q):
+    def parse_function(planes, probs, winner, q, moves_left):
         """
         Convert unpacked record batches to tensors for tensorflow training
         """
@@ -145,13 +145,15 @@ class ChunkParser:
         probs = tf.decode_raw(probs, tf.float32)
         winner = tf.decode_raw(winner, tf.float32)
         q = tf.decode_raw(q, tf.float32)
+        moves_left = tf.decode_raw(moves_left, tf.int32)
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
         winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
         q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 3))
+        moves_left = tf.reshape(moves_left, (ChunkParser.BATCH_SIZE,))
 
-        return (planes, probs, winner, q)
+        return (planes, probs, winner, q, moves_left)
 
 
     def convert_v4_to_tuple(self, content):
@@ -176,6 +178,8 @@ class ChunkParser:
             float32 best_d (4 bytes)
         """
         (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
+        # Use move_count for moves_left
+        moves_left = struct.pack('i', move_count)
         # Enforce move_count to 0
         move_count = 0
 
@@ -205,7 +209,7 @@ class ChunkParser:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q)
+        return (planes, probs, winner, best_q, moves_left)
 
 
     def sample_record(self, chunkdata):
@@ -298,7 +302,8 @@ class ChunkParser:
             yield ( b''.join([x[0] for x in s]),
                     b''.join([x[1] for x in s]),
                     b''.join([x[2] for x in s]),
-                    b''.join([x[3] for x in s]))
+                    b''.join([x[3] for x in s]),
+                    b''.join([x[4] for x in s]))
 
 
     def parse(self):
