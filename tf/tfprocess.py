@@ -194,10 +194,12 @@ class TFProcess:
                 tf.reduce_mean(tf.squared_difference(scalar_target, self.z_conv))
 
         if self.moves_left:
-            #moves = tf.constant(np.arange(self.MAX_MOVES_LEFT), dtype=tf.float32)
-            #m_dot = tf.tensordot(moves, tf.nn.softmax(self.m_conv), axes=[[0],[1]])
+            moves = tf.constant(np.arange(self.MAX_MOVES_LEFT), dtype=tf.float32)
+            m_dot = tf.tensordot(moves, tf.nn.softmax(self.m_conv), axes=[[0],[1]])
             #moves_left_mse = tf.square(((tf.cast(self.m_, tf.float32) - m_dot) / self.MAX_MOVES_LEFT))
             #self.moves_left_loss = tf.reduce_mean(moves_left_mse)
+            moves_left_abs = tf.abs(((tf.cast(self.m_, tf.float32) - m_dot)))
+            self.moves_left_abs = tf.reduce_mean(moves_left_abs)
             m_one_hot = tf.one_hot(self.m_, self.MAX_MOVES_LEFT)
             self.moves_left_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
                                     labels=m_one_hot, logits=self.m_conv))
@@ -507,10 +509,11 @@ class TFProcess:
         sum_mse = 0
         sum_policy = 0
         sum_moves_left = 0
+        sum_moves_left_abs = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            test_policy, test_moves_left, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
-                [self.policy_loss, self.moves_left_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
+            test_policy, test_moves_left, test_moves_left_abs, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
+                [self.policy_loss, self.moves_left_loss, self.moves_left_abs, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
                  self.next_batch],
                 feed_dict={self.training: False,
                            self.handle: self.test_handle})
@@ -519,6 +522,7 @@ class TFProcess:
             sum_policy += test_policy
             if self.moves_left:
                 sum_moves_left += test_moves_left
+                sum_moves_left_abs += test_moves_left_abs
             if self.wdl:
                 sum_value_accuracy += test_value_accuracy
                 sum_value += test_value
@@ -526,6 +530,7 @@ class TFProcess:
         sum_policy_accuracy *= 100
         sum_policy /= test_batches
         sum_moves_left /= test_batches
+        sum_moves_left_abs /= test_batches
         sum_value /= test_batches
         if self.wdl:
             sum_value_accuracy /= test_batches
@@ -541,6 +546,7 @@ class TFProcess:
             test_summaries = tf.Summary(value=[
                 tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
                 tf.Summary.Value(tag="Moves Left Loss", simple_value=sum_moves_left),
+                tf.Summary.Value(tag="Moves Left Mean Error", simple_value=sum_moves_left_abs),
                 tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
                 tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
                 tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
