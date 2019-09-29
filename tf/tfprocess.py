@@ -196,8 +196,6 @@ class TFProcess:
         if self.moves_left:
             moves = tf.constant(np.arange(self.MAX_MOVES_LEFT), dtype=tf.float32)
             m_dot = tf.tensordot(moves, tf.nn.softmax(self.m_conv), axes=[[0],[1]])
-            #moves_left_mse = tf.square(((tf.cast(self.m_, tf.float32) - m_dot) / self.MAX_MOVES_LEFT))
-            #self.moves_left_loss = tf.reduce_mean(moves_left_mse)
             moves_left_abs = tf.abs(((tf.cast(self.m_, tf.float32) - m_dot)))
             self.moves_left_abs = tf.reduce_mean(moves_left_abs)
             m_one_hot = tf.one_hot(self.m_, self.MAX_MOVES_LEFT)
@@ -480,7 +478,7 @@ class TFProcess:
                 self.calculate_swa_summaries(test_batches, steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
-        if steps == 1 or steps % self.cfg['training']['total_steps'] == 0 or (
+        if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             path = os.path.join(self.root_dir, self.cfg['name'])
             save_path = self.saver.save(self.session, path, global_step=steps)
