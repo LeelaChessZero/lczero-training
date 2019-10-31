@@ -285,6 +285,11 @@ class TFProcess:
                     for i in range(len(new_weights[e])):
                         if (i % (num_inputs*9))//9 == rule50_input:
                             new_weights[e][i] = new_weights[e][i]*99
+                        # zero all history except pawns from the previous move (13 and 19 starting from 0)
+                        if 14 <= (i%(num_inputs*9))//9 <= 18:
+                            new_weights[e][i] = 0
+                        if 20 <= (i%(num_inputs*9))//9 <= 103:
+                            new_weights[e][i] = 0
 
                 # Convolution weights need a transpose
                 #
