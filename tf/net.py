@@ -35,7 +35,7 @@ class Net:
 
         self.set_networkformat(net)
         self.pb.format.network_format.input = input
-        self.set_policyformat(value)
+        self.set_policyformat(policy)
         self.set_valueformat(value)
 
     def set_networkformat(self, net):

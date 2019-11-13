@@ -32,9 +32,10 @@ def main(cmd):
 
     START_FROM = cmd.start
 
-    update_global_step = tfp.global_step.assign(START_FROM)
-    tfp.session.run(update_global_step)
-    save_path = tfp.saver.save(tfp.session, root_dir, global_step=START_FROM)
+    update_global_step = tfprocess.global_step.assign(START_FROM)
+    tfprocess.session.run(update_global_step)
+    path = os.path.join(root_dir, cfg['name'])
+    save_path = tfprocess.saver.save(tfprocess.session, path, global_step=START_FROM)
 
     tfprocess.session.close()
 

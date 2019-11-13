@@ -274,6 +274,7 @@ class TFProcess:
         self.session.run(self.init)
 
     def replace_weights(self, new_weights):
+        all_evals = []
         for e, weights in enumerate(self.weights):
             if weights.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
@@ -295,7 +296,7 @@ class TFProcess:
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [3, 2, 0, 1]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
-                self.session.run(weights.assign(
+                all_evals.append(weights.assign(
                     tf.transpose(new_weight, [2, 3, 1, 0])))
             elif weights.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
@@ -305,12 +306,13 @@ class TFProcess:
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [1, 0]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
-                self.session.run(weights.assign(
+                all_evals.append(weights.assign(
                     tf.transpose(new_weight, [1, 0])))
             else:
                 # Biases, batchnorm etc
                 new_weight = tf.constant(new_weights[e], shape=weights.shape)
-                self.session.run(tf.assign(weights, new_weight))
+                all_evals.append(tf.assign(weights, new_weight))
+        self.session.run(all_evals)
         # This should result in identical file to the starting one
         # self.save_leelaz_weights('restored.txt')
 
@@ -571,7 +573,7 @@ class TFProcess:
 
     def snap_save(self):
         # Save a snapshot of all the variables in the current graph.
-        if not hasattr(self, 'save_op'):
+        if not hasattr(self, 'snap_save_op'):
             save_ops = []
             rest_ops = []
             for var in self.weights:
@@ -597,29 +599,31 @@ class TFProcess:
 
     def save_leelaz_weights(self, filename):
         all_weights = []
-        all_evals = []
-        for e, weights in enumerate(self.weights):
-            work_weights = None
-            if weights.shape.ndims == 4:
-                # Convolution weights need a transpose
-                #
-                # TF (kYXInputOutput)
-                # [filter_height, filter_width, in_channels, out_channels]
-                #
-                # Leela/cuDNN/Caffe (kOutputInputYX)
-                # [output, input, filter_size, filter_size]
-                work_weights = tf.transpose(weights, [3, 2, 0, 1])
-            elif weights.shape.ndims == 2:
-                # Fully connected layers are [in, out] in TF
-                #
-                # [out, in] in Leela
-                #
-                work_weights = tf.transpose(weights, [1, 0])
-            else:
-                # Biases, batchnorm etc
-                work_weights = weights
-            all_evals.append(work_weights)
-        nparrays = self.session.run(all_evals)
+        if not hasattr(self, 'pb_save_op'):
+            all_evals = []
+            for weights in self.weights:
+                work_weights = None
+                if weights.shape.ndims == 4:
+                    # Convolution weights need a transpose
+                    #
+                    # TF (kYXInputOutput)
+                    # [filter_height, filter_width, in_channels, out_channels]
+                    #
+                    # Leela/cuDNN/Caffe (kOutputInputYX)
+                    # [output, input, filter_size, filter_size]
+                    work_weights = tf.transpose(weights, [3, 2, 0, 1])
+                elif weights.shape.ndims == 2:
+                    # Fully connected layers are [in, out] in TF
+                    #
+                    # [out, in] in Leela
+                    #
+                    work_weights = tf.transpose(weights, [1, 0])
+                else:
+                    # Biases, batchnorm etc
+                    work_weights = weights
+                all_evals.append(work_weights)
+            self.pb_save_op = all_evals
+        nparrays = self.session.run(self.pb_save_op)
         for e, nparray in enumerate(nparrays):
             # Rescale rule50 related weights as clients do not normalize the input.
             if e == 0:

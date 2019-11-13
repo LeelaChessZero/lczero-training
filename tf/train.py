@@ -35,14 +35,22 @@ def get_chunks(data_prefix):
     return glob.glob(data_prefix + "*.gz")
 
 
-def get_latest_chunks(path, num_chunks):
+def get_latest_chunks(path, num_chunks, allow_less):
     chunks = []
     for d in glob.glob(path):
         chunks += get_chunks(d)
 
     if len(chunks) < num_chunks:
-        print("Not enough chunks {}".format(len(chunks)))
-        sys.exit(1)
+        if allow_less:
+            print("sorting {} chunks...".format(len(chunks)), end='')
+            chunks.sort(key=os.path.getmtime, reverse=True)
+            print("[done]")
+            print("{} - {}".format(os.path.basename(chunks[-1]), os.path.basename(chunks[0])))
+            random.shuffle(chunks)
+            return chunks
+        else:
+            print("Not enough chunks {}".format(len(chunks)))
+            sys.exit(1)
 
     print("sorting {} chunks...".format(len(chunks)), end='')
     chunks.sort(key=os.path.getmtime, reverse=True)
@@ -81,14 +89,18 @@ def main(cmd):
     print(yaml.dump(cfg, default_flow_style=False))
 
     num_chunks = cfg['dataset']['num_chunks']
+    allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
     num_train = int(num_chunks*train_ratio)
     num_test = num_chunks - num_train
     if 'input_test' in cfg['dataset']:
-        train_chunks = get_latest_chunks(cfg['dataset']['input_train'], num_train)
-        test_chunks = get_latest_chunks(cfg['dataset']['input_test'], num_test)
+        train_chunks = get_latest_chunks(cfg['dataset']['input_train'], num_train, allow_less)
+        test_chunks = get_latest_chunks(cfg['dataset']['input_test'], num_test, allow_less)
     else:
-        chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks)
+        chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks, allow_less)
+        if allow_less:
+            num_train = int(len(chunks)*train_ratio)
+            num_test = len(chunks) - num_train            
         train_chunks = chunks[:num_train]
         test_chunks = chunks[num_train:]
 
@@ -134,14 +146,17 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = cfg['training'].get('num_test_positions', num_test * 10)
+    num_evals = cfg['training'].get('num_test_positions', len(test_chunks) * 10)
     num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
     print("Using {} evaluation batches".format(num_evals))
 
     tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
 
     if cmd.output is not None:
-        tfprocess.save_leelaz_weights(cmd.output)
+        if cfg['training'].get('swa_output', False):
+            tfprocess.save_swa_weights(cmd.output)
+        else:
+            tfprocess.save_leelaz_weights(cmd.output)
 
     tfprocess.session.close()
     train_parser.shutdown()
