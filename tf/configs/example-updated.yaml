@@ -1,0 +1,50 @@
+%YAML 1.2
+---
+name: 'ld2-T60'                       # ideally no spaces
+gpu: 0                                 # gpu id to process on
+
+dataset: 
+  num_chunks: 1800000              # newest nof chunks to parse
+  train_ratio: 0.937              # trainingset ratio
+  # For separated test and train data.
+  input_train: 'D:/T60train/*/' # supports glob
+  input_test: 'D:/T60test/*/'  # supports glob
+  # For a one-shot run with all data in one directory.
+  # input: '/path/to/chunks/*/draw/'
+training:
+    batch_size: 4096                     # training batch
+    swa: true
+    swa_steps: 25
+    swa_max_n: 25
+    renorm: true
+    renorm_max_r: 1.0
+    renorm_max_d: 0.0
+    num_batch_splits: 16
+    max_grad_norm: 4.0
+    q_ratio: 0.0
+    mask_legal_moves: true
+    test_steps: 250                   # eval test set values after this many steps
+    train_avg_report_steps: 50      # training reports its average values after this many steps.
+    total_steps: 300000                # terminate after these steps
+    warmup_steps: 100                  # if global step is less than this, scale the current LR by ratio of global step to this value
+    checkpoint_steps: 1000         # optional frequency for checkpointing before finish
+    shuffle_size: 200000               # size of the shuffle buffer
+    lr_values: 
+        - 0.15
+        - 0.015
+        - 0.0015
+
+    lr_boundaries:                     # list of boundaries
+        - 50000
+        - 100000
+        - 200000
+
+    policy_loss_weight: 1.0            # weight of policy loss
+    value_loss_weight: 0.5             # weight of value loss
+    path: 'D:/lczero-training/tf/'   # network storage dir
+model:
+  filters: 128
+  residual_blocks: 10
+  se_ratio: 4
+  
+...
