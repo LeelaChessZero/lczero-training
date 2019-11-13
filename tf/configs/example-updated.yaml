@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-name: 'ld2-T60'                       # ideally no spaces
+name: 'example'                       # ideally no spaces
 gpu: 0                                 # gpu id to process on
 
 dataset: 
