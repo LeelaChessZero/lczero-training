@@ -694,14 +694,14 @@ class TFProcess:
                     "rmax": self.renorm_max_r,
                     "dmax": self.renorm_max_d
                     }
+                # Renorm has issues with fp16, cast to fp32.
                 net = tf.layers.batch_normalization(
                     tf.cast(net, tf.float32), epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=scale,
                     renorm=True, renorm_clipping=clipping,
                     renorm_momentum=self.renorm_momentum,
                     training=self.training)
-                if self.model_dtype != tf.float32:
-                    net = tf.cast(net, tf.float32)
+                net = tf.cast(net, self.model_dtype)
             else:
                 # Virtual batch doesn't work with fp16
                 virtual_batch = 64 if self.model_dtype == tf.float32 else None
@@ -760,8 +760,8 @@ class TFProcess:
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
         # later on.
-        weight_key = self.get_batchnorm_key() + "/"
-        conv_key = weight_key + "conv_weight"
+        weight_key = self.get_batchnorm_key()
+        conv_key = weight_key + "/conv_weight"
         W_conv = weight_variable([filter_size, filter_size,
                                   input_channels, output_channels], name=conv_key,
                                   dtype=self.model_dtype)
@@ -775,14 +775,14 @@ class TFProcess:
     def residual_block(self, inputs, channels):
         # First convnet
         orig = tf.identity(inputs)
-        weight_key_1 = self.get_batchnorm_key() + "/"
-        conv_key_1 = weight_key_1 + "conv_weight"
+        weight_key_1 = self.get_batchnorm_key()
+        conv_key_1 = weight_key_1 + "/conv_weight"
         W_conv_1 = weight_variable([3, 3, channels, channels], name=conv_key_1,
                 dtype=self.model_dtype)
 
         # Second convnet
-        weight_key_2 = self.get_batchnorm_key() + "/"
-        conv_key_2 = weight_key_2 + "conv_weight"
+        weight_key_2 = self.get_batchnorm_key()
+        conv_key_2 = weight_key_2 + "/conv_weight"
         W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2,
                 dtype=self.model_dtype)
 
