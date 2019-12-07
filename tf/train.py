@@ -25,6 +25,7 @@ import gzip
 import random
 import multiprocessing as mp
 import tensorflow as tf
+tf.compat.v1.disable_v2_behavior()
 from tfprocess import TFProcess
 from chunkparser import ChunkParser
 
@@ -116,6 +117,7 @@ def main(cmd):
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
+    tfprocess = TFProcess(cfg)
 
     train_parser = ChunkParser(FileDataSrc(train_chunks),
             shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
@@ -134,7 +136,6 @@ def main(cmd):
     dataset = dataset.prefetch(4)
     test_iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
 
-    tfprocess = TFProcess(cfg)
     tfprocess.init(dataset, train_iterator, test_iterator)
 
     if os.path.exists(os.path.join(root_dir, 'checkpoint')):

@@ -132,7 +132,9 @@ class TFProcess:
                                     allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
         config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
         self.session = tf.compat.v1.Session(config=config)
-
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
+    
         self.training = tf.compat.v1.placeholder(tf.bool)
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
         self.learning_rate = tf.compat.v1.placeholder(tf.float32)
