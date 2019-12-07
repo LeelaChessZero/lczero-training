@@ -43,9 +43,7 @@ def weight_variable(shape, name=None, dtype=tf.float32):
     stddev = trunc_correction * np.sqrt(2.0 / (fan_in + fan_out))
     # Do not use a constant as the initializer, that will cause the
     # variable to be stored in wrong dtype.
-    weights = tf.compat.v1.get_variable(
-        name, shape, dtype=dtype,
-        initializer=tf.compat.v1.truncated_normal_initializer(stddev=stddev))
+    weights = tf.Variable(tf.compat.v1.truncated_normal_initializer(stddev=stddev)(shape, dtype), name=name)
     tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, weights)
     return weights
 
@@ -55,8 +53,7 @@ def weight_variable(shape, name=None, dtype=tf.float32):
 
 
 def bias_variable(shape, name=None, dtype=tf.float32):
-    return tf.compat.v1.get_variable(name, shape, dtype=dtype,
-            initializer=tf.compat.v1.zeros_initializer())
+    return tf.Variable(tf.compat.v1.zeros_initializer()(shape, dtype), name=name)
 
 def conv2d(x, W):
     return tf.nn.conv2d(input=x, filters=W, data_format='NCHW',
@@ -836,10 +833,7 @@ class TFProcess:
 
             h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
             fc1_init = tf.constant(lc0_az_policy_map.make_map(), dtype=self.model_dtype)
-            W_fc1 = tf.compat.v1.get_variable("policy_map",
-                                    initializer=fc1_init,
-                                    trainable=False,
-                                    dtype=self.model_dtype)
+            W_fc1 = tf.Variable(fcl_init, trainable=False, name="policy_map")
 
             h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
