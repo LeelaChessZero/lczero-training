@@ -833,7 +833,7 @@ class TFProcess:
 
             h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
             fc1_init = tf.constant(lc0_az_policy_map.make_map(), dtype=self.model_dtype)
-            W_fc1 = tf.Variable(fcl_init, trainable=False, name="policy_map")
+            W_fc1 = tf.Variable(fc1_init, trainable=False, name="policy_map")
 
             h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
