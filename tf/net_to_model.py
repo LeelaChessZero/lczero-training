@@ -28,10 +28,10 @@ if cfg['model']['residual_blocks'] != blocks:
 weights = net.get_weights()
 
 x = [
-    tf.placeholder(tf.float32, [None, 112, 8*8]),
-    tf.placeholder(tf.float32, [None, 1858]),
-    tf.placeholder(tf.float32, [None, 3]),
-    tf.placeholder(tf.float32, [None, 3]),
+    tf.compat.v1.placeholder(tf.float32, [None, 112, 8*8]),
+    tf.compat.v1.placeholder(tf.float32, [None, 1858]),
+    tf.compat.v1.placeholder(tf.float32, [None, 3]),
+    tf.compat.v1.placeholder(tf.float32, [None, 3]),
     ]
 
 tfp = tfprocess.TFProcess(cfg)

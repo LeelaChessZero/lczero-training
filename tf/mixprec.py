@@ -16,7 +16,7 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
     if trainable and dtype != tf.float32:
         cast_name = name + '/fp16_cast'
         try:
-            cast_variable = tf.get_default_graph().get_tensor_by_name(
+            cast_variable = tf.compat.v1.get_default_graph().get_tensor_by_name(
                 cast_name + ':0')
         except KeyError:
             cast_variable = tf.cast(variable, dtype, name=cast_name)
@@ -25,7 +25,7 @@ def float32_variable_storage_getter(getter, name, shape=None, dtype=None,
     return variable
 
 
-class LossScalingOptimizer(tf.train.Optimizer):
+class LossScalingOptimizer(tf.compat.v1.train.Optimizer):
     """An optimizer that scales loss and un-scales gradients."""
 
     def __init__(self, optimizer,

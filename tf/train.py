@@ -123,7 +123,7 @@ def main(cmd):
         train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
     dataset = dataset.map(ChunkParser.parse_function)
     dataset = dataset.prefetch(4)
-    train_iterator = dataset.make_one_shot_iterator()
+    train_iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     test_parser = ChunkParser(FileDataSrc(test_chunks),
@@ -132,7 +132,7 @@ def main(cmd):
         test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
     dataset = dataset.map(ChunkParser.parse_function)
     dataset = dataset.prefetch(4)
-    test_iterator = dataset.make_one_shot_iterator()
+    test_iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
 
     tfprocess = TFProcess(cfg)
     tfprocess.init(dataset, train_iterator, test_iterator)

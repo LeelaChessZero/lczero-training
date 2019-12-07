@@ -43,10 +43,10 @@ def weight_variable(shape, name=None, dtype=tf.float32):
     stddev = trunc_correction * np.sqrt(2.0 / (fan_in + fan_out))
     # Do not use a constant as the initializer, that will cause the
     # variable to be stored in wrong dtype.
-    weights = tf.get_variable(
+    weights = tf.compat.v1.get_variable(
         name, shape, dtype=dtype,
-        initializer=tf.truncated_normal_initializer(stddev=stddev, dtype=dtype))
-    tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, weights)
+        initializer=tf.compat.v1.truncated_normal_initializer(stddev=stddev))
+    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, weights)
     return weights
 
 # Bias weights for layers not followed by BatchNorm
@@ -55,11 +55,11 @@ def weight_variable(shape, name=None, dtype=tf.float32):
 
 
 def bias_variable(shape, name=None, dtype=tf.float32):
-    return tf.get_variable(name, shape, dtype=dtype,
-            initializer=tf.zeros_initializer())
+    return tf.compat.v1.get_variable(name, shape, dtype=dtype,
+            initializer=tf.compat.v1.zeros_initializer())
 
 def conv2d(x, W):
-    return tf.nn.conv2d(x, W, data_format='NCHW',
+    return tf.nn.conv2d(input=x, filters=W, data_format='NCHW',
                         strides=[1, 1, 1, 1], padding='SAME')
 
 class TFProcess:
@@ -128,25 +128,25 @@ class TFProcess:
         self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
         self.renorm_momentum = self.cfg['training'].get('renorm_momentum', 0.99)
 
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.90,
+        gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.90,
                                     allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
-        config = tf.ConfigProto(gpu_options=gpu_options)
-        self.session = tf.Session(config=config)
+        config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
+        self.session = tf.compat.v1.Session(config=config)
 
-        self.training = tf.placeholder(tf.bool)
+        self.training = tf.compat.v1.placeholder(tf.bool)
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.learning_rate = tf.placeholder(tf.float32)
+        self.learning_rate = tf.compat.v1.placeholder(tf.float32)
 
     def init(self, dataset, train_iterator, test_iterator):
         # TF variables
-        self.handle = tf.placeholder(tf.string, shape=[])
-        iterator = tf.data.Iterator.from_string_handle(
-            self.handle, dataset.output_types, dataset.output_shapes)
+        self.handle = tf.compat.v1.placeholder(tf.string, shape=[])
+        iterator = tf.compat.v1.data.Iterator.from_string_handle(
+            self.handle, tf.compat.v1.data.get_output_types(dataset), tf.compat.v1.data.get_output_shapes(dataset))
         self.next_batch = iterator.get_next()
         self.train_handle = self.session.run(train_iterator.string_handle())
         self.test_handle = self.session.run(test_iterator.string_handle())
         # This forces trainable variables to be stored as fp32
-        with tf.variable_scope("fp32_storage",
+        with tf.compat.v1.variable_scope("fp32_storage",
                 custom_getter=float32_variable_storage_getter):
             self.init_net(self.next_batch)
 
@@ -168,14 +168,14 @@ class TFProcess:
             move_is_legal = tf.greater_equal(self.y_, 0)
             # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
             illegal_filler = tf.zeros_like(self.y_conv) - 1.0e10
-            self.y_conv = tf.where(move_is_legal, self.y_conv, illegal_filler)
+            self.y_conv = tf.compat.v1.where_v2(move_is_legal, self.y_conv, illegal_filler)
         # y_ still has -1 on illegal moves, flush them to 0
         self.y_ = tf.nn.relu(self.y_)
 
         policy_cross_entropy = \
-            tf.nn.softmax_cross_entropy_with_logits(labels=self.y_,
+            tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(labels=tf.stop_gradient(self.y_),
                                                     logits=self.y_conv)
-        self.policy_loss = tf.reduce_mean(policy_cross_entropy)
+        self.policy_loss = tf.reduce_mean(input_tensor=policy_cross_entropy)
 
         q_ratio = self.cfg['training'].get('q_ratio', 0)
         assert 0 <= q_ratio <= 1
@@ -188,22 +188,22 @@ class TFProcess:
         # Loss on value head
         if self.wdl:
             value_cross_entropy = \
-                tf.nn.softmax_cross_entropy_with_logits(labels=target,
+                tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(labels=tf.stop_gradient(target),
                                                     logits=self.z_conv)
-            self.value_loss = tf.reduce_mean(value_cross_entropy)
+            self.value_loss = tf.reduce_mean(input_tensor=value_cross_entropy)
             scalar_z_conv = tf.matmul(tf.nn.softmax(self.z_conv), wdl)
             self.mse_loss = \
-                tf.reduce_mean(tf.squared_difference(scalar_target, scalar_z_conv))
+                tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, scalar_z_conv))
         else:
             self.value_loss = tf.constant(0)
             self.mse_loss = \
-                tf.reduce_mean(tf.squared_difference(scalar_target, self.z_conv))
+                tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, self.z_conv))
 
         # Regularizer
-        regularizer = tf.contrib.layers.l2_regularizer(scale=0.0001)
-        reg_variables = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        self.reg_term = \
-            tf.contrib.layers.apply_regularization(regularizer, reg_variables)
+        regularizer = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+        reg_variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES)
+        penalties = [regularizer(w) for w in reg_variables]
+        self.reg_term = tf.math.add_n(penalties)
 
         if self.model_dtype != tf.float32:
             self.reg_term = tf.cast(self.reg_term, tf.float32)
@@ -226,7 +226,7 @@ class TFProcess:
 
         # You need to change the learning rate here if you are training
         # from a self-play training set, for example start with 0.005 instead.
-        opt_op = tf.train.MomentumOptimizer(
+        opt_op = tf.compat.v1.train.MomentumOptimizer(
             learning_rate=self.learning_rate, momentum=0.9, use_nesterov=True)
 
         opt_op = LossScalingOptimizer(opt_op, scale=self.loss_scale)
@@ -244,19 +244,19 @@ class TFProcess:
                 var = tf.Variable(
                     tf.zeros(shape=w.shape), name='swa/'+name, trainable=False)
                 accum.append(
-                    tf.assign(var, var * (n / (n + 1.)) + tf.stop_gradient(w) * (1. / (n + 1.))))
-                load.append(tf.assign(w, var))
+                    tf.compat.v1.assign(var, var * (n / (n + 1.)) + tf.stop_gradient(w) * (1. / (n + 1.))))
+                load.append(tf.compat.v1.assign(w, var))
             with tf.control_dependencies(accum):
-                self.swa_accum_op = tf.assign_add(n, 1.)
+                self.swa_accum_op = tf.compat.v1.assign_add(n, 1.)
             self.swa_load_op = tf.group(*load)
 
         # Accumulate (possibly multiple) gradient updates to simulate larger batch sizes than can be held in GPU memory.
         gradient_accum = [tf.Variable(tf.zeros_like(
-            var.initialized_value()), trainable=False) for var in tf.trainable_variables()]
+            var.initialized_value()), trainable=False) for var in tf.compat.v1.trainable_variables()]
         self.zero_op = [var.assign(tf.zeros_like(var))
                         for var in gradient_accum]
 
-        self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        self.update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(self.update_ops):
             gradients = opt_op.compute_gradients(loss)
         self.accum_op = [accum.assign_add(
@@ -270,13 +270,13 @@ class TFProcess:
             [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
 
         correct_policy_prediction = \
-            tf.equal(tf.argmax(self.y_conv, 1), tf.argmax(self.y_, 1))
+            tf.equal(tf.argmax(input=self.y_conv, axis=1), tf.argmax(input=self.y_, axis=1))
         correct_policy_prediction = tf.cast(correct_policy_prediction, tf.float32)
-        self.policy_accuracy = tf.reduce_mean(correct_policy_prediction)
+        self.policy_accuracy = tf.reduce_mean(input_tensor=correct_policy_prediction)
         correct_value_prediction = \
-            tf.equal(tf.argmax(self.z_conv, 1), tf.argmax(self.z_, 1))
+            tf.equal(tf.argmax(input=self.z_conv, axis=1), tf.argmax(input=self.z_, axis=1))
         correct_value_prediction = tf.cast(correct_value_prediction, tf.float32)
-        self.value_accuracy = tf.reduce_mean(correct_value_prediction)
+        self.value_accuracy = tf.reduce_mean(input_tensor=correct_value_prediction)
 
         self.avg_policy_loss = []
         self.avg_value_loss = []
@@ -286,18 +286,18 @@ class TFProcess:
         self.last_steps = None
 
         # Summary part
-        self.test_writer = tf.summary.FileWriter(
+        self.test_writer = tf.compat.v1.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])))
-        self.train_writer = tf.summary.FileWriter(
+        self.train_writer = tf.compat.v1.summary.FileWriter(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])))
         if self.swa_enabled:
-            self.swa_writer = tf.summary.FileWriter(
+            self.swa_writer = tf.compat.v1.summary.FileWriter(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
-        self.histograms = [tf.summary.histogram(
+        self.histograms = [tf.compat.v1.summary.histogram(
             weight.name, weight) for weight in self.weights]
 
-        self.init = tf.global_variables_initializer()
-        self.saver = tf.train.Saver()
+        self.init = tf.compat.v1.global_variables_initializer()
+        self.saver = tf.compat.v1.train.Saver()
 
         self.session.run(self.init)
 
@@ -325,7 +325,7 @@ class TFProcess:
                 shape = [s[i] for i in [3, 2, 0, 1]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
                 all_evals.append(weights.assign(
-                    tf.transpose(new_weight, [2, 3, 1, 0])))
+                    tf.transpose(a=new_weight, perm=[2, 3, 1, 0])))
             elif weights.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
@@ -335,11 +335,11 @@ class TFProcess:
                 shape = [s[i] for i in [1, 0]]
                 new_weight = tf.constant(new_weights[e], shape=shape)
                 all_evals.append(weights.assign(
-                    tf.transpose(new_weight, [1, 0])))
+                    tf.transpose(a=new_weight, perm=[1, 0])))
             else:
                 # Biases, batchnorm etc
                 new_weight = tf.constant(new_weights[e], shape=weights.shape)
-                all_evals.append(tf.assign(weights, new_weight))
+                all_evals.append(tf.compat.v1.assign(weights, new_weight))
         self.session.run(all_evals)
         # This should result in identical file to the starting one
         # self.save_leelaz_weights('restored.txt')
@@ -351,7 +351,7 @@ class TFProcess:
     def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
         # which is not a multiple of total_steps.
-        steps = tf.train.global_step(self.session, self.global_step)
+        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
             self.process(batch_size, test_batches, batch_splits=batch_splits)
@@ -361,7 +361,7 @@ class TFProcess:
             self.time_start = time.time()
 
         # Get the initial steps value before we do a training step.
-        steps = tf.train.global_step(self.session, self.global_step)
+        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
         if not self.last_steps:
             self.last_steps = steps
 
@@ -419,7 +419,7 @@ class TFProcess:
                                         feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
 
         # Update steps since training should have incremented it.
-        steps = tf.train.global_step(self.session, self.global_step)
+        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
 
         if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
             pol_loss_w = self.cfg['training']['policy_loss_weight']
@@ -443,14 +443,14 @@ class TFProcess:
             update_ratio_summaries = self.compute_update_ratio(
                 before_weights, after_weights)
 
-            train_summaries = tf.Summary(value=[
-                tf.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
-                tf.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
-                tf.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
-                tf.Summary.Value(tag="LR", simple_value=self.lr),
-                tf.Summary.Value(tag="Gradient norm",
+            train_summaries = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
+                tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
+                tf.compat.v1.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
+                tf.compat.v1.Summary.Value(tag="LR", simple_value=self.lr),
+                tf.compat.v1.Summary.Value(tag="Gradient norm",
                                  simple_value=grad_norm / batch_splits),
-                tf.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
+                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
             self.train_writer.add_summary(train_summaries, steps)
             self.train_writer.add_summary(update_ratio_summaries, steps)
             self.time_start = time_end
@@ -524,18 +524,18 @@ class TFProcess:
         # TODO store value and value accuracy in pb
         self.net.pb.training_params.accuracy = sum_policy_accuracy
         if self.wdl:
-            test_summaries = tf.Summary(value=[
-                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-                tf.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
-                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-                tf.Summary.Value(tag="Value Loss", simple_value=sum_value),
-                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+            test_summaries = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.compat.v1.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
+                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=sum_value),
+                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         else:
-            test_summaries = tf.Summary(value=[
-                tf.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-                tf.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-                tf.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
-        test_summaries = tf.summary.merge(
+            test_summaries = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        test_summaries = tf.compat.v1.summary.merge(
             [test_summaries] + self.histograms).eval(session=self.session)
         self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
@@ -552,12 +552,12 @@ class TFProcess:
         weight_norms = [np.linalg.norm(w.ravel()) for w in before_weights]
         ratios = [(tensor.name, d / w) for d, w, tensor in zip(delta_norms, weight_norms, self.weights) if not 'moving' in tensor.name]
         all_summaries = [
-            tf.Summary.Value(tag='update_ratios/' +
+            tf.compat.v1.Summary.Value(tag='update_ratios/' +
                              name, simple_value=ratio)
             for name, ratio in ratios]
         ratios = np.log10([r for (_, r) in ratios if 0 < r < np.inf])
         all_summaries.append(self.log_histogram('update_ratios_log10', ratios))
-        return tf.Summary(value=all_summaries)
+        return tf.compat.v1.Summary(value=all_summaries)
 
     def log_histogram(self, tag, values, bins=1000):
         """Logs the histogram of a list/vector of values.
@@ -571,7 +571,7 @@ class TFProcess:
         counts, bin_edges = np.histogram(values, bins=bins)
 
         # Fill fields of histogram proto
-        hist = tf.HistogramProto()
+        hist = tf.compat.v1.HistogramProto()
         hist.min = float(np.min(values))
         hist.max = float(np.max(values))
         hist.num = int(np.prod(values.shape))
@@ -589,7 +589,7 @@ class TFProcess:
         for c in counts:
             hist.bucket.append(c)
 
-        return tf.Summary.Value(tag=tag, histo=hist)
+        return tf.compat.v1.Summary.Value(tag=tag, histo=hist)
 
     def update_swa(self):
         # Add the current weight vars to the running average.
@@ -604,11 +604,11 @@ class TFProcess:
             rest_ops = []
             for var in self.weights:
                 if isinstance(var, str):
-                    var = tf.get_default_graph().get_tensor_by_name(var)
+                    var = tf.compat.v1.get_default_graph().get_tensor_by_name(var)
                 name = var.name.split(':')[0]
                 v = tf.Variable(var, name='save/'+name, trainable=False)
-                save_ops.append(tf.assign(v, var))
-                rest_ops.append(tf.assign(var, v))
+                save_ops.append(tf.compat.v1.assign(v, var))
+                rest_ops.append(tf.compat.v1.assign(var, v))
             self.snap_save_op = tf.group(*save_ops)
             self.snap_restore_op = tf.group(*rest_ops)
         self.session.run(self.snap_save_op)
@@ -637,13 +637,13 @@ class TFProcess:
                     #
                     # Leela/cuDNN/Caffe (kOutputInputYX)
                     # [output, input, filter_size, filter_size]
-                    work_weights = tf.transpose(weights, [3, 2, 0, 1])
+                    work_weights = tf.transpose(a=weights, perm=[3, 2, 0, 1])
                 elif weights.shape.ndims == 2:
                     # Fully connected layers are [in, out] in TF
                     #
                     # [out, in] in Leela
                     #
-                    work_weights = tf.transpose(weights, [1, 0])
+                    work_weights = tf.transpose(a=weights, perm=[1, 0])
                 else:
                     # Biases, batchnorm etc
                     work_weights = weights
@@ -677,7 +677,7 @@ class TFProcess:
     def add_weights(self, var):
         if var.name[-11:] == "fp16_cast:0":
             name = var.name[:-12] + ":0"
-            var = tf.get_default_graph().get_tensor_by_name(name)
+            var = tf.compat.v1.get_default_graph().get_tensor_by_name(name)
         # All trainable variables should be stored as fp32
         assert var.dtype.base_dtype == tf.float32
         self.weights.append(var)
@@ -687,7 +687,7 @@ class TFProcess:
         # a unique scope that we can store, and use to look them back up
         # later on.
 
-        with tf.variable_scope(scope, custom_getter=float32_variable_storage_getter):
+        with tf.compat.v1.variable_scope(scope, custom_getter=float32_variable_storage_getter):
             if self.renorm_enabled:
                 clipping = {
                     "rmin": 1.0/self.renorm_max_r,
@@ -695,7 +695,7 @@ class TFProcess:
                     "dmax": self.renorm_max_d
                     }
                 # Renorm has issues with fp16, cast to fp32.
-                net = tf.layers.batch_normalization(
+                net = tf.compat.v1.layers.batch_normalization(
                     tf.cast(net, tf.float32), epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=scale,
                     renorm=True, renorm_clipping=clipping,
@@ -705,7 +705,7 @@ class TFProcess:
             else:
                 # Virtual batch doesn't work with fp16
                 virtual_batch = 64 if self.model_dtype == tf.float32 else None
-                net = tf.layers.batch_normalization(
+                net = tf.compat.v1.layers.batch_normalization(
                     net, epsilon=1e-5, axis=1, fused=True,
                     center=True, scale=scale,
                     virtual_batch_size=virtual_batch,
@@ -718,7 +718,7 @@ class TFProcess:
                                     dtype=tf.float32)
             else:
                 name = "fp32_storage/" + scope + '/batch_normalization/' + v + ':0'
-                var = tf.get_default_graph().get_tensor_by_name(name)
+                var = tf.compat.v1.get_default_graph().get_tensor_by_name(name)
             self.add_weights(var)
         return net
 
@@ -727,7 +727,7 @@ class TFProcess:
         assert channels % ratio == 0
 
         # NCHW format reduced to NC
-        net = tf.reduce_mean(x, axis=[2, 3])
+        net = tf.reduce_mean(input_tensor=x, axis=[2, 3])
 
         W_fc1 = weight_variable([channels, channels // ratio], name='se_fc1_w',
                                   dtype=self.model_dtype)
@@ -793,7 +793,7 @@ class TFProcess:
         self.add_weights(W_conv_2)
         h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), weight_key_2, scale=True)
 
-        with tf.variable_scope(weight_key_2):
+        with tf.compat.v1.variable_scope(weight_key_2):
             h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
         h_out_2 = tf.nn.relu(tf.add(h_se, orig))
 
@@ -826,7 +826,7 @@ class TFProcess:
                                           dtype=self.model_dtype)
 
             self.add_weights(W_pol_conv)
-            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
             self.add_weights(b_pol_conv)
 
             conv_pol2 = tf.nn.bias_add(
@@ -834,7 +834,7 @@ class TFProcess:
 
             h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
             fc1_init = tf.constant(lc0_az_policy_map.make_map(), dtype=self.model_dtype)
-            W_fc1 = tf.get_variable("policy_map",
+            W_fc1 = tf.compat.v1.get_variable("policy_map",
                                     initializer=fc1_init,
                                     trainable=False,
                                     dtype=self.model_dtype)
@@ -852,7 +852,7 @@ class TFProcess:
             b_fc1 = bias_variable([1858], name='fc1/bias',
                                   dtype=self.model_dtype)
             self.add_weights(W_fc1)
-            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
             self.add_weights(b_fc1)
             h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
                            b_fc1, name='policy_head')
@@ -882,7 +882,7 @@ class TFProcess:
         if not self.wdl:
             h_fc3 = tf.nn.tanh(h_fc3)
         else:
-            tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
 
 
         return h_fc1, h_fc3

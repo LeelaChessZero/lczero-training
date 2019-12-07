@@ -17,10 +17,10 @@ def main(cmd):
         os.makedirs(root_dir)
 
     x = [
-        tf.placeholder(tf.float32, [None, 112, 8*8]),
-        tf.placeholder(tf.float32, [None, 1858]),
-        tf.placeholder(tf.float32, [None, 3]),
-        tf.placeholder(tf.float32, [None, 3]),
+        tf.compat.v1.placeholder(tf.float32, [None, 112, 8*8]),
+        tf.compat.v1.placeholder(tf.float32, [None, 1858]),
+        tf.compat.v1.placeholder(tf.float32, [None, 3]),
+        tf.compat.v1.placeholder(tf.float32, [None, 3]),
     ]
 
     tfprocess = TFProcess(cfg)
