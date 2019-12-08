@@ -49,8 +49,7 @@ class ApplySqueezeExcitation(tf.keras.layers.Layer):
 class ApplyPolicyMap(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super(ApplyPolicyMap, self).__init__(**kwargs)
-        fc1_init = tf.constant(lc0_az_policy_map.make_map())
-        self.fc1 = tf.Variable(fc1_init, trainable=False)
+        self.fc1 = tf.constant(lc0_az_policy_map.make_map())
 
     def call(self, inputs):
         h_conv_pol_flat = tf.reshape(inputs, [-1, 80*8*8])
