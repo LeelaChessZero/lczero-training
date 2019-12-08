@@ -596,11 +596,11 @@ class TFProcess:
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             self.manager.save()
-            #print("Model saved in file: {}".format(save_path))
-            #leela_path = path + "-" + str(steps)
+            print("Model saved in file: {}".format(self.manager.latest_checkpoint))
+            leela_path = self.manager.latest_checkpoint + "-" + str(steps)
             #swa_path = path + "-swa-" + str(steps)
             self.net.pb.training_params.training_steps = steps
-            #self.save_leelaz_weights(leela_path)
+            self.save_leelaz_weights_v2(leela_path)
             #print("Weights saved in file: {}".format(leela_path))
             #if self.swa_enabled:
             #    self.save_swa_weights(swa_path)
@@ -947,6 +947,10 @@ class TFProcess:
         self.save_leelaz_weights(filename)
         self.snap_restore()
 
+    def save_leelaz_weights_v2(self, filename):
+        for w in self.model.weights:
+            tf.print(w.name)
+
     def save_leelaz_weights(self, filename):
         all_weights = []
         if not hasattr(self, 'pb_save_op'):
@@ -1128,7 +1132,7 @@ class TFProcess:
         conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
         out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv1, scale=False))
         conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(out1)
-        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv1, scale=True), channels)
+        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, scale=True), channels)
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
         
 
