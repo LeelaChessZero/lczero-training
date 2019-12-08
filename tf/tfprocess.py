@@ -525,7 +525,8 @@ class TFProcess:
             if not grads:
                 grads = tape.gradient(total_loss, self.model.trainable_weights)
             else:
-                grads += tape.gradient(total_loss, self.model.trainable_weights)
+                new_grads = tape.gradient(total_loss, self.model.trainable_weights)
+                grads = [tf.math.add(a, b) for (a, b) in zip(grads, new_grads)]
             # Keep running averages
             # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
             # get comparable values.
