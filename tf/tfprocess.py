@@ -527,8 +527,9 @@ class TFProcess:
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.        
         self.active_lr = self.lr / batch_splits
+        max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * batch_splits
+        grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
-        #grad_norm = compute_norm(self.model.trainable_weights)
 
         # Update steps.
         self.global_step.assign_add(1)
