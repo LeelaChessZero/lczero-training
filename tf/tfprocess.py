@@ -146,7 +146,8 @@ class TFProcess:
         self.test_dataset = test_dataset
         self.test_iter = iter(test_dataset)
         self.init_net_v2()
-        self.checkpoint = tf.train.Checkpoint(optimizer=self.optimizer, model=self.model, global_step=self.global_step)
+        self.checkpoint = tf.train.Checkpoint(optimizer=self.optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
+        self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
             self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
 
@@ -171,6 +172,13 @@ class TFProcess:
         input_var = tf.keras.Input(shape=(112, 8*8))
         x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=self.construct_net_v2(x_planes))
+        self.swa_count = None
+        self.swa_weights = None
+        if self.swa_enabled:
+            # Count of networks accumulated into SWA
+            self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
+            self.swa_weights = [tf.Variable(w, trainable=False) for w in self.model.weights]
+        
         self.active_lr = 0.01
         # TODO set up optimizers and loss functions.
         self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
@@ -469,12 +477,12 @@ class TFProcess:
             test_batches //= 2
 
         # Run test before first step to see delta since end of last run.
-        #if steps % self.cfg['training']['total_steps'] == 0:
+        if steps % self.cfg['training']['total_steps'] == 0:
             # Steps is given as one higher than current in order to avoid it
             # being equal to the value the end of a run is stored against.
-        #    self.calculate_test_summaries_v2(test_batches, steps + 1)
-        #    if self.swa_enabled:
-        #        self.calculate_swa_summaries_v2(test_batches, steps + 1)
+            self.calculate_test_summaries_v2(test_batches, steps + 1)
+            if self.swa_enabled:
+                self.calculate_swa_summaries_v2(test_batches, steps + 1)
 
         # Make sure that ghost batch norm can be applied
         if batch_size % 64 != 0:
@@ -512,6 +520,8 @@ class TFProcess:
                     total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
             if self.wdl:
                 mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+            else:
+                value_loss = self.value_loss_fn(self.qMix(z, q), value)
             if not grads:
                 grads = tape.gradient(total_loss, self.model.trainable_weights)
             else:
@@ -571,15 +581,15 @@ class TFProcess:
             self.last_steps = steps
             self.avg_policy_loss, self.avg_value_loss, self.avg_mse_loss, self.avg_reg_term = [], [], [], []
 
-        #if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
-        #    self.update_swa_v2()
+        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
+            self.update_swa_v2()
 
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
-        #if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
-        #    self.calculate_test_summaries_v2(test_batches, steps)
-        #    if self.swa_enabled:
-        #        self.calculate_swa_summaries_v2(test_batches, steps)
+        if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
+            self.calculate_test_summaries_v2(test_batches, steps)
+            if self.swa_enabled:
+                self.calculate_swa_summaries_v2(test_batches, steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
@@ -721,6 +731,17 @@ class TFProcess:
                 self.save_swa_weights(swa_path)
                 print("SWA Weights saved in file: {}".format(swa_path))
 
+    def calculate_swa_summaries_v2(self, test_batches, steps):
+        backup = [w.read_value() for w in self.model.weights]
+        for (swa, w) in zip(self.swa_weights, self.model.weights):
+            w.assign(swa.read_value())
+        #true_test_writer, self.test_writer = self.test_writer, self.swa_writer
+        print('swa', end=' ')
+        self.calculate_test_summaries_v2(test_batches, steps)
+        #self.test_writer = true_test_writer
+        for (old, w) in zip(backup, self.model.weights):
+            w.assign(old)
+
     def calculate_swa_summaries(self, test_batches, steps):
         self.snap_save()
         self.session.run(self.swa_load_op)
@@ -729,6 +750,63 @@ class TFProcess:
         self.calculate_test_summaries(test_batches, steps)
         self.test_writer = true_test_writer
         self.snap_restore()
+
+    def calculate_test_summaries_v2(self, test_batches, steps):
+        sum_policy_accuracy = 0
+        sum_value_accuracy = 0
+        sum_mse = 0
+        sum_policy = 0
+        sum_value = 0
+        for _ in range(0, test_batches):
+            x, y, z, q = next(self.test_iter)
+            policy, value = self.model(x)
+            policy_loss = self.policy_loss_fn(y, policy)                    
+            reg_term = sum(self.model.losses)
+            if self.wdl:
+                value_loss = self.value_loss_fn(self.qMix(z, q), value)
+                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+                total_loss = self.lossMix(policy_loss, value_loss) + reg_term
+            else:
+                value_loss = self.value_loss_fn(self.qMix(z, q), value)
+                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+                total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
+            #sum_policy_accuracy += test_policy_accuracy
+            sum_mse += mse_loss
+            sum_policy += policy_loss
+            if self.wdl:
+                #sum_value_accuracy += test_value_accuracy
+                sum_value += value_loss
+        #sum_policy_accuracy /= test_batches
+        #sum_policy_accuracy *= 100
+        sum_policy /= test_batches
+        sum_value /= test_batches
+        #if self.wdl:
+            #sum_value_accuracy /= test_batches
+            #sum_value_accuracy *= 100
+        # Additionally rescale to [0, 1] so divide by 4
+        sum_mse /= (4.0 * test_batches)
+        self.net.pb.training_params.learning_rate = self.lr
+        self.net.pb.training_params.mse_loss = sum_mse
+        self.net.pb.training_params.policy_loss = sum_policy
+        # TODO store value and value accuracy in pb
+        #self.net.pb.training_params.accuracy = sum_policy_accuracy
+        #if self.wdl:
+        #    test_summaries = tf.compat.v1.Summary(value=[
+        #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+        #        tf.compat.v1.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
+        #        tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+        #        tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=sum_value),
+        #        tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        #else:
+        #    test_summaries = tf.compat.v1.Summary(value=[
+        #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
+        #        tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
+        #        tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
+        #test_summaries = tf.compat.v1.summary.merge(
+        #    [test_summaries] + self.histograms).eval(session=self.session)
+        #self.test_writer.add_summary(test_summaries, steps)
+        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
     def calculate_test_summaries(self, test_batches, steps):
         sum_policy_accuracy = 0
@@ -829,6 +907,12 @@ class TFProcess:
             hist.bucket.append(c)
 
         return tf.compat.v1.Summary.Value(tag=tag, histo=hist)
+
+    def update_swa_v2(self):
+        num = self.swa_count.read_value()
+        for (w, swa) in zip(self.model.weights, self.swa_weights):
+            swa.assign(swa.read_value() * (num / (num + 1.)) + w.read_value() * (1. / (num + 1.)))
+        self.swa_count.assign(min(num + 1., self.swa_max_n))
 
     def update_swa(self):
         # Add the current weight vars to the running average.
