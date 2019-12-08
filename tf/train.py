@@ -25,7 +25,7 @@ import gzip
 import random
 import multiprocessing as mp
 import tensorflow as tf
-tf.compat.v1.disable_v2_behavior()
+#tf.compat.v1.disable_v2_behavior()
 from tfprocess import TFProcess
 from chunkparser import ChunkParser
 
@@ -121,26 +121,28 @@ def main(cmd):
 
     train_parser = ChunkParser(FileDataSrc(train_chunks),
             shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
+    train_dataset = tf.data.Dataset.from_generator(
         train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    train_iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
+    train_dataset = train_dataset.map(ChunkParser.parse_function)
+    train_dataset = train_dataset.prefetch(4)
+    #train_iterator = tf.compat.v1.data.make_one_shot_iterator(train_dataset)
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     test_parser = ChunkParser(FileDataSrc(test_chunks),
             shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
+    test_dataset = tf.data.Dataset.from_generator(
         test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    test_iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
+    test_dataset = test_dataset.map(ChunkParser.parse_function)
+    test_dataset = test_dataset.prefetch(4)
+    #test_iterator = tf.compat.v1.data.make_one_shot_iterator(test_dataset)
 
-    tfprocess.init(dataset, train_iterator, test_iterator)
+    #tfprocess.init(test_dataset, train_iterator, test_iterator)
+    tfprocess.init_v2(train_dataset, test_dataset)
 
-    if os.path.exists(os.path.join(root_dir, 'checkpoint')):
-        cp = tf.train.latest_checkpoint(root_dir)
-        tfprocess.restore(cp)
+    #if os.path.exists(os.path.join(root_dir, 'checkpoint')):
+    #    cp = tf.train.latest_checkpoint(root_dir)
+    #    tfprocess.restore(cp)
+    tfprocess.restore_v2()
 
     # If number of test positions is not given
     # sweeps through all test chunks statistically
@@ -151,15 +153,16 @@ def main(cmd):
     num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
     print("Using {} evaluation batches".format(num_evals))
 
-    tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
+    #tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
+    tfprocess.process_loop_v2(total_batch_size, num_evals, batch_splits=batch_splits)
 
-    if cmd.output is not None:
-        if cfg['training'].get('swa_output', False):
-            tfprocess.save_swa_weights(cmd.output)
-        else:
-            tfprocess.save_leelaz_weights(cmd.output)
+    #if cmd.output is not None:
+    #    if cfg['training'].get('swa_output', False):
+    #        tfprocess.save_swa_weights(cmd.output)
+    #    else:
+    #        tfprocess.save_leelaz_weights(cmd.output)
 
-    tfprocess.session.close()
+    #tfprocess.session.close()
     train_parser.shutdown()
     test_parser.shutdown()
 

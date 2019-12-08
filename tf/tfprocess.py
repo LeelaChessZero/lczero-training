@@ -28,28 +28,33 @@ from mixprec import float32_variable_storage_getter, LossScalingOptimizer
 
 from net import Net
 
-
-def weight_variable(shape, name=None, dtype=tf.float32):
-    """Xavier initialization"""
-    if len(shape) == 4:
-        receptive_field = shape[0] * shape[1]
-        fan_in = shape[2] * receptive_field
-        fan_out = shape[3] * receptive_field
-    else:
-        fan_in = shape[0]
-        fan_out = shape[1]
-    # truncated normal has lower stddev than a regular normal distribution, so need to correct for that
-    trunc_correction = np.sqrt(1.3)
-    stddev = trunc_correction * np.sqrt(2.0 / (fan_in + fan_out))
-    # Do not use a constant as the initializer, that will cause the
-    # variable to be stored in wrong dtype.
-    weights = tf.Variable(tf.compat.v1.truncated_normal_initializer(stddev=stddev)(shape, dtype), name=name)
-    tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, weights)
-    return weights
-
 # Bias weights for layers not followed by BatchNorm
 # We do not regularlize biases, so they are not
 # added to the regularlizer collection
+
+class ApplySqueezeExcitation(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(ApplySqueezeExcitation, self).__init__(**kwargs)
+
+    def build(self, input_dimens):
+        self.reshape_size = input_dimens[1][1]
+
+    def call(self, inputs):
+        x = inputs[0]
+        excited = inputs[1]
+        gammas, betas = tf.split(tf.reshape(excited, [-1, self.reshape_size, 1, 1]), 2, axis=1)
+        return tf.nn.sigmoid(gammas) * x + betas
+
+
+class ApplyPolicyMap(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(ApplyPolicyMap, self).__init__(**kwargs)
+        fc1_init = tf.constant(lc0_az_policy_map.make_map())
+        self.fc1 = tf.Variable(fc1_init, trainable=False)
+
+    def call(self, inputs):
+        h_conv_pol_flat = tf.reshape(inputs, [-1, 80*8*8])
+        return tf.matmul(h_conv_pol_flat, self.fc1)
 
 
 def bias_variable(shape, name=None, dtype=tf.float32):
@@ -132,11 +137,22 @@ class TFProcess:
         gpus = tf.config.experimental.list_physical_devices('GPU')
         tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
     
-        self.training = tf.compat.v1.placeholder(tf.bool)
         self.global_step = tf.Variable(0, name='global_step', trainable=False)
-        self.learning_rate = tf.compat.v1.placeholder(tf.float32)
+
+    def init_v2(self, train_dataset, test_dataset):
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+        self.train_dataset = train_dataset
+        self.train_iter = iter(train_dataset)
+        self.test_dataset = test_dataset
+        self.test_iter = iter(test_dataset)
+        self.init_net_v2()
+        self.checkpoint = tf.train.Checkpoint(optimizer=self.optimizer, model=self.model, global_step=self.global_step)
+        self.manager = tf.train.CheckpointManager(
+            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
 
     def init(self, dataset, train_iterator, test_iterator):
+        self.training = tf.compat.v1.placeholder(tf.bool)
+        self.learning_rate = tf.compat.v1.placeholder(tf.float32)
         # TF variables
         self.handle = tf.compat.v1.placeholder(tf.string, shape=[])
         iterator = tf.compat.v1.data.Iterator.from_string_handle(
@@ -144,10 +160,81 @@ class TFProcess:
         self.next_batch = iterator.get_next()
         self.train_handle = self.session.run(train_iterator.string_handle())
         self.test_handle = self.session.run(test_iterator.string_handle())
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+
         # This forces trainable variables to be stored as fp32
         with tf.compat.v1.variable_scope("fp32_storage",
                 custom_getter=float32_variable_storage_getter):
             self.init_net(self.next_batch)
+
+    def init_net_v2(self):
+        input_var = tf.keras.Input(shape=(112, 8*8))
+        x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
+        self.model = tf.keras.Model(inputs=input_var, outputs=self.construct_net_v2(x_planes))
+        self.active_lr = 0.01
+        # TODO set up optimizers and loss functions.
+        self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
+        def policy_loss(target, output):                
+            # Calculate loss on policy head
+            if self.cfg['training'].get('mask_legal_moves'):
+                # extract mask for legal moves from target policy
+                move_is_legal = tf.greater_equal(target, 0)
+                # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
+                illegal_filler = tf.zeros_like(output) - 1.0e10
+                output = tf.where(move_is_legal, output, illegal_filler)
+            # y_ still has -1 on illegal moves, flush them to 0
+            target = tf.nn.relu(target)
+
+            policy_cross_entropy = \
+                tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
+                                                        logits=output)
+            return tf.reduce_mean(input_tensor=policy_cross_entropy)
+        self.policy_loss_fn = policy_loss
+
+
+        q_ratio = self.cfg['training'].get('q_ratio', 0)
+        assert 0 <= q_ratio <= 1
+
+        # Linear conversion to scalar to compute MSE with, for comparison to old values
+        wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
+
+        self.qMix = lambda z, q: q * q_ratio + z *(1 - q_ratio)
+        # Loss on value head
+        if self.wdl:
+            def value_loss(target, output):
+                value_cross_entropy = \
+                    tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
+                                                    logits=output)
+                return tf.reduce_mean(input_tensor=value_cross_entropy)
+            self.value_loss_fn = value_loss
+            def mse_loss(target, output):
+                scalar_z_conv = tf.matmul(tf.nn.softmax(output), wdl)
+                scalar_target = tf.matmul(target, wdl)
+                return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, scalar_z_conv))
+            self.mse_loss_fn = mse_loss
+        else:
+            def value_loss(target, output):
+                return tf.constant(0)
+            self.value_loss_fn = value_loss
+            def mse_loss(target, output):
+                scalar_target = tf.matmul(target, wdl)
+                return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, output))
+            self.mse_loss_fn = mse_loss
+
+        pol_loss_w = self.cfg['training']['policy_loss_weight']
+        val_loss_w = self.cfg['training']['value_loss_weight']
+        self.lossMix = lambda policy, value: pol_loss_w * policy + val_loss_w * value
+        
+        self.avg_policy_loss = []
+        self.avg_value_loss = []
+        self.avg_mse_loss = []
+        self.avg_reg_term = []
+        self.time_start = None
+        self.last_steps = None
+        # Set adaptive learning rate during training
+        self.cfg['training']['lr_boundaries'].sort()
+        self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
+        self.lr = self.cfg['training']['lr_values'][0]
 
     def init_net(self, next_batch):
         self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
@@ -199,9 +286,8 @@ class TFProcess:
                 tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, self.z_conv))
 
         # Regularizer
-        regularizer = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         reg_variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES)
-        penalties = [regularizer(w) for w in reg_variables]
+        penalties = [self.l2reg(w) for w in reg_variables]
         self.reg_term = tf.math.add_n(penalties)
 
         if self.model_dtype != tf.float32:
@@ -343,9 +429,23 @@ class TFProcess:
         # This should result in identical file to the starting one
         # self.save_leelaz_weights('restored.txt')
 
+    def restore_v2(self):
+        if self.manager.latest_checkpoint is not None:
+            print("Restoring from {0}".format(self.manager.latest_checkpoint))
+            self.checkpoint.restore(self.manager.latest_checkpoint)
+
+
     def restore(self, file):
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
+
+    def process_loop_v2(self, batch_size, test_batches, batch_splits=1):
+        # Get the initial steps value in case this is a resume from a step count
+        # which is not a multiple of total_steps.
+        steps = self.global_step.read_value()
+        total_steps = self.cfg['training']['total_steps']
+        for _ in range(steps % total_steps, total_steps):
+            self.process_v2(batch_size, test_batches, batch_splits=batch_splits)
 
     def process_loop(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
@@ -354,6 +454,145 @@ class TFProcess:
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
             self.process(batch_size, test_batches, batch_splits=batch_splits)
+
+    def process_v2(self, batch_size, test_batches, batch_splits=1):
+        if not self.time_start:
+            self.time_start = time.time()
+
+        # Get the initial steps value before we do a training step.
+        steps = self.global_step.read_value()
+        if not self.last_steps:
+            self.last_steps = steps
+
+        if self.swa_enabled:
+            # split half of test_batches between testing regular weights and SWA weights
+            test_batches //= 2
+
+        # Run test before first step to see delta since end of last run.
+        #if steps % self.cfg['training']['total_steps'] == 0:
+            # Steps is given as one higher than current in order to avoid it
+            # being equal to the value the end of a run is stored against.
+        #    self.calculate_test_summaries_v2(test_batches, steps + 1)
+        #    if self.swa_enabled:
+        #        self.calculate_swa_summaries_v2(test_batches, steps + 1)
+
+        # Make sure that ghost batch norm can be applied
+        if batch_size % 64 != 0:
+            # Adjust required batch size for batch splitting.
+            required_factor = 64 * \
+                self.cfg['training'].get('num_batch_splits', 1)
+            raise ValueError(
+                'batch_size must be a multiple of {}'.format(required_factor))
+
+        # Determine learning rate
+        lr_values = self.cfg['training']['lr_values']
+        lr_boundaries = self.cfg['training']['lr_boundaries']
+        steps_total = steps % self.cfg['training']['total_steps']
+        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
+        if self.warmup_steps > 0 and steps < self.warmup_steps:
+            self.lr = self.lr * tf.cast(steps + 1, tf.float32) / self.warmup_steps
+
+        # need to add 1 to steps because steps will be incremented after gradient update
+        #if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
+        #    before_weights = self.session.run(self.weights)
+
+        # Run training for this batch
+        grads = None
+        for _ in range(batch_splits):
+            x, y, z, q = next(self.train_iter)
+            with tf.GradientTape() as tape:
+                policy, value = self.model(x)
+                policy_loss = self.policy_loss_fn(y, policy)                    
+                reg_term = sum(self.model.losses)
+                if self.wdl:
+                    value_loss = self.value_loss_fn(self.qMix(z, q), value)
+                    total_loss = self.lossMix(policy_loss, value_loss) + reg_term
+                else:
+                    mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+                    total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
+            if self.wdl:
+                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+            if not grads:
+                grads = tape.gradient(total_loss, self.model.trainable_weights)
+            else:
+                grads += tape.gradient(total_loss, self.model.trainable_weights)
+            # Keep running averages
+            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
+            # get comparable values.
+            mse_loss /= 4.0
+            self.avg_policy_loss.append(policy_loss)
+            if self.wdl:
+                self.avg_value_loss.append(value_loss)
+            self.avg_mse_loss.append(mse_loss)
+            self.avg_reg_term.append(reg_term)
+        # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.        
+        self.active_lr = self.lr / batch_splits
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
+        #grad_norm = compute_norm(self.model.trainable_weights)
+
+        # Update steps.
+        self.global_step.assign_add(1)
+        steps = self.global_step.read_value()
+
+        if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
+            pol_loss_w = self.cfg['training']['policy_loss_weight']
+            val_loss_w = self.cfg['training']['value_loss_weight']
+            time_end = time.time()
+            speed = 0
+            if self.time_start:
+                elapsed = time_end - self.time_start
+                steps_elapsed = steps - self.last_steps
+                speed = batch_size * (tf.cast(steps_elapsed, tf.float32) / elapsed)
+            avg_policy_loss = np.mean(self.avg_policy_loss or [0])
+            avg_value_loss = np.mean(self.avg_value_loss or [0])
+            avg_mse_loss = np.mean(self.avg_mse_loss or [0])
+            avg_reg_term = np.mean(self.avg_reg_term or [0])
+            print("step {}, lr={:g} policy={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
+                steps, self.lr, avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
+                pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
+                speed))
+
+            #after_weights = self.session.run(self.weights)
+            #update_ratio_summaries = self.compute_update_ratio(
+            #    before_weights, after_weights)
+
+            #train_summaries = tf.compat.v1.Summary(value=[
+            #    tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
+            #    tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
+            #    tf.compat.v1.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
+            #    tf.compat.v1.Summary.Value(tag="LR", simple_value=self.lr),
+            #    tf.compat.v1.Summary.Value(tag="Gradient norm",
+            #                     simple_value=grad_norm / batch_splits),
+            #    tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
+            #self.train_writer.add_summary(train_summaries, steps)
+            #self.train_writer.add_summary(update_ratio_summaries, steps)
+            self.time_start = time_end
+            self.last_steps = steps
+            self.avg_policy_loss, self.avg_value_loss, self.avg_mse_loss, self.avg_reg_term = [], [], [], []
+
+        #if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
+        #    self.update_swa_v2()
+
+        # Calculate test values every 'test_steps', but also ensure there is
+        # one at the final step so the delta to the first step can be calculted.
+        #if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
+        #    self.calculate_test_summaries_v2(test_batches, steps)
+        #    if self.swa_enabled:
+        #        self.calculate_swa_summaries_v2(test_batches, steps)
+
+        # Save session and weights at end, and also optionally every 'checkpoint_steps'.
+        if steps % self.cfg['training']['total_steps'] == 0 or (
+                'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
+            self.manager.save()
+            #print("Model saved in file: {}".format(save_path))
+            #leela_path = path + "-" + str(steps)
+            #swa_path = path + "-swa-" + str(steps)
+            self.net.pb.training_params.training_steps = steps
+            #self.save_leelaz_weights(leela_path)
+            #print("Weights saved in file: {}".format(leela_path))
+            #if self.swa_enabled:
+            #    self.save_swa_weights(swa_path)
+            #    print("SWA Weights saved in file: {}".format(swa_path))
 
     def process(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
@@ -681,6 +920,23 @@ class TFProcess:
         assert var.dtype.base_dtype == tf.float32
         self.weights.append(var)
 
+    def batch_norm_v2(self, input, scale=False):
+        if self.renorm_enabled:
+            clipping = {
+                "rmin": 1.0/self.renorm_max_r,
+                "rmax": self.renorm_max_r,
+                "dmax": self.renorm_max_d
+                }
+            return tf.keras.layers.BatchNormalization(
+                epsilon=1e-5, axis=1, fused=True, center=True,
+                scale=scale, renorm=True, renorm_clipping=clipping,
+                renorm_momentum=self.renorm_momentum)(input)
+        else:
+            return tf.keras.layers.BatchNormalization(
+                epsilon=1e-5, axis=1, fused=False, center=True,
+                scale=scale, virtual_batch_size=64)(input)
+            
+
     def batch_norm(self, net, scope, scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
@@ -720,6 +976,13 @@ class TFProcess:
                 var = tf.compat.v1.get_default_graph().get_tensor_by_name(name)
             self.add_weights(var)
         return net
+                        
+
+    def squeeze_excitation_v2(self, inputs, channels):
+        pooled = tf.keras.layers.GlobalAveragePooling2D()(inputs)
+        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
+        excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
+        return ApplySqueezeExcitation()([inputs, excited])
 
     def squeeze_excitation(self, x, channels, ratio):
 
@@ -755,6 +1018,10 @@ class TFProcess:
 
         return out
 
+    def conv_block_v2(self, inputs, filter_size, output_channels, bn_scale=False):
+        conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
+        return tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv, scale=bn_scale))
+
     def conv_block(self, inputs, filter_size, input_channels, output_channels, bn_scale=False):
         # The weights are internal to the batchnorm layer, so apply
         # a unique scope that we can store, and use to look them back up
@@ -770,6 +1037,14 @@ class TFProcess:
         h_conv = tf.nn.relu(h_bn)
 
         return h_conv
+
+    def residual_block_v2(self, inputs, channels):
+        conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
+        out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv1, scale=False))
+        conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(out1)
+        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv1, scale=True), channels)
+        return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
+        
 
     def residual_block(self, inputs, channels):
         # First convnet
@@ -797,6 +1072,34 @@ class TFProcess:
         h_out_2 = tf.nn.relu(tf.add(h_se, orig))
 
         return h_out_2
+
+    def construct_net_v2(self, inputs):
+        flow = self.conv_block_v2(inputs, filter_size=3, output_channels=self.RESIDUAL_FILTERS, bn_scale=True)
+        for _ in range(0, self.RESIDUAL_BLOCKS):
+            flow = self.residual_block_v2(flow, self.RESIDUAL_FILTERS)
+        # Policy head
+        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
+            conv_pol = self.conv_block_v2(flow, filter_size=3, output_channels=self.RESIDUAL_FILTERS)
+            conv_pol2 = tf.keras.layers.Conv2D(80, 3, use_bias=True, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, data_format='channels_first')(conv_pol)
+            h_fc1 = ApplyPolicyMap()(conv_pol2)
+        elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
+            conv_pol = self.conv_block_v2(flow, filter_size=1, output_channels=self.policy_channels)
+            h_conv_pol_flat = tf.keras.layers.Flatten()(conv_pol)
+            h_fc1 = tf.keras.layers.Dense(1858, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_conv_pol_flat)
+        else:
+            raise ValueError(
+                "Unknown policy head type {}".format(self.POLICY_HEAD))
+
+        # Value head
+        conv_val = self.conv_block_v2(flow, filter_size=1, output_channels=32)
+        h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
+        h_fc2 = tf.keras.layers.Dense(128, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu')(h_conv_val_flat)
+        if self.wdl:
+            h_fc3 = tf.keras.layers.Dense(3, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_fc2)
+        else:
+            h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh')(h_fc2)
+        return h_fc1, h_fc3
+        
 
     def construct_net(self, planes):
         # NCHW format
