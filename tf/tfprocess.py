@@ -756,6 +756,20 @@ class TFProcess:
         self.test_writer = true_test_writer
         self.snap_restore()
 
+    @tf.function()
+    def calculate_test_summaries_inner_loop(self):
+        print('tracing summaries inner loop!')
+        x, y, z, q = next(self.test_iter)
+        policy, value = self.model(x)
+        policy_loss = self.policy_loss_fn(y, policy)                    
+        if self.wdl:
+            value_loss = self.value_loss_fn(self.qMix(z, q), value)
+            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+        else:
+            value_loss = self.value_loss_fn(self.qMix(z, q), value)
+            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+        return policy_loss, value_loss, mse_loss
+
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = 0
         sum_value_accuracy = 0
@@ -763,18 +777,7 @@ class TFProcess:
         sum_policy = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            x, y, z, q = next(self.test_iter)
-            policy, value = self.model(x)
-            policy_loss = self.policy_loss_fn(y, policy)                    
-            reg_term = sum(self.model.losses)
-            if self.wdl:
-                value_loss = self.value_loss_fn(self.qMix(z, q), value)
-                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-                total_loss = self.lossMix(policy_loss, value_loss) + reg_term
-            else:
-                value_loss = self.value_loss_fn(self.qMix(z, q), value)
-                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-                total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
+            policy_loss, value_loss, mse_loss = self.calculate_test_summaries_inner_loop()
             #sum_policy_accuracy += test_policy_accuracy
             sum_mse += mse_loss
             sum_policy += policy_loss
