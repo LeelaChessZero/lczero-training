@@ -441,7 +441,6 @@ class TFProcess:
             print("Restoring from {0}".format(self.manager.latest_checkpoint))
             self.checkpoint.restore(self.manager.latest_checkpoint)
 
-
     def restore(self, file):
         print("Restoring from {0}".format(file))
         self.saver.restore(self.session, file)
@@ -596,9 +595,10 @@ class TFProcess:
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
             self.manager.save()
             print("Model saved in file: {}".format(self.manager.latest_checkpoint))
-            leela_path = self.manager.latest_checkpoint + "-" + str(steps)
+            evaled_steps = steps.numpy()
+            leela_path = self.manager.latest_checkpoint + "-" + str(evaled_steps)
             #swa_path = path + "-swa-" + str(steps)
-            self.net.pb.training_params.training_steps = steps
+            self.net.pb.training_params.training_steps = evaled_steps
             self.save_leelaz_weights_v2(leela_path)
             #print("Weights saved in file: {}".format(leela_path))
             #if self.swa_enabled:
@@ -940,6 +940,14 @@ class TFProcess:
         # Restore variables in the current graph from the snapshot.
         self.session.run(self.snap_restore_op)
 
+    def save_swa_weights_v2(self, filename):
+        backup = [w.read_value() for w in self.model.weights]
+        for (swa, w) in zip(self.swa_weights, self.model.weights):
+            w.assign(swa.read_value())
+        self.save_leelaz_weights_v2(self, filename)
+        for (old, w) in zip(backup, self.model.weights):
+            w.assign(old)
+
     def save_swa_weights(self, filename):
         self.snap_save()
         self.session.run(self.swa_load_op)
@@ -947,8 +955,72 @@ class TFProcess:
         self.snap_restore()
 
     def save_leelaz_weights_v2(self, filename):
-        for w in self.model.weights:
-            tf.print(w.name)
+        all_tensors = []
+        all_weights = []
+        last_was_gamma = False
+        for weights in self.model.weights:
+            work_weights = None
+            if weights.shape.ndims == 4:
+                # Convolution weights need a transpose
+                #
+                # TF (kYXInputOutput)
+                # [filter_height, filter_width, in_channels, out_channels]
+                #
+                # Leela/cuDNN/Caffe (kOutputInputYX)
+                # [output, input, filter_size, filter_size]
+                work_weights = tf.transpose(a=weights, perm=[3, 2, 0, 1])
+            elif weights.shape.ndims == 2:
+                # Fully connected layers are [in, out] in TF
+                #
+                # [out, in] in Leela
+                #
+                work_weights = tf.transpose(a=weights, perm=[1, 0])
+            else:
+                # Biases, batchnorm etc
+                # pb expects every batch norm to have gammas, but not all of our
+                # batch norms have gammas, so manually add pretend gammas.
+                if 'beta:' in weights.name and not last_was_gamma:
+                    all_tensors.append(tf.ones_like(weights))
+                work_weights = weights.read_value()
+            all_tensors.append(work_weights)
+            last_was_gamma = 'gamma:' in weights.name
+
+        # HACK: model weights ordering is some kind of breadth first traversal,
+        # but pb expects a specific ordering which BFT is not a match for once
+        # we get to the heads. Apply manual permutation.
+        # This is fragile and at minimum should have some checks to ensure it isn't breaking things.
+        #TODO: also support classic policy head as it has a different set of layers and hence changes the permutation.
+        permuted_tensors = [w for w in all_tensors]
+        permuted_tensors[-5] = all_tensors[-10]
+        permuted_tensors[-6] = all_tensors[-11]
+        permuted_tensors[-7] = all_tensors[-12]
+        permuted_tensors[-8] = all_tensors[-14]
+        permuted_tensors[-9] = all_tensors[-5]
+        permuted_tensors[-10] = all_tensors[-6]
+        permuted_tensors[-11] = all_tensors[-7]        
+        permuted_tensors[-12] = all_tensors[-8]        
+        permuted_tensors[-13] = all_tensors[-9]        
+        permuted_tensors[-14] = all_tensors[-13]        
+        all_tensors = permuted_tensors
+        
+        for e, nparray in enumerate(all_tensors):
+            # Rescale rule50 related weights as clients do not normalize the input.
+            if e == 0:
+                num_inputs = 112
+                # 50 move rule is the 110th input, or 109 starting from 0.
+                rule50_input = 109
+                wt_flt = []
+                for i, weight in enumerate(np.ravel(nparray)):
+                    if (i % (num_inputs*9))//9 == rule50_input:
+                        wt_flt.append(weight/99)
+                    else:
+                        wt_flt.append(weight)
+            else:
+                wt_flt = [wt for wt in np.ravel(nparray)]
+            all_weights.append(wt_flt)
+
+        self.net.fill_net(all_weights)
+        self.net.save_proto(filename)
 
     def save_leelaz_weights(self, filename):
         all_weights = []
