@@ -597,7 +597,7 @@ class TFProcess:
             print("Model saved in file: {}".format(self.manager.latest_checkpoint))
             evaled_steps = steps.numpy()
             leela_path = self.manager.latest_checkpoint + "-" + str(evaled_steps)
-            #swa_path = path + "-swa-" + str(steps)
+            #swa_path = path + "-swa-" + str(evaled_steps)
             self.net.pb.training_params.training_steps = evaled_steps
             self.save_leelaz_weights_v2(leela_path)
             #print("Weights saved in file: {}".format(leela_path))
@@ -991,16 +991,18 @@ class TFProcess:
         # This is fragile and at minimum should have some checks to ensure it isn't breaking things.
         #TODO: also support classic policy head as it has a different set of layers and hence changes the permutation.
         permuted_tensors = [w for w in all_tensors]
-        permuted_tensors[-5] = all_tensors[-10]
-        permuted_tensors[-6] = all_tensors[-11]
-        permuted_tensors[-7] = all_tensors[-12]
+        permuted_tensors[-5] = all_tensors[-11]
+        permuted_tensors[-6] = all_tensors[-12]
+        permuted_tensors[-7] = all_tensors[-13]
         permuted_tensors[-8] = all_tensors[-14]
-        permuted_tensors[-9] = all_tensors[-5]
-        permuted_tensors[-10] = all_tensors[-6]
-        permuted_tensors[-11] = all_tensors[-7]        
-        permuted_tensors[-12] = all_tensors[-8]        
-        permuted_tensors[-13] = all_tensors[-9]        
-        permuted_tensors[-14] = all_tensors[-13]        
+        permuted_tensors[-9] = all_tensors[-16]
+        permuted_tensors[-10] = all_tensors[-5]
+        permuted_tensors[-11] = all_tensors[-6]        
+        permuted_tensors[-12] = all_tensors[-7]        
+        permuted_tensors[-13] = all_tensors[-8]        
+        permuted_tensors[-14] = all_tensors[-9]        
+        permuted_tensors[-15] = all_tensors[-10]        
+        permuted_tensors[-16] = all_tensors[-15]        
         all_tensors = permuted_tensors
         
         for e, nparray in enumerate(all_tensors):
