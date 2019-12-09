@@ -461,6 +461,26 @@ class TFProcess:
         for _ in range(steps % total_steps, total_steps):
             self.process(batch_size, test_batches, batch_splits=batch_splits)
 
+    @tf.function()
+    def process_inner_loop(self):
+        print('tracing inner loop!')
+        x, y, z, q = next(self.train_iter)
+        with tf.GradientTape() as tape:
+            policy, value = self.model(x)
+            policy_loss = self.policy_loss_fn(y, policy)                    
+            reg_term = sum(self.model.losses)
+            if self.wdl:
+                value_loss = self.value_loss_fn(self.qMix(z, q), value)
+                total_loss = self.lossMix(policy_loss, value_loss) + reg_term
+            else:
+                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+                total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
+        if self.wdl:
+            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+        else:
+            value_loss = self.value_loss_fn(self.qMix(z, q), value)
+        return policy_loss, value_loss, mse_loss, reg_term, tape.gradient(total_loss, self.model.trainable_weights)
+
     def process_v2(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
             self.time_start = time.time()
@@ -505,25 +525,10 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for _ in range(batch_splits):
-            x, y, z, q = next(self.train_iter)
-            with tf.GradientTape() as tape:
-                policy, value = self.model(x)
-                policy_loss = self.policy_loss_fn(y, policy)                    
-                reg_term = sum(self.model.losses)
-                if self.wdl:
-                    value_loss = self.value_loss_fn(self.qMix(z, q), value)
-                    total_loss = self.lossMix(policy_loss, value_loss) + reg_term
-                else:
-                    mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-                    total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
-            if self.wdl:
-                mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-            else:
-                value_loss = self.value_loss_fn(self.qMix(z, q), value)
+            policy_loss, value_loss, mse_loss, reg_term, new_grads = self.process_inner_loop()
             if not grads:
-                grads = tape.gradient(total_loss, self.model.trainable_weights)
+                grads = new_grads
             else:
-                new_grads = tape.gradient(total_loss, self.model.trainable_weights)
                 grads = [tf.math.add(a, b) for (a, b) in zip(grads, new_grads)]
             # Keep running averages
             # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
