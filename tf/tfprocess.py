@@ -1142,7 +1142,7 @@ class TFProcess:
                         
 
     def squeeze_excitation_v2(self, inputs, channels):
-        pooled = tf.keras.layers.GlobalAveragePooling2D()(inputs)
+        pooled = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_first')(inputs)
         squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
         excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
         return ApplySqueezeExcitation()([inputs, excited])
