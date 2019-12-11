@@ -53,7 +53,7 @@ class ApplyPolicyMap(tf.keras.layers.Layer):
 
     def call(self, inputs):
         h_conv_pol_flat = tf.reshape(inputs, [-1, 80*8*8])
-        return tf.matmul(h_conv_pol_flat, self.fc1)
+        return tf.matmul(h_conv_pol_flat, tf.cast(self.fc1, h_conv_pol_flat.dtype))
 
 
 def bias_variable(shape, name=None, dtype=tf.float32):
@@ -135,6 +135,9 @@ class TFProcess:
         self.session = tf.compat.v1.Session(config=config)
         gpus = tf.config.experimental.list_physical_devices('GPU')
         tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
+        if self.model_dtype == tf.float16:
+            tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
+
     
         self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
@@ -145,7 +148,7 @@ class TFProcess:
         self.test_dataset = test_dataset
         self.test_iter = iter(test_dataset)
         self.init_net_v2()
-        self.checkpoint = tf.train.Checkpoint(optimizer=self.optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
+        self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
         self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
             self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
@@ -181,7 +184,11 @@ class TFProcess:
         self.active_lr = 0.01
         # TODO set up optimizers and loss functions.
         self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
-        def policy_loss(target, output):                
+        self.orig_optimizer = self.optimizer
+        if self.loss_scale != 1:
+            self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(self.optimizer, self.loss_scale)
+        def policy_loss(target, output):
+            output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
             if self.cfg['training'].get('mask_legal_moves'):
                 # extract mask for legal moves from target policy
@@ -209,12 +216,14 @@ class TFProcess:
         # Loss on value head
         if self.wdl:
             def value_loss(target, output):
+                output = tf.cast(output, tf.float32)
                 value_cross_entropy = \
                     tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
                                                     logits=output)
                 return tf.reduce_mean(input_tensor=value_cross_entropy)
             self.value_loss_fn = value_loss
             def mse_loss(target, output):
+                output = tf.cast(output, tf.float32)
                 scalar_z_conv = tf.matmul(tf.nn.softmax(output), wdl)
                 scalar_target = tf.matmul(target, wdl)
                 return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, scalar_z_conv))
@@ -224,6 +233,7 @@ class TFProcess:
                 return tf.constant(0)
             self.value_loss_fn = value_loss
             def mse_loss(target, output):
+                output = tf.cast(output, tf.float32)
                 scalar_target = tf.matmul(target, wdl)
                 return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, output))
             self.mse_loss_fn = mse_loss
@@ -482,6 +492,8 @@ class TFProcess:
             else:
                 mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
                 total_loss = self.lossMix(policy_loss, mse_loss) + reg_term
+            if self.loss_scale != 1:
+                total_loss = self.optimizer.get_scaled_loss(total_loss)
         if self.wdl:
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
         else:
@@ -548,6 +560,8 @@ class TFProcess:
             self.avg_reg_term.append(reg_term)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.        
         self.active_lr = self.lr / batch_splits
+        if self.loss_scale != 1:
+            grads = self.optimizer.get_unscaled_gradients(grads)
         max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * batch_splits
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
