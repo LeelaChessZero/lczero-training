@@ -612,7 +612,7 @@ class TFProcess:
             self.save_leelaz_weights_v2(leela_path)
             print("Weights saved in file: {}".format(leela_path))
             if self.swa_enabled:
-                self.save_swa_weights(swa_path)
+                self.save_swa_weights_v2(swa_path)
                 print("SWA Weights saved in file: {}".format(swa_path))
 
     def process(self, batch_size, test_batches, batch_splits=1):
