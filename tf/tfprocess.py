@@ -521,6 +521,7 @@ class TFProcess:
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
             format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
+    @tf.function()
     def compute_update_ratio_v2(self, before_weights, after_weights, steps):
         """Compute the ratio of gradient norm to weight norm.
 
@@ -528,14 +529,14 @@ class TFProcess:
         """
         deltas = [after - before for after,
                   before in zip(after_weights, before_weights)]
-        delta_norms = [np.linalg.norm(d.numpy().ravel()) for d in deltas]
-        weight_norms = [np.linalg.norm(w.numpy().ravel()) for w in before_weights]
-        ratios = [(tensor.name, d / w) for d, w, tensor in zip(delta_norms, weight_norms, self.model.weights) if not 'moving' in tensor.name and w != 0.]
+        delta_norms = [tf.math.reduce_euclidean_norm(d) for d in deltas]
+        weight_norms = [tf.math.reduce_euclidean_norm(w) for w in before_weights]
+        ratios = [(tensor.name, tf.cond(w != 0., lambda: d / w, lambda: -1.)) for d, w, tensor in zip(delta_norms, weight_norms, self.model.weights) if not 'moving' in tensor.name]
         for name, ratio in ratios:
             tf.summary.scalar('update_ratios/' + name, ratio, step=steps)
-        #ratios = np.log10([r for (_, r) in ratios if 0 < r < np.inf])
-        #all_summaries.append(self.log_histogram('update_ratios_log10', ratios))
-        #return tf.compat.v1.Summary(value=all_summaries)
+        # Filtering is hard, so just push infinities/NaNs to an unreasonably large value.
+        ratios = [tf.cond(r > 0, lambda: tf.math.log(r) / 2.30258509299, lambda: 200.) for (_, r) in ratios]
+        tf.summary.histogram('update_ratios_log10', tf.stack(ratios), buckets=1000, step=steps)
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
