@@ -296,6 +296,10 @@ class TFProcess:
             self.process_v2(batch_size, test_batches, batch_splits=batch_splits)
 
     @tf.function()
+    def read_weights(self):
+        return [w.read_value() for w in self.model.weights]
+
+    @tf.function()
     def process_inner_loop(self):
         print('tracing inner loop!')
         x, y, z, q = next(self.train_iter)
@@ -356,7 +360,7 @@ class TFProcess:
 
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
-            before_weights = [w.read_value() for w in self.model.weights]
+            before_weights = self.read_weights()
 
 
         # Run training for this batch
@@ -406,7 +410,7 @@ class TFProcess:
                 pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
                 speed))
 
-            after_weights = [w.read_value() for w in self.model.weights]
+            after_weights = self.read_weights()
             with self.train_writer.as_default():
                 tf.summary.scalar("Policy Loss", avg_policy_loss, step=steps)
                 tf.summary.scalar("Value Loss", avg_value_loss, step=steps)
@@ -447,7 +451,7 @@ class TFProcess:
                 print("SWA Weights saved in file: {}".format(swa_path))
 
     def calculate_swa_summaries_v2(self, test_batches, steps):
-        backup = [w.read_value() for w in self.model.weights]
+        backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
         true_test_writer, self.test_writer = self.test_writer, self.swa_writer
@@ -590,7 +594,7 @@ class TFProcess:
         self.swa_count.assign(min(num + 1., self.swa_max_n))
 
     def save_swa_weights_v2(self, filename):
-        backup = [w.read_value() for w in self.model.weights]
+        backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
         self.save_leelaz_weights_v2(filename)
