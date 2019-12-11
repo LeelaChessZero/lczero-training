@@ -1107,7 +1107,7 @@ class TFProcess:
                 "dmax": self.renorm_max_d
                 }
             return tf.keras.layers.BatchNormalization(
-                epsilon=1e-5, axis=1, fused=True, center=True,
+                epsilon=1e-5, axis=1, fused=False, center=True,
                 scale=scale, renorm=True, renorm_clipping=clipping,
                 renorm_momentum=self.renorm_momentum)(input)
         else:
