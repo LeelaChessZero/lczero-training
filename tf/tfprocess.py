@@ -182,7 +182,6 @@ class TFProcess:
             self.swa_weights = [tf.Variable(w, trainable=False) for w in self.model.weights]
         
         self.active_lr = 0.01
-        # TODO set up optimizers and loss functions.
         self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
         self.orig_optimizer = self.optimizer
         if self.loss_scale != 1:
@@ -241,7 +240,12 @@ class TFProcess:
         pol_loss_w = self.cfg['training']['policy_loss_weight']
         val_loss_w = self.cfg['training']['value_loss_weight']
         self.lossMix = lambda policy, value: pol_loss_w * policy + val_loss_w * value
-        
+
+        def accuracy(target, output):
+            output = tf.cast(output, tf.float32)
+            return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(input=target, axis=1), tf.argmax(input=output, axis=1)), tf.float32))
+        self.accuracy_fn = accuracy
+       
         self.avg_policy_loss = []
         self.avg_value_loss = []
         self.avg_mse_loss = []
@@ -780,14 +784,17 @@ class TFProcess:
         print('tracing summaries inner loop!')
         x, y, z, q = next(self.test_iter)
         policy, value = self.model(x)
-        policy_loss = self.policy_loss_fn(y, policy)                    
+        policy_loss = self.policy_loss_fn(y, policy)
+        policy_accuracy = self.accuracy_fn(y, policy)
         if self.wdl:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+            value_accuracy = self.accuracy_fn(self.qMix(z,q), value)
         else:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-        return policy_loss, value_loss, mse_loss
+            value_accuracy = tf.constant(0.)
+        return policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy
 
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = 0
@@ -796,41 +803,36 @@ class TFProcess:
         sum_policy = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            policy_loss, value_loss, mse_loss = self.calculate_test_summaries_inner_loop()
-            #sum_policy_accuracy += test_policy_accuracy
+            policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.calculate_test_summaries_inner_loop()
+            sum_policy_accuracy += policy_accuracy
             sum_mse += mse_loss
             sum_policy += policy_loss
             if self.wdl:
-                #sum_value_accuracy += test_value_accuracy
+                sum_value_accuracy += value_accuracy
                 sum_value += value_loss
-        #sum_policy_accuracy /= test_batches
-        #sum_policy_accuracy *= 100
+        sum_policy_accuracy /= test_batches
+        sum_policy_accuracy *= 100
         sum_policy /= test_batches
         sum_value /= test_batches
-        #if self.wdl:
-            #sum_value_accuracy /= test_batches
-            #sum_value_accuracy *= 100
+        if self.wdl:
+            sum_value_accuracy /= test_batches
+            sum_value_accuracy *= 100
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * test_batches)
         self.net.pb.training_params.learning_rate = self.lr
         self.net.pb.training_params.mse_loss = sum_mse
         self.net.pb.training_params.policy_loss = sum_policy
         # TODO store value and value accuracy in pb
-        #self.net.pb.training_params.accuracy = sum_policy_accuracy
+        self.net.pb.training_params.accuracy = sum_policy_accuracy
         with self.test_writer.as_default():
             tf.summary.scalar("Policy Loss", sum_policy, step=steps)
             tf.summary.scalar("Value Loss", sum_value, step=steps)
             tf.summary.scalar("MSE Loss", sum_mse, step=steps)
+            tf.summary.scalar("Policy Accuracy", sum_policy_accuracy, step=steps)
+            if self.wdl:
+                tf.summary.scalar("Value Accuracy", sum_value_accuracy, step=steps)
         self.test_writer.flush()
 
-        #if self.wdl:
-        #    test_summaries = tf.compat.v1.Summary(value=[
-        #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-        #        tf.compat.v1.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
-        #else:
-        #    test_summaries = tf.compat.v1.Summary(value=[
-        #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-        #        tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
         #test_summaries = tf.compat.v1.summary.merge(
         #    [test_summaries] + self.histograms).eval(session=self.session)
         #self.test_writer.add_summary(test_summaries, steps)
