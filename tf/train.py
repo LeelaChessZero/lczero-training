@@ -156,11 +156,11 @@ def main(cmd):
     #tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
     tfprocess.process_loop_v2(total_batch_size, num_evals, batch_splits=batch_splits)
 
-    #if cmd.output is not None:
-    #    if cfg['training'].get('swa_output', False):
-    #        tfprocess.save_swa_weights(cmd.output)
-    #    else:
-    #        tfprocess.save_leelaz_weights(cmd.output)
+    if cmd.output is not None:
+        if cfg['training'].get('swa_output', False):
+            tfprocess.save_swa_weights_v2(cmd.output)
+        else:
+            tfprocess.save_leelaz_weights_v2(cmd.output)
 
     #tfprocess.session.close()
     train_parser.shutdown()

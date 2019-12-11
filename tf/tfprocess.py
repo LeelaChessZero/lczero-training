@@ -136,7 +136,7 @@ class TFProcess:
         gpus = tf.config.experimental.list_physical_devices('GPU')
         tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
     
-        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+        self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
     def init_v2(self, train_dataset, test_dataset):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
@@ -242,6 +242,13 @@ class TFProcess:
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
         self.lr = self.cfg['training']['lr_values'][0]
+        self.test_writer = tf.summary.create_file_writer(
+            os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])))
+        self.train_writer = tf.summary.create_file_writer(
+            os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])))
+        if self.swa_enabled:
+            self.swa_writer = tf.summary.create_file_writer(
+                os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
 
     def init_net(self, next_batch):
         self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
@@ -570,16 +577,14 @@ class TFProcess:
             #after_weights = self.session.run(self.weights)
             #update_ratio_summaries = self.compute_update_ratio(
             #    before_weights, after_weights)
-
-            #train_summaries = tf.compat.v1.Summary(value=[
-            #    tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
-            #    tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
-            #    tf.compat.v1.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
-            #    tf.compat.v1.Summary.Value(tag="LR", simple_value=self.lr),
-            #    tf.compat.v1.Summary.Value(tag="Gradient norm",
-            #                     simple_value=grad_norm / batch_splits),
-            #    tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
-            #self.train_writer.add_summary(train_summaries, steps)
+            with self.train_writer.as_default():
+                tf.summary.scalar("Policy Loss", avg_policy_loss, step=steps)
+                tf.summary.scalar("Value Loss", avg_value_loss, step=steps)
+                tf.summary.scalar("Reg term", avg_reg_term, step=steps)
+                tf.summary.scalar("LR", self.lr, step=steps)
+                tf.summary.scalar("Gradient norm", grad_norm / batch_splits, step=steps)
+                tf.summary.scalar("MSE Loss", avg_mse_loss, step=steps)
+            self.train_writer.flush()
             #self.train_writer.add_summary(update_ratio_summaries, steps)
             self.time_start = time_end
             self.last_steps = steps
@@ -602,13 +607,13 @@ class TFProcess:
             print("Model saved in file: {}".format(self.manager.latest_checkpoint))
             evaled_steps = steps.numpy()
             leela_path = self.manager.latest_checkpoint + "-" + str(evaled_steps)
-            #swa_path = path + "-swa-" + str(evaled_steps)
+            swa_path = self.manager.latest_checkpoint + "-swa-" + str(evaled_steps)
             self.net.pb.training_params.training_steps = evaled_steps
             self.save_leelaz_weights_v2(leela_path)
-            #print("Weights saved in file: {}".format(leela_path))
-            #if self.swa_enabled:
-            #    self.save_swa_weights(swa_path)
-            #    print("SWA Weights saved in file: {}".format(swa_path))
+            print("Weights saved in file: {}".format(leela_path))
+            if self.swa_enabled:
+                self.save_swa_weights(swa_path)
+                print("SWA Weights saved in file: {}".format(swa_path))
 
     def process(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
@@ -798,18 +803,20 @@ class TFProcess:
         self.net.pb.training_params.policy_loss = sum_policy
         # TODO store value and value accuracy in pb
         #self.net.pb.training_params.accuracy = sum_policy_accuracy
+        with self.test_writer.as_default():
+            tf.summary.scalar("Policy Loss", sum_policy, step=steps)
+            tf.summary.scalar("Value Loss", sum_value, step=steps)
+            tf.summary.scalar("MSE Loss", sum_mse, step=steps)
+        self.test_writer.flush()
+
         #if self.wdl:
         #    test_summaries = tf.compat.v1.Summary(value=[
         #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
         #        tf.compat.v1.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
-        #        tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-        #        tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=sum_value),
-        #        tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         #else:
         #    test_summaries = tf.compat.v1.Summary(value=[
         #        tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
         #        tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-        #        tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
         #test_summaries = tf.compat.v1.summary.merge(
         #    [test_summaries] + self.histograms).eval(session=self.session)
         #self.test_writer.add_summary(test_summaries, steps)
