@@ -355,8 +355,9 @@ class TFProcess:
             self.lr = self.lr * tf.cast(steps + 1, tf.float32) / self.warmup_steps
 
         # need to add 1 to steps because steps will be incremented after gradient update
-        #if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
-        #    before_weights = self.session.run(self.weights)
+        if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
+            before_weights = [w.read_value() for w in self.model.weights]
+
 
         # Run training for this batch
         grads = None
@@ -405,9 +406,7 @@ class TFProcess:
                 pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
                 speed))
 
-            #after_weights = self.session.run(self.weights)
-            #update_ratio_summaries = self.compute_update_ratio(
-            #    before_weights, after_weights)
+            after_weights = [w.read_value() for w in self.model.weights]
             with self.train_writer.as_default():
                 tf.summary.scalar("Policy Loss", avg_policy_loss, step=steps)
                 tf.summary.scalar("Value Loss", avg_value_loss, step=steps)
@@ -415,8 +414,9 @@ class TFProcess:
                 tf.summary.scalar("LR", self.lr, step=steps)
                 tf.summary.scalar("Gradient norm", grad_norm / batch_splits, step=steps)
                 tf.summary.scalar("MSE Loss", avg_mse_loss, step=steps)
+                self.compute_update_ratio_v2(
+                    before_weights, after_weights, steps)
             self.train_writer.flush()
-            #self.train_writer.add_summary(update_ratio_summaries, steps)
             self.time_start = time_end
             self.last_steps = steps
             self.avg_policy_loss, self.avg_value_loss, self.avg_mse_loss, self.avg_reg_term = [], [], [], []
@@ -516,6 +516,22 @@ class TFProcess:
         #self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
             format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
+
+    def compute_update_ratio_v2(self, before_weights, after_weights, steps):
+        """Compute the ratio of gradient norm to weight norm.
+
+        Adapted from https://github.com/tensorflow/minigo/blob/c923cd5b11f7d417c9541ad61414bf175a84dc31/dual_net.py#L567
+        """
+        deltas = [after - before for after,
+                  before in zip(after_weights, before_weights)]
+        delta_norms = [np.linalg.norm(d.numpy().ravel()) for d in deltas]
+        weight_norms = [np.linalg.norm(w.numpy().ravel()) for w in before_weights]
+        ratios = [(tensor.name, d / w) for d, w, tensor in zip(delta_norms, weight_norms, self.model.weights) if not 'moving' in tensor.name and w != 0.]
+        for name, ratio in ratios:
+            tf.summary.scalar('update_ratios/' + name, ratio, step=steps)
+        #ratios = np.log10([r for (_, r) in ratios if 0 < r < np.inf])
+        #all_summaries.append(self.log_histogram('update_ratios_log10', ratios))
+        #return tf.compat.v1.Summary(value=all_summaries)
 
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
