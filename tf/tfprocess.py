@@ -959,7 +959,7 @@ class TFProcess:
         backup = [w.read_value() for w in self.model.weights]
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
-        self.save_leelaz_weights_v2(self, filename)
+        self.save_leelaz_weights_v2(filename)
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
