@@ -1085,19 +1085,6 @@ class TFProcess:
         self.net.fill_net(all_weights)
         self.net.save_proto(filename)
 
-    def get_batchnorm_key(self):
-        result = "bn" + str(self.batch_norm_count)
-        self.batch_norm_count += 1
-        return result
-
-    def add_weights(self, var):
-        if var.name[-11:] == "fp16_cast:0":
-            name = var.name[:-12] + ":0"
-            var = tf.compat.v1.get_default_graph().get_tensor_by_name(name)
-        # All trainable variables should be stored as fp32
-        assert var.dtype.base_dtype == tf.float32
-        self.weights.append(var)
-
     def batch_norm_v2(self, input, scale=False):
         if self.renorm_enabled:
             clipping = {
@@ -1114,107 +1101,17 @@ class TFProcess:
                 epsilon=1e-5, axis=1, fused=False, center=True,
                 scale=scale, virtual_batch_size=64)(input)
             
-
-    def batch_norm(self, net, scope, scale=False):
-        # The weights are internal to the batchnorm layer, so apply
-        # a unique scope that we can store, and use to look them back up
-        # later on.
-
-        with tf.compat.v1.variable_scope(scope, custom_getter=float32_variable_storage_getter):
-            if self.renorm_enabled:
-                clipping = {
-                    "rmin": 1.0/self.renorm_max_r,
-                    "rmax": self.renorm_max_r,
-                    "dmax": self.renorm_max_d
-                    }
-                # Renorm has issues with fp16, cast to fp32.
-                net = tf.compat.v1.layers.batch_normalization(
-                    tf.cast(net, tf.float32), epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=scale,
-                    renorm=True, renorm_clipping=clipping,
-                    renorm_momentum=self.renorm_momentum,
-                    training=self.training)
-                net = tf.cast(net, self.model_dtype)
-            else:
-                # Virtual batch doesn't work with fp16
-                virtual_batch = 64 if self.model_dtype == tf.float32 else None
-                net = tf.compat.v1.layers.batch_normalization(
-                    net, epsilon=1e-5, axis=1, fused=True,
-                    center=True, scale=scale,
-                    virtual_batch_size=virtual_batch,
-                    training=self.training)
-
-        for v in ['gamma', 'beta', 'moving_mean', 'moving_variance' ]:
-            if v == 'gamma' and not scale:
-                var = tf.Variable(tf.ones(shape=[net.shape[1]]),
-                                    name=scope + '/fixed_gamma', trainable=False,
-                                    dtype=tf.float32)
-            else:
-                name = "fp32_storage/" + scope + '/batch_normalization/' + v + ':0'
-                var = tf.compat.v1.get_default_graph().get_tensor_by_name(name)
-            self.add_weights(var)
-        return net
-                        
-
     def squeeze_excitation_v2(self, inputs, channels):
+        assert channels % self.SE_ratio == 0
+        
         pooled = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_first')(inputs)
         squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
         excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
         return ApplySqueezeExcitation()([inputs, excited])
 
-    def squeeze_excitation(self, x, channels, ratio):
-
-        assert channels % ratio == 0
-
-        # NCHW format reduced to NC
-        net = tf.reduce_mean(input_tensor=x, axis=[2, 3])
-
-        W_fc1 = weight_variable([channels, channels // ratio], name='se_fc1_w',
-                                  dtype=self.model_dtype)
-        b_fc1 = bias_variable([channels // ratio], name='se_fc1_b',
-                                  dtype=self.model_dtype)
-        self.add_weights(W_fc1)
-        self.add_weights(b_fc1)
-
-        net = tf.nn.relu(tf.add(tf.matmul(net, W_fc1), b_fc1))
-
-        W_fc2 = weight_variable(
-            [channels // ratio, 2 * channels], name='se_fc2_w',
-                                  dtype=self.model_dtype)
-        b_fc2 = bias_variable([2 * channels], name='se_fc2_b',
-                                  dtype=self.model_dtype)
-        self.add_weights(W_fc2)
-        self.add_weights(b_fc2)
-
-        net = tf.add(tf.matmul(net, W_fc2), b_fc2)
-        net = tf.reshape(net, [-1, 2 * channels, 1, 1])
-
-        # Split to scale and bias
-        gammas, betas = tf.split(net, 2, axis=1)
-
-        out = tf.nn.sigmoid(gammas) * x + betas
-
-        return out
-
     def conv_block_v2(self, inputs, filter_size, output_channels, bn_scale=False):
         conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
         return tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv, scale=bn_scale))
-
-    def conv_block(self, inputs, filter_size, input_channels, output_channels, bn_scale=False):
-        # The weights are internal to the batchnorm layer, so apply
-        # a unique scope that we can store, and use to look them back up
-        # later on.
-        weight_key = self.get_batchnorm_key()
-        conv_key = weight_key + "/conv_weight"
-        W_conv = weight_variable([filter_size, filter_size,
-                                  input_channels, output_channels], name=conv_key,
-                                  dtype=self.model_dtype)
-
-        self.add_weights(W_conv)
-        h_bn = self.batch_norm(conv2d(inputs, W_conv), weight_key, scale=bn_scale)
-        h_conv = tf.nn.relu(h_bn)
-
-        return h_conv
 
     def residual_block_v2(self, inputs, channels):
         conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
@@ -1223,34 +1120,6 @@ class TFProcess:
         out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, scale=True), channels)
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
         
-
-    def residual_block(self, inputs, channels):
-        # First convnet
-        orig = tf.identity(inputs)
-        weight_key_1 = self.get_batchnorm_key()
-        conv_key_1 = weight_key_1 + "/conv_weight"
-        W_conv_1 = weight_variable([3, 3, channels, channels], name=conv_key_1,
-                dtype=self.model_dtype)
-
-        # Second convnet
-        weight_key_2 = self.get_batchnorm_key()
-        conv_key_2 = weight_key_2 + "/conv_weight"
-        W_conv_2 = weight_variable([3, 3, channels, channels], name=conv_key_2,
-                dtype=self.model_dtype)
-
-        self.add_weights(W_conv_1)
-        h_bn1 = self.batch_norm(conv2d(inputs, W_conv_1), weight_key_1, scale=False)
-        h_out_1 = tf.nn.relu(h_bn1)
-
-        self.add_weights(W_conv_2)
-        h_bn2 = self.batch_norm(conv2d(h_out_1, W_conv_2), weight_key_2, scale=True)
-
-        with tf.compat.v1.variable_scope(weight_key_2):
-            h_se = self.squeeze_excitation(h_bn2, channels, self.SE_ratio)
-        h_out_2 = tf.nn.relu(tf.add(h_se, orig))
-
-        return h_out_2
-
     def construct_net_v2(self, inputs):
         flow = self.conv_block_v2(inputs, filter_size=3, output_channels=self.RESIDUAL_FILTERS, bn_scale=True)
         for _ in range(0, self.RESIDUAL_BLOCKS):
@@ -1278,88 +1147,3 @@ class TFProcess:
             h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh')(h_fc2)
         return h_fc1, h_fc3
         
-
-    def construct_net(self, planes):
-        # NCHW format
-        # batch, 112 input channels, 8 x 8
-        x_planes = tf.reshape(planes, [-1, 112, 8, 8])
-        x_planes = tf.cast(x_planes, dtype=self.model_dtype)
-
-        # Input convolution
-        flow = self.conv_block(x_planes, filter_size=3,
-                               input_channels=112,
-                               output_channels=self.RESIDUAL_FILTERS,
-                               bn_scale=True)
-        # Residual tower
-        for _ in range(0, self.RESIDUAL_BLOCKS):
-            flow = self.residual_block(flow, self.RESIDUAL_FILTERS)
-
-        # Policy head
-        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
-            conv_pol = self.conv_block(flow, filter_size=3,
-                                       input_channels=self.RESIDUAL_FILTERS,
-                                       output_channels=self.RESIDUAL_FILTERS)
-            W_pol_conv = weight_variable([3, 3,
-                                          self.RESIDUAL_FILTERS, 80], name='W_pol_conv2',
-                                          dtype=self.model_dtype)
-            b_pol_conv = bias_variable([80], name='b_pol_conv2',
-                                          dtype=self.model_dtype)
-
-            self.add_weights(W_pol_conv)
-            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_pol_conv)
-            self.add_weights(b_pol_conv)
-
-            conv_pol2 = tf.nn.bias_add(
-                conv2d(conv_pol, W_pol_conv), b_pol_conv, data_format='NCHW')
-
-            h_conv_pol_flat = tf.reshape(conv_pol2, [-1, 80*8*8])
-            fc1_init = tf.constant(lc0_az_policy_map.make_map(), dtype=self.model_dtype)
-            W_fc1 = tf.Variable(fc1_init, trainable=False, name="policy_map")
-
-            h_fc1 = tf.matmul(h_conv_pol_flat, W_fc1, name='policy_head')
-        elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
-            conv_pol = self.conv_block(flow, filter_size=1,
-                                       input_channels=self.RESIDUAL_FILTERS,
-                                       output_channels=self.policy_channels)
-            h_conv_pol_flat = tf.reshape(
-                conv_pol, [-1, self.policy_channels*8*8])
-            W_fc1 = weight_variable(
-                [self.policy_channels*8*8, 1858], name='fc1/weight',
-                dtype=self.model_dtype)
-            b_fc1 = bias_variable([1858], name='fc1/bias',
-                                  dtype=self.model_dtype)
-            self.add_weights(W_fc1)
-            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_fc1)
-            self.add_weights(b_fc1)
-            h_fc1 = tf.add(tf.matmul(h_conv_pol_flat, W_fc1),
-                           b_fc1, name='policy_head')
-        else:
-            raise ValueError(
-                "Unknown policy head type {}".format(self.POLICY_HEAD))
-
-        # Value head
-        conv_val = self.conv_block(flow, filter_size=1,
-                                   input_channels=self.RESIDUAL_FILTERS,
-                                   output_channels=32)
-        h_conv_val_flat = tf.reshape(conv_val, [-1, 32*8*8])
-        W_fc2 = weight_variable([32 * 8 * 8, 128], name='fc2/weight',
-                dtype=self.model_dtype)
-        b_fc2 = bias_variable([128], name='fc2/bias', dtype=self.model_dtype)
-        self.add_weights(W_fc2)
-        self.add_weights(b_fc2)
-        h_fc2 = tf.nn.relu(tf.add(tf.matmul(h_conv_val_flat, W_fc2), b_fc2))
-        value_outputs = 3 if self.wdl else 1
-        W_fc3 = weight_variable([128, value_outputs], name='fc3/weight',
-                dtype=self.model_dtype)
-        b_fc3 = bias_variable([value_outputs], name='fc3/bias',
-                dtype=self.model_dtype)
-        self.add_weights(W_fc3)
-        self.add_weights(b_fc3)
-        h_fc3 = tf.add(tf.matmul(h_fc2, W_fc3), b_fc3, name='value_head')
-        if not self.wdl:
-            h_fc3 = tf.nn.tanh(h_fc3)
-        else:
-            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES, b_fc3)
-
-
-        return h_fc1, h_fc3
