@@ -116,9 +116,6 @@ class TFProcess:
 
         self.net.set_valueformat(self.VALUE_HEAD)
 
-        # For exporting
-        self.weights = []
-
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
@@ -129,16 +126,11 @@ class TFProcess:
         self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
         self.renorm_momentum = self.cfg['training'].get('renorm_momentum', 0.99)
 
-        gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.90,
-                                    allow_growth=True, visible_device_list="{}".format(self.cfg['gpu']))
-        config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
-        self.session = tf.compat.v1.Session(config=config)
         gpus = tf.config.experimental.list_physical_devices('GPU')
         tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
 
-    
         self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
     def init_v2(self, train_dataset, test_dataset):
@@ -152,23 +144,6 @@ class TFProcess:
         self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
             self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
-
-    def init(self, dataset, train_iterator, test_iterator):
-        self.training = tf.compat.v1.placeholder(tf.bool)
-        self.learning_rate = tf.compat.v1.placeholder(tf.float32)
-        # TF variables
-        self.handle = tf.compat.v1.placeholder(tf.string, shape=[])
-        iterator = tf.compat.v1.data.Iterator.from_string_handle(
-            self.handle, tf.compat.v1.data.get_output_types(dataset), tf.compat.v1.data.get_output_shapes(dataset))
-        self.next_batch = iterator.get_next()
-        self.train_handle = self.session.run(train_iterator.string_handle())
-        self.test_handle = self.session.run(test_iterator.string_handle())
-        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
-
-        # This forces trainable variables to be stored as fp32
-        with tf.compat.v1.variable_scope("fp32_storage",
-                custom_getter=float32_variable_storage_getter):
-            self.init_net(self.next_batch)
 
     def init_net_v2(self):
         input_var = tf.keras.Input(shape=(112, 8*8))
@@ -264,156 +239,6 @@ class TFProcess:
             self.swa_writer = tf.summary.create_file_writer(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
 
-    def init_net(self, next_batch):
-        self.x = next_batch[0]  # tf.placeholder(tf.float32, [None, 112, 8*8])
-        self.y_ = next_batch[1] # tf.placeholder(tf.float32, [None, 1858])
-        self.z_ = next_batch[2] # tf.placeholder(tf.float32, [None, 3])
-        self.q_ = next_batch[3] # tf.placeholder(tf.float32, [None, 3])
-        self.batch_norm_count = 0
-        self.y_conv, self.z_conv = self.construct_net(self.x)
-
-        if self.model_dtype != tf.float32:
-            self.y_conv = tf.cast(self.y_conv, tf.float32)
-            self.z_conv = tf.cast(self.z_conv, tf.float32)
-
-        # Calculate loss on policy head
-        if self.cfg['training'].get('mask_legal_moves'):
-            # extract mask for legal moves from target policy
-            move_is_legal = tf.greater_equal(self.y_, 0)
-            # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
-            illegal_filler = tf.zeros_like(self.y_conv) - 1.0e10
-            self.y_conv = tf.compat.v1.where_v2(move_is_legal, self.y_conv, illegal_filler)
-        # y_ still has -1 on illegal moves, flush them to 0
-        self.y_ = tf.nn.relu(self.y_)
-
-        policy_cross_entropy = \
-            tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(labels=tf.stop_gradient(self.y_),
-                                                    logits=self.y_conv)
-        self.policy_loss = tf.reduce_mean(input_tensor=policy_cross_entropy)
-
-        q_ratio = self.cfg['training'].get('q_ratio', 0)
-        assert 0 <= q_ratio <= 1
-        target = self.q_ * q_ratio + self.z_ * (1 - q_ratio)
-
-        # Linear conversion to scalar to compute MSE with, for comparison to old values
-        wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
-        scalar_target = tf.matmul(target, wdl)
-
-        # Loss on value head
-        if self.wdl:
-            value_cross_entropy = \
-                tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(labels=tf.stop_gradient(target),
-                                                    logits=self.z_conv)
-            self.value_loss = tf.reduce_mean(input_tensor=value_cross_entropy)
-            scalar_z_conv = tf.matmul(tf.nn.softmax(self.z_conv), wdl)
-            self.mse_loss = \
-                tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, scalar_z_conv))
-        else:
-            self.value_loss = tf.constant(0)
-            self.mse_loss = \
-                tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, self.z_conv))
-
-        # Regularizer
-        reg_variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES)
-        penalties = [self.l2reg(w) for w in reg_variables]
-        self.reg_term = tf.math.add_n(penalties)
-
-        if self.model_dtype != tf.float32:
-            self.reg_term = tf.cast(self.reg_term, tf.float32)
-
-        # For training from a (smaller) dataset of strong players, you will
-        # want to reduce the factor in front of self.mse_loss here.
-        pol_loss_w = self.cfg['training']['policy_loss_weight']
-        val_loss_w = self.cfg['training']['value_loss_weight']
-        if self.wdl:
-            value_loss = self.value_loss
-        else:
-            value_loss = self.mse_loss
-        loss = pol_loss_w * self.policy_loss + \
-            val_loss_w * value_loss + self.reg_term
-
-        # Set adaptive learning rate during training
-        self.cfg['training']['lr_boundaries'].sort()
-        self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
-        self.lr = self.cfg['training']['lr_values'][0]
-
-        # You need to change the learning rate here if you are training
-        # from a self-play training set, for example start with 0.005 instead.
-        opt_op = tf.compat.v1.train.MomentumOptimizer(
-            learning_rate=self.learning_rate, momentum=0.9, use_nesterov=True)
-
-        opt_op = LossScalingOptimizer(opt_op, scale=self.loss_scale)
-
-        # Do swa after we contruct the net
-        if self.swa_enabled:
-            # Count of networks accumulated into SWA
-            self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
-            # Build the SWA variables and accumulators
-            accum = []
-            load = []
-            n = self.swa_count
-            for w in self.weights:
-                name = w.name.split(':')[0]
-                var = tf.Variable(
-                    tf.zeros(shape=w.shape), name='swa/'+name, trainable=False)
-                accum.append(
-                    tf.compat.v1.assign(var, var * (n / (n + 1.)) + tf.stop_gradient(w) * (1. / (n + 1.))))
-                load.append(tf.compat.v1.assign(w, var))
-            with tf.control_dependencies(accum):
-                self.swa_accum_op = tf.compat.v1.assign_add(n, 1.)
-            self.swa_load_op = tf.group(*load)
-
-        # Accumulate (possibly multiple) gradient updates to simulate larger batch sizes than can be held in GPU memory.
-        gradient_accum = [tf.Variable(tf.zeros_like(
-            var.initialized_value()), trainable=False) for var in tf.compat.v1.trainable_variables()]
-        self.zero_op = [var.assign(tf.zeros_like(var))
-                        for var in gradient_accum]
-
-        self.update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(self.update_ops):
-            gradients = opt_op.compute_gradients(loss)
-        self.accum_op = [accum.assign_add(
-            gradient[0]) for accum, gradient in zip(gradient_accum, gradients)]
-        # gradients are num_batch_splits times higher due to accumulation by summing, so the norm will be too
-        max_grad_norm = self.cfg['training'].get(
-            'max_grad_norm', 10000.0) * self.cfg['training'].get('num_batch_splits', 1)
-        gradient_accum, self.grad_norm = tf.clip_by_global_norm(
-            gradient_accum, max_grad_norm)
-        self.train_op = opt_op.apply_gradients(
-            [(accum, gradient[1]) for accum, gradient in zip(gradient_accum, gradients)], global_step=self.global_step)
-
-        correct_policy_prediction = \
-            tf.equal(tf.argmax(input=self.y_conv, axis=1), tf.argmax(input=self.y_, axis=1))
-        correct_policy_prediction = tf.cast(correct_policy_prediction, tf.float32)
-        self.policy_accuracy = tf.reduce_mean(input_tensor=correct_policy_prediction)
-        correct_value_prediction = \
-            tf.equal(tf.argmax(input=self.z_conv, axis=1), tf.argmax(input=self.z_, axis=1))
-        correct_value_prediction = tf.cast(correct_value_prediction, tf.float32)
-        self.value_accuracy = tf.reduce_mean(input_tensor=correct_value_prediction)
-
-        self.avg_policy_loss = []
-        self.avg_value_loss = []
-        self.avg_mse_loss = []
-        self.avg_reg_term = []
-        self.time_start = None
-        self.last_steps = None
-
-        # Summary part
-        self.test_writer = tf.compat.v1.summary.FileWriter(
-            os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])))
-        self.train_writer = tf.compat.v1.summary.FileWriter(
-            os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])))
-        if self.swa_enabled:
-            self.swa_writer = tf.compat.v1.summary.FileWriter(
-                os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
-        self.histograms = [tf.compat.v1.summary.histogram(
-            weight.name, weight) for weight in self.weights]
-
-        self.init = tf.compat.v1.global_variables_initializer()
-        self.saver = tf.compat.v1.train.Saver()
-
-        self.session.run(self.init)
-
     def replace_weights(self, new_weights):
         all_evals = []
         for e, weights in enumerate(self.weights):
@@ -462,10 +287,6 @@ class TFProcess:
             print("Restoring from {0}".format(self.manager.latest_checkpoint))
             self.checkpoint.restore(self.manager.latest_checkpoint)
 
-    def restore(self, file):
-        print("Restoring from {0}".format(file))
-        self.saver.restore(self.session, file)
-
     def process_loop_v2(self, batch_size, test_batches, batch_splits=1):
         # Get the initial steps value in case this is a resume from a step count
         # which is not a multiple of total_steps.
@@ -473,14 +294,6 @@ class TFProcess:
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
             self.process_v2(batch_size, test_batches, batch_splits=batch_splits)
-
-    def process_loop(self, batch_size, test_batches, batch_splits=1):
-        # Get the initial steps value in case this is a resume from a step count
-        # which is not a multiple of total_steps.
-        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
-        total_steps = self.cfg['training']['total_steps']
-        for _ in range(steps % total_steps, total_steps):
-            self.process(batch_size, test_batches, batch_splits=batch_splits)
 
     @tf.function()
     def process_inner_loop(self):
@@ -633,151 +446,16 @@ class TFProcess:
                 self.save_swa_weights_v2(swa_path)
                 print("SWA Weights saved in file: {}".format(swa_path))
 
-    def process(self, batch_size, test_batches, batch_splits=1):
-        if not self.time_start:
-            self.time_start = time.time()
-
-        # Get the initial steps value before we do a training step.
-        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
-        if not self.last_steps:
-            self.last_steps = steps
-
-        if self.swa_enabled:
-            # split half of test_batches between testing regular weights and SWA weights
-            test_batches //= 2
-
-        # Run test before first step to see delta since end of last run.
-        if steps % self.cfg['training']['total_steps'] == 0:
-            # Steps is given as one higher than current in order to avoid it
-            # being equal to the value the end of a run is stored against.
-            self.calculate_test_summaries(test_batches, steps + 1)
-            if self.swa_enabled:
-                self.calculate_swa_summaries(test_batches, steps + 1)
-
-        # Make sure that ghost batch norm can be applied
-        if batch_size % 64 != 0:
-            # Adjust required batch size for batch splitting.
-            required_factor = 64 * \
-                self.cfg['training'].get('num_batch_splits', 1)
-            raise ValueError(
-                'batch_size must be a multiple of {}'.format(required_factor))
-
-        # Determine learning rate
-        lr_values = self.cfg['training']['lr_values']
-        lr_boundaries = self.cfg['training']['lr_boundaries']
-        steps_total = steps % self.cfg['training']['total_steps']
-        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
-        if self.warmup_steps > 0 and steps < self.warmup_steps:
-            self.lr = self.lr * (steps + 1) / self.warmup_steps
-
-        # need to add 1 to steps because steps will be incremented after gradient update
-        if (steps + 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (steps + 1) % self.cfg['training']['total_steps'] == 0:
-            before_weights = self.session.run(self.weights)
-
-        # Run training for this batch
-        self.session.run(self.zero_op)
-        for _ in range(batch_splits):
-            policy_loss, value_loss, mse_loss, reg_term, _, _ = self.session.run(
-                [self.policy_loss, self.value_loss, self.mse_loss, self.reg_term, self.accum_op,
-                    self.next_batch],
-                feed_dict={self.training: True, self.handle: self.train_handle})
-            # Keep running averages
-            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
-            # get comparable values.
-            mse_loss /= 4.0
-            self.avg_policy_loss.append(policy_loss)
-            if self.wdl:
-                self.avg_value_loss.append(value_loss)
-            self.avg_mse_loss.append(mse_loss)
-            self.avg_reg_term.append(reg_term)
-        # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
-        corrected_lr = self.lr / batch_splits
-        _, grad_norm = self.session.run([self.train_op, self.grad_norm],
-                                        feed_dict={self.learning_rate: corrected_lr, self.training: True, self.handle: self.train_handle})
-
-        # Update steps since training should have incremented it.
-        steps = tf.compat.v1.train.global_step(self.session, self.global_step)
-
-        if steps % self.cfg['training']['train_avg_report_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
-            pol_loss_w = self.cfg['training']['policy_loss_weight']
-            val_loss_w = self.cfg['training']['value_loss_weight']
-            time_end = time.time()
-            speed = 0
-            if self.time_start:
-                elapsed = time_end - self.time_start
-                steps_elapsed = steps - self.last_steps
-                speed = batch_size * (steps_elapsed / elapsed)
-            avg_policy_loss = np.mean(self.avg_policy_loss or [0])
-            avg_value_loss = np.mean(self.avg_value_loss or [0])
-            avg_mse_loss = np.mean(self.avg_mse_loss or [0])
-            avg_reg_term = np.mean(self.avg_reg_term or [0])
-            print("step {}, lr={:g} policy={:g} value={:g} mse={:g} reg={:g} total={:g} ({:g} pos/s)".format(
-                steps, self.lr, avg_policy_loss, avg_value_loss, avg_mse_loss, avg_reg_term,
-                pol_loss_w * avg_policy_loss + val_loss_w * avg_value_loss + avg_reg_term,
-                speed))
-
-            after_weights = self.session.run(self.weights)
-            update_ratio_summaries = self.compute_update_ratio(
-                before_weights, after_weights)
-
-            train_summaries = tf.compat.v1.Summary(value=[
-                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=avg_policy_loss),
-                tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=avg_value_loss),
-                tf.compat.v1.Summary.Value(tag="Reg term", simple_value=avg_reg_term),
-                tf.compat.v1.Summary.Value(tag="LR", simple_value=self.lr),
-                tf.compat.v1.Summary.Value(tag="Gradient norm",
-                                 simple_value=grad_norm / batch_splits),
-                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=avg_mse_loss)])
-            self.train_writer.add_summary(train_summaries, steps)
-            self.train_writer.add_summary(update_ratio_summaries, steps)
-            self.time_start = time_end
-            self.last_steps = steps
-            self.avg_policy_loss, self.avg_value_loss, self.avg_mse_loss, self.avg_reg_term = [], [], [], []
-
-        if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
-            self.update_swa()
-
-        # Calculate test values every 'test_steps', but also ensure there is
-        # one at the final step so the delta to the first step can be calculted.
-        if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0:
-            self.calculate_test_summaries(test_batches, steps)
-            if self.swa_enabled:
-                self.calculate_swa_summaries(test_batches, steps)
-
-        # Save session and weights at end, and also optionally every 'checkpoint_steps'.
-        if steps % self.cfg['training']['total_steps'] == 0 or (
-                'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
-            path = os.path.join(self.root_dir, self.cfg['name'])
-            save_path = self.saver.save(self.session, path, global_step=steps)
-            print("Model saved in file: {}".format(save_path))
-            leela_path = path + "-" + str(steps)
-            swa_path = path + "-swa-" + str(steps)
-            self.net.pb.training_params.training_steps = steps
-            self.save_leelaz_weights(leela_path)
-            print("Weights saved in file: {}".format(leela_path))
-            if self.swa_enabled:
-                self.save_swa_weights(swa_path)
-                print("SWA Weights saved in file: {}".format(swa_path))
-
     def calculate_swa_summaries_v2(self, test_batches, steps):
         backup = [w.read_value() for w in self.model.weights]
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
-        #true_test_writer, self.test_writer = self.test_writer, self.swa_writer
-        print('swa', end=' ')
-        self.calculate_test_summaries_v2(test_batches, steps)
-        #self.test_writer = true_test_writer
-        for (old, w) in zip(backup, self.model.weights):
-            w.assign(old)
-
-    def calculate_swa_summaries(self, test_batches, steps):
-        self.snap_save()
-        self.session.run(self.swa_load_op)
         true_test_writer, self.test_writer = self.test_writer, self.swa_writer
         print('swa', end=' ')
-        self.calculate_test_summaries(test_batches, steps)
+        self.calculate_test_summaries_v2(test_batches, steps)
         self.test_writer = true_test_writer
-        self.snap_restore()
+        for (old, w) in zip(backup, self.model.weights):
+            w.assign(old)
 
     @tf.function()
     def calculate_test_summaries_inner_loop(self):
@@ -839,56 +517,6 @@ class TFProcess:
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
             format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
-    def calculate_test_summaries(self, test_batches, steps):
-        sum_policy_accuracy = 0
-        sum_value_accuracy = 0
-        sum_mse = 0
-        sum_policy = 0
-        sum_value = 0
-        for _ in range(0, test_batches):
-            test_policy, test_value, test_policy_accuracy, test_value_accuracy, test_mse, _ = self.session.run(
-                [self.policy_loss, self.value_loss, self.policy_accuracy, self.value_accuracy, self.mse_loss,
-                 self.next_batch],
-                feed_dict={self.training: False,
-                           self.handle: self.test_handle})
-            sum_policy_accuracy += test_policy_accuracy
-            sum_mse += test_mse
-            sum_policy += test_policy
-            if self.wdl:
-                sum_value_accuracy += test_value_accuracy
-                sum_value += test_value
-        sum_policy_accuracy /= test_batches
-        sum_policy_accuracy *= 100
-        sum_policy /= test_batches
-        sum_value /= test_batches
-        if self.wdl:
-            sum_value_accuracy /= test_batches
-            sum_value_accuracy *= 100
-        # Additionally rescale to [0, 1] so divide by 4
-        sum_mse /= (4.0 * test_batches)
-        self.net.pb.training_params.learning_rate = self.lr
-        self.net.pb.training_params.mse_loss = sum_mse
-        self.net.pb.training_params.policy_loss = sum_policy
-        # TODO store value and value accuracy in pb
-        self.net.pb.training_params.accuracy = sum_policy_accuracy
-        if self.wdl:
-            test_summaries = tf.compat.v1.Summary(value=[
-                tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-                tf.compat.v1.Summary.Value(tag="Value Accuracy", simple_value=sum_value_accuracy),
-                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-                tf.compat.v1.Summary.Value(tag="Value Loss", simple_value=sum_value),
-                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
-        else:
-            test_summaries = tf.compat.v1.Summary(value=[
-                tf.compat.v1.Summary.Value(tag="Policy Accuracy", simple_value=sum_policy_accuracy),
-                tf.compat.v1.Summary.Value(tag="Policy Loss", simple_value=sum_policy),
-                tf.compat.v1.Summary.Value(tag="MSE Loss", simple_value=sum_mse)]).SerializeToString()
-        test_summaries = tf.compat.v1.summary.merge(
-            [test_summaries] + self.histograms).eval(session=self.session)
-        self.test_writer.add_summary(test_summaries, steps)
-        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
-
     def compute_update_ratio(self, before_weights, after_weights):
         """Compute the ratio of gradient norm to weight norm.
 
@@ -945,32 +573,6 @@ class TFProcess:
             swa.assign(swa.read_value() * (num / (num + 1.)) + w.read_value() * (1. / (num + 1.)))
         self.swa_count.assign(min(num + 1., self.swa_max_n))
 
-    def update_swa(self):
-        # Add the current weight vars to the running average.
-        num = self.session.run(self.swa_accum_op)
-        num = min(num, self.swa_max_n)
-        self.swa_count.load(float(num), self.session)
-
-    def snap_save(self):
-        # Save a snapshot of all the variables in the current graph.
-        if not hasattr(self, 'snap_save_op'):
-            save_ops = []
-            rest_ops = []
-            for var in self.weights:
-                if isinstance(var, str):
-                    var = tf.compat.v1.get_default_graph().get_tensor_by_name(var)
-                name = var.name.split(':')[0]
-                v = tf.Variable(var, name='save/'+name, trainable=False)
-                save_ops.append(tf.compat.v1.assign(v, var))
-                rest_ops.append(tf.compat.v1.assign(var, v))
-            self.snap_save_op = tf.group(*save_ops)
-            self.snap_restore_op = tf.group(*rest_ops)
-        self.session.run(self.snap_save_op)
-
-    def snap_restore(self):
-        # Restore variables in the current graph from the snapshot.
-        self.session.run(self.snap_restore_op)
-
     def save_swa_weights_v2(self, filename):
         backup = [w.read_value() for w in self.model.weights]
         for (swa, w) in zip(self.swa_weights, self.model.weights):
@@ -978,12 +580,6 @@ class TFProcess:
         self.save_leelaz_weights_v2(filename)
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
-
-    def save_swa_weights(self, filename):
-        self.snap_save()
-        self.session.run(self.swa_load_op)
-        self.save_leelaz_weights(filename)
-        self.snap_restore()
 
     def save_leelaz_weights_v2(self, filename):
         all_tensors = []
@@ -1037,52 +633,6 @@ class TFProcess:
         all_tensors = permuted_tensors
         
         for e, nparray in enumerate(all_tensors):
-            # Rescale rule50 related weights as clients do not normalize the input.
-            if e == 0:
-                num_inputs = 112
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                rule50_input = 109
-                wt_flt = []
-                for i, weight in enumerate(np.ravel(nparray)):
-                    if (i % (num_inputs*9))//9 == rule50_input:
-                        wt_flt.append(weight/99)
-                    else:
-                        wt_flt.append(weight)
-            else:
-                wt_flt = [wt for wt in np.ravel(nparray)]
-            all_weights.append(wt_flt)
-
-        self.net.fill_net(all_weights)
-        self.net.save_proto(filename)
-
-    def save_leelaz_weights(self, filename):
-        all_weights = []
-        if not hasattr(self, 'pb_save_op'):
-            all_evals = []
-            for weights in self.weights:
-                work_weights = None
-                if weights.shape.ndims == 4:
-                    # Convolution weights need a transpose
-                    #
-                    # TF (kYXInputOutput)
-                    # [filter_height, filter_width, in_channels, out_channels]
-                    #
-                    # Leela/cuDNN/Caffe (kOutputInputYX)
-                    # [output, input, filter_size, filter_size]
-                    work_weights = tf.transpose(a=weights, perm=[3, 2, 0, 1])
-                elif weights.shape.ndims == 2:
-                    # Fully connected layers are [in, out] in TF
-                    #
-                    # [out, in] in Leela
-                    #
-                    work_weights = tf.transpose(a=weights, perm=[1, 0])
-                else:
-                    # Biases, batchnorm etc
-                    work_weights = weights
-                all_evals.append(work_weights)
-            self.pb_save_op = all_evals
-        nparrays = self.session.run(self.pb_save_op)
-        for e, nparray in enumerate(nparrays):
             # Rescale rule50 related weights as clients do not normalize the input.
             if e == 0:
                 num_inputs = 112
