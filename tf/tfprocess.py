@@ -24,7 +24,6 @@ import time
 import bisect
 import lc0_az_policy_map
 import proto.net_pb2 as pb
-from mixprec import float32_variable_storage_getter, LossScalingOptimizer
 
 from net import Net
 
@@ -126,18 +125,14 @@ class TFProcess:
         self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
     def init_v2(self, train_dataset, test_dataset):
-        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         self.train_dataset = train_dataset
         self.train_iter = iter(train_dataset)
         self.test_dataset = test_dataset
         self.test_iter = iter(test_dataset)
         self.init_net_v2()
-        self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
-        self.checkpoint.listed = self.swa_weights
-        self.manager = tf.train.CheckpointManager(
-            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
 
     def init_net_v2(self):
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8*8))
         x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=self.construct_net_v2(x_planes))
@@ -230,19 +225,58 @@ class TFProcess:
         if self.swa_enabled:
             self.swa_writer = tf.summary.create_file_writer(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
+        self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
+        self.checkpoint.listed = self.swa_weights
+        self.manager = tf.train.CheckpointManager(
+            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
 
-    def replace_weights(self, new_weights):
+    def replace_weights_v2(self, new_weights_orig):
+        new_weights = [w for w in new_weights_orig]
+        # self.model.weights ordering doesn't match up nicely, so first shuffle the new weights to match up.
+        # input order is (for convolutional policy):
+        # policy conv
+        # policy bn * 4
+        # policy raw conv and bias
+        # value conv
+        # value bn * 4
+        # value dense with bias
+        # value dense with bias
+        #
+        # output order is (for convolutional policy):
+        # value conv
+        # policy conv
+        # value bn * 4
+        # policy bn * 4
+        # policy raw conv and bias
+        # value dense with bias
+        # value dense with bias
+        new_weights[-5] = new_weights_orig[-10]
+        new_weights[-6] = new_weights_orig[-11]
+        new_weights[-7] = new_weights_orig[-12]
+        new_weights[-8] = new_weights_orig[-13]
+        new_weights[-9] = new_weights_orig[-14]
+        new_weights[-10] = new_weights_orig[-15]
+        new_weights[-11] = new_weights_orig[-5]
+        new_weights[-12] = new_weights_orig[-6]
+        new_weights[-13] = new_weights_orig[-7]
+        new_weights[-14] = new_weights_orig[-8]
+        new_weights[-15] = new_weights_orig[-16]
+        new_weights[-16] = new_weights_orig[-9]
+
         all_evals = []
-        for e, weights in enumerate(self.weights):
+        offset = 0
+        last_was_gamma = False
+        for e, weights in enumerate(self.model.weights):
+            source_idx = e+offset
             if weights.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
                 if e == 0:
                     num_inputs = 112
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109
-                    for i in range(len(new_weights[e])):
+                    for i in range(len(new_weights[source_idx])):
                         if (i % (num_inputs*9))//9 == rule50_input:
-                            new_weights[e][i] = new_weights[e][i]*99
+                            new_weights[source_idx][i] = new_weights[source_idx][i]*99
 
                 # Convolution weights need a transpose
                 #
@@ -253,9 +287,9 @@ class TFProcess:
                 # [output, input, filter_size, filter_size]
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [3, 2, 0, 1]]
-                new_weight = tf.constant(new_weights[e], shape=shape)
-                all_evals.append(weights.assign(
-                    tf.transpose(a=new_weight, perm=[2, 3, 1, 0])))
+                new_weight = tf.constant(new_weights[source_idx], shape=shape)
+                weights.assign(
+                    tf.transpose(a=new_weight, perm=[2, 3, 1, 0]))
             elif weights.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
@@ -263,16 +297,34 @@ class TFProcess:
                 #
                 s = weights.shape.as_list()
                 shape = [s[i] for i in [1, 0]]
-                new_weight = tf.constant(new_weights[e], shape=shape)
-                all_evals.append(weights.assign(
-                    tf.transpose(a=new_weight, perm=[1, 0])))
+                new_weight = tf.constant(new_weights[source_idx], shape=shape)
+                weights.assign(
+                    tf.transpose(a=new_weight, perm=[1, 0]))
             else:
+                # Can't populate renorm weights, but the current new_weight will need using elsewhere.
+                if 'renorm' in weights.name:
+                    offset-=1
+                    continue
+                # betas without gamms need to skip the gamma in the input.
+                if 'beta:' in weights.name and not last_was_gamma:
+                    source_idx+=1
+                    offset+=1
                 # Biases, batchnorm etc
-                new_weight = tf.constant(new_weights[e], shape=weights.shape)
-                all_evals.append(tf.compat.v1.assign(weights, new_weight))
-        self.session.run(all_evals)
+                new_weight = tf.constant(new_weights[source_idx], shape=weights.shape)
+                if 'stddev:' in weights.name:
+                    weights.assign(tf.math.sqrt(new_weight + 1e-5))
+                else:
+                    weights.assign(new_weight)
+                # need to use the variance to also populate the stddev for renorm, so adjust offset.
+                if 'variance:' in weights.name and self.renorm_enabled:
+                    offset-=1
+            last_was_gamma = 'gamma:' in weights.name
+        # Replace the SWA weights as well, ensuring swa accumulation is reset.
+        if self.swa_enabled:
+            self.swa_count.assign(tf.constant(0.))
+            self.update_swa_v2()
         # This should result in identical file to the starting one
-        # self.save_leelaz_weights('restored.txt')
+        # self.save_leelaz_weights_v2('restored.pb.gz')
 
     def restore_v2(self):
         if self.manager.latest_checkpoint is not None:
