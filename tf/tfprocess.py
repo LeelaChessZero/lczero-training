@@ -27,10 +27,6 @@ import proto.net_pb2 as pb
 
 from net import Net
 
-# Bias weights for layers not followed by BatchNorm
-# We do not regularlize biases, so they are not
-# added to the regularlizer collection
-
 class ApplySqueezeExcitation(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super(ApplySqueezeExcitation, self).__init__(**kwargs)
