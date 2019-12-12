@@ -345,7 +345,7 @@ class TFProcess:
         print('tracing inner loop!')
         x, y, z, q = next(self.train_iter)
         with tf.GradientTape() as tape:
-            policy, value = self.model(x)
+            policy, value = self.model(x, training=True)
             policy_loss = self.policy_loss_fn(y, policy)                    
             reg_term = sum(self.model.losses)
             if self.wdl:
@@ -506,7 +506,7 @@ class TFProcess:
     def calculate_test_summaries_inner_loop(self):
         print('tracing summaries inner loop!')
         x, y, z, q = next(self.test_iter)
-        policy, value = self.model(x)
+        policy, value = self.model(x, training=False)
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.accuracy_fn(y, policy)
         if self.wdl:
