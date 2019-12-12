@@ -55,14 +55,6 @@ class ApplyPolicyMap(tf.keras.layers.Layer):
         h_conv_pol_flat = tf.reshape(inputs, [-1, 80*8*8])
         return tf.matmul(h_conv_pol_flat, tf.cast(self.fc1, h_conv_pol_flat.dtype))
 
-
-def bias_variable(shape, name=None, dtype=tf.float32):
-    return tf.Variable(tf.compat.v1.zeros_initializer()(shape, dtype), name=name)
-
-def conv2d(x, W):
-    return tf.nn.conv2d(input=x, filters=W, data_format='NCHW',
-                        strides=[1, 1, 1, 1], padding='SAME')
-
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -513,11 +505,10 @@ class TFProcess:
             tf.summary.scalar("Policy Accuracy", sum_policy_accuracy, step=steps)
             if self.wdl:
                 tf.summary.scalar("Value Accuracy", sum_value_accuracy, step=steps)
+            for w in self.model.weights:
+                tf.summary.histogram(w.name, w, buckets=1000, step=steps)
         self.test_writer.flush()
 
-        #test_summaries = tf.compat.v1.summary.merge(
-        #    [test_summaries] + self.histograms).eval(session=self.session)
-        #self.test_writer.add_summary(test_summaries, steps)
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
             format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
@@ -537,56 +528,6 @@ class TFProcess:
         # Filtering is hard, so just push infinities/NaNs to an unreasonably large value.
         ratios = [tf.cond(r > 0, lambda: tf.math.log(r) / 2.30258509299, lambda: 200.) for (_, r) in ratios]
         tf.summary.histogram('update_ratios_log10', tf.stack(ratios), buckets=1000, step=steps)
-
-    def compute_update_ratio(self, before_weights, after_weights):
-        """Compute the ratio of gradient norm to weight norm.
-
-        Adapted from https://github.com/tensorflow/minigo/blob/c923cd5b11f7d417c9541ad61414bf175a84dc31/dual_net.py#L567
-        """
-        deltas = [after - before for after,
-                  before in zip(after_weights, before_weights)]
-        delta_norms = [np.linalg.norm(d.ravel()) for d in deltas]
-        weight_norms = [np.linalg.norm(w.ravel()) for w in before_weights]
-        ratios = [(tensor.name, d / w) for d, w, tensor in zip(delta_norms, weight_norms, self.weights) if not 'moving' in tensor.name]
-        all_summaries = [
-            tf.compat.v1.Summary.Value(tag='update_ratios/' +
-                             name, simple_value=ratio)
-            for name, ratio in ratios]
-        ratios = np.log10([r for (_, r) in ratios if 0 < r < np.inf])
-        all_summaries.append(self.log_histogram('update_ratios_log10', ratios))
-        return tf.compat.v1.Summary(value=all_summaries)
-
-    def log_histogram(self, tag, values, bins=1000):
-        """Logs the histogram of a list/vector of values.
-
-        From https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
-        """
-        # Convert to a numpy array
-        values = np.array(values)
-
-        # Create histogram using numpy
-        counts, bin_edges = np.histogram(values, bins=bins)
-
-        # Fill fields of histogram proto
-        hist = tf.compat.v1.HistogramProto()
-        hist.min = float(np.min(values))
-        hist.max = float(np.max(values))
-        hist.num = int(np.prod(values.shape))
-        hist.sum = float(np.sum(values))
-        hist.sum_squares = float(np.sum(values**2))
-
-        # Requires equal number as bins, where the first goes from -DBL_MAX to bin_edges[1]
-        # See https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/framework/summary.proto#L30
-        # Thus, we drop the start of the first bin
-        bin_edges = bin_edges[1:]
-
-        # Add bin edges and counts
-        for edge in bin_edges:
-            hist.bucket_limit.append(edge)
-        for c in counts:
-            hist.bucket.append(c)
-
-        return tf.compat.v1.Summary.Value(tag=tag, histo=hist)
 
     def update_swa_v2(self):
         num = self.swa_count.read_value()
