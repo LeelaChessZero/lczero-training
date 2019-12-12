@@ -565,6 +565,16 @@ class TFProcess:
                 #
                 work_weights = tf.transpose(a=weights, perm=[1, 0])
             else:
+                # batch renorm has extra weights, but we don't know what to do with them.
+                if 'renorm' in weights.name:
+                    continue
+                # renorm has variance, but it is not the primary source of truth
+                if 'variance:' in weights.name and self.renorm_enabled:
+                    continue
+                # Renorm has moving stddev not variance, undo the transform to make it compatible.
+                if 'stddev:' in weights.name:
+                    all_tensors.append(tf.math.square(weights) - 1e-5)
+                    continue
                 # Biases, batchnorm etc
                 # pb expects every batch norm to have gammas, but not all of our
                 # batch norms have gammas, so manually add pretend gammas.
