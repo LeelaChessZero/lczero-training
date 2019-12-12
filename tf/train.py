@@ -125,7 +125,6 @@ def main(cmd):
         train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
     train_dataset = train_dataset.map(ChunkParser.parse_function)
     train_dataset = train_dataset.prefetch(4)
-    #train_iterator = tf.compat.v1.data.make_one_shot_iterator(train_dataset)
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     test_parser = ChunkParser(FileDataSrc(test_chunks),
@@ -134,14 +133,9 @@ def main(cmd):
         test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
     test_dataset = test_dataset.map(ChunkParser.parse_function)
     test_dataset = test_dataset.prefetch(4)
-    #test_iterator = tf.compat.v1.data.make_one_shot_iterator(test_dataset)
 
-    #tfprocess.init(test_dataset, train_iterator, test_iterator)
     tfprocess.init_v2(train_dataset, test_dataset)
 
-    #if os.path.exists(os.path.join(root_dir, 'checkpoint')):
-    #    cp = tf.train.latest_checkpoint(root_dir)
-    #    tfprocess.restore(cp)
     tfprocess.restore_v2()
 
     # If number of test positions is not given
@@ -153,7 +147,6 @@ def main(cmd):
     num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
     print("Using {} evaluation batches".format(num_evals))
 
-    #tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
     tfprocess.process_loop_v2(total_batch_size, num_evals, batch_splits=batch_splits)
 
     if cmd.output is not None:
@@ -162,7 +155,6 @@ def main(cmd):
         else:
             tfprocess.save_leelaz_weights_v2(cmd.output)
 
-    #tfprocess.session.close()
     train_parser.shutdown()
     test_parser.shutdown()
 
