@@ -133,11 +133,11 @@ class TFProcess:
         input_var = tf.keras.Input(shape=(112, 8*8))
         x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=self.construct_net_v2(x_planes))
-        self.swa_count = None
+        # swa_count initialized reguardless to make checkpoint code simpler.
+        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
         self.swa_weights = None
         if self.swa_enabled:
             # Count of networks accumulated into SWA
-            self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
             self.swa_weights = [tf.Variable(w, trainable=False) for w in self.model.weights]
         
         self.active_lr = 0.01
@@ -342,7 +342,6 @@ class TFProcess:
 
     @tf.function()
     def process_inner_loop(self):
-        print('tracing inner loop!')
         x, y, z, q = next(self.train_iter)
         with tf.GradientTape() as tape:
             policy, value = self.model(x, training=True)
@@ -504,7 +503,6 @@ class TFProcess:
 
     @tf.function()
     def calculate_test_summaries_inner_loop(self):
-        print('tracing summaries inner loop!')
         x, y, z, q = next(self.test_iter)
         policy, value = self.model(x, training=False)
         policy_loss = self.policy_loss_fn(y, policy)
@@ -645,14 +643,14 @@ class TFProcess:
         permuted_tensors[-8] = all_tensors[-14]
         permuted_tensors[-9] = all_tensors[-16]
         permuted_tensors[-10] = all_tensors[-5]
-        permuted_tensors[-11] = all_tensors[-6]        
-        permuted_tensors[-12] = all_tensors[-7]        
-        permuted_tensors[-13] = all_tensors[-8]        
-        permuted_tensors[-14] = all_tensors[-9]        
-        permuted_tensors[-15] = all_tensors[-10]        
-        permuted_tensors[-16] = all_tensors[-15]        
+        permuted_tensors[-11] = all_tensors[-6]
+        permuted_tensors[-12] = all_tensors[-7]
+        permuted_tensors[-13] = all_tensors[-8]
+        permuted_tensors[-14] = all_tensors[-9]
+        permuted_tensors[-15] = all_tensors[-10]
+        permuted_tensors[-16] = all_tensors[-15]
         all_tensors = permuted_tensors
-        
+
         for e, nparray in enumerate(all_tensors):
             # Rescale rule50 related weights as clients do not normalize the input.
             if e == 0:

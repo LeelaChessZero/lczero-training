@@ -25,7 +25,6 @@ import gzip
 import random
 import multiprocessing as mp
 import tensorflow as tf
-#tf.compat.v1.disable_v2_behavior()
 from tfprocess import TFProcess
 from chunkparser import ChunkParser
 
