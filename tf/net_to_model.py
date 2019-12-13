@@ -27,22 +27,13 @@ if cfg['model']['residual_blocks'] != blocks:
     raise ValueError("Number of blocks in YAML doesn't match the network")
 weights = net.get_weights()
 
-x = [
-    tf.placeholder(tf.float32, [None, 112, 8*8]),
-    tf.placeholder(tf.float32, [None, 1858]),
-    tf.placeholder(tf.float32, [None, 3]),
-    tf.placeholder(tf.float32, [None, 3]),
-    ]
-
 tfp = tfprocess.TFProcess(cfg)
-tfp.init_net(x)
-tfp.replace_weights(weights)
-update_global_step = tfp.global_step.assign(START_FROM)
-tfp.session.run(update_global_step)
+tfp.init_net_v2()
+tfp.replace_weights_v2(weights)
+tfp.global_step.assign(START_FROM)
 
 root_dir = os.path.join(cfg['training']['path'], cfg['name'])
 if not os.path.exists(root_dir):
     os.makedirs(root_dir)
-path = os.path.join(root_dir, cfg['name'])
-save_path = tfp.saver.save(tfp.session, path, global_step=START_FROM)
-print("Wrote model to {}".format(root_dir))
+tfp.manager.save()
+print("Wrote model to {}".format(tfp.manager.latest_checkpoint))

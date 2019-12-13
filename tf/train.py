@@ -83,6 +83,43 @@ class FileDataSrc:
             except:
                 print("failed to parse {}".format(filename))
 
+def extract_inputs_outputs(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 7432 are easy, policy extraction.
+    policy = tf.io.decode_raw(tf.strings.substr(raw, 4, 7432), tf.float32)
+    # Next are 104 bit packed chess boards, they have to be expanded.
+    bit_planes = tf.expand_dims(tf.reshape(tf.io.decode_raw(tf.strings.substr(raw, 7436, 832), tf.uint8), [-1, 104, 8]), -1)
+    bit_planes = tf.bitwise.bitwise_and(tf.tile(bit_planes, [1, 1, 1, 8]), [128, 64, 32, 16, 8, 4, 2, 1])
+    bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
+    # Next 5 planes are 1 or 0 to indicate 8x8 of 1 or 0.
+    unit_planes = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8268, 5), tf.uint8), -1), -1)
+    unit_planes = tf.cast(tf.tile(unit_planes, [1, 1, 8, 8]), tf.float32)
+    # rule50 count plane.
+    rule50_plane = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8273, 1), tf.uint8), -1), -1)
+    rule50_plane = tf.cast(tf.tile(rule50_plane, [1, 1, 8, 8]), tf.float32)
+    rule50_plane = tf.divide(rule50_plane, 99.)
+    # zero plane and one plane
+    zero_plane = tf.zeros_like(rule50_plane)
+    one_plane = tf.ones_like(rule50_plane)    
+    inputs = tf.reshape(tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1), [-1, 112, 64])
+
+    # winner is stored in one signed byte and needs to be converted to one hot.
+    winner = tf.cast(tf.io.decode_raw(tf.strings.substr(raw, 8275, 1), tf.int8), tf.float32)
+    winner = tf.tile(winner, [1,3])
+    z = tf.cast(tf.equal(winner, [1., 0., -1.]), tf.float32)
+
+    # Outcome distribution needs to be calculated from q and d.
+    best_q = tf.io.decode_raw(tf.strings.substr(raw, 8280, 4), tf.float32)
+    best_d = tf.io.decode_raw(tf.strings.substr(raw, 8288, 4), tf.float32)
+    best_q_w = 0.5 * (1.0 - best_d + best_q)
+    best_q_l = 0.5 * (1.0 - best_d - best_q)
+
+    q = tf.concat([best_q_w, best_d, best_q_l], 1)
+    
+    return (inputs, policy, z, q)
+    
+def sample(x):
+    return tf.math.equal(tf.random.uniform([], 0, SKIP-1, dtype=tf.int32), 0)
 
 def main(cmd):
     cfg = yaml.safe_load(cmd.cfg.read())
@@ -91,6 +128,7 @@ def main(cmd):
     num_chunks = cfg['dataset']['num_chunks']
     allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
+    experimental_parser = cfg['dataset'].get('experimental_v4_only_dataset', False)
     num_train = int(num_chunks*train_ratio)
     num_test = num_chunks - num_train
     if 'input_test' in cfg['dataset']:
@@ -116,30 +154,38 @@ def main(cmd):
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
+    tfprocess = TFProcess(cfg)
 
-    train_parser = ChunkParser(FileDataSrc(train_chunks),
-            shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
-        train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    train_iterator = dataset.make_one_shot_iterator()
+    if experimental_parser:
+        train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat()\
+                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                         .shuffle(shuffle_size)\
+                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+    else:
+        train_parser = ChunkParser(FileDataSrc(train_chunks),
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+        train_dataset = tf.data.Dataset.from_generator(
+            train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
+        train_dataset = train_dataset.map(ChunkParser.parse_function)
+        train_dataset = train_dataset.prefetch(4)
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
-    test_parser = ChunkParser(FileDataSrc(test_chunks),
-            shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
-    dataset = tf.data.Dataset.from_generator(
-        test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
-    dataset = dataset.map(ChunkParser.parse_function)
-    dataset = dataset.prefetch(4)
-    test_iterator = dataset.make_one_shot_iterator()
+    if experimental_parser:
+        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat()\
+                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                         .shuffle(shuffle_size)\
+                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+    else:
+        test_parser = ChunkParser(FileDataSrc(test_chunks),
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+        test_dataset = tf.data.Dataset.from_generator(
+            test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
+        test_dataset = test_dataset.map(ChunkParser.parse_function)
+        test_dataset = test_dataset.prefetch(4)
 
-    tfprocess = TFProcess(cfg)
-    tfprocess.init(dataset, train_iterator, test_iterator)
+    tfprocess.init_v2(train_dataset, test_dataset)
 
-    if os.path.exists(os.path.join(root_dir, 'checkpoint')):
-        cp = tf.train.latest_checkpoint(root_dir)
-        tfprocess.restore(cp)
+    tfprocess.restore_v2()
 
     # If number of test positions is not given
     # sweeps through all test chunks statistically
@@ -150,15 +196,14 @@ def main(cmd):
     num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
     print("Using {} evaluation batches".format(num_evals))
 
-    tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
+    tfprocess.process_loop_v2(total_batch_size, num_evals, batch_splits=batch_splits)
 
     if cmd.output is not None:
         if cfg['training'].get('swa_output', False):
-            tfprocess.save_swa_weights(cmd.output)
+            tfprocess.save_swa_weights_v2(cmd.output)
         else:
-            tfprocess.save_leelaz_weights(cmd.output)
+            tfprocess.save_leelaz_weights_v2(cmd.output)
 
-    tfprocess.session.close()
     train_parser.shutdown()
     test_parser.shutdown()
 

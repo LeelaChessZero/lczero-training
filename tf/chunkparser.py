@@ -141,10 +141,10 @@ class ChunkParser:
         """
         Convert unpacked record batches to tensors for tensorflow training
         """
-        planes = tf.decode_raw(planes, tf.float32)
-        probs = tf.decode_raw(probs, tf.float32)
-        winner = tf.decode_raw(winner, tf.float32)
-        q = tf.decode_raw(q, tf.float32)
+        planes = tf.io.decode_raw(planes, tf.float32)
+        probs = tf.io.decode_raw(probs, tf.float32)
+        winner = tf.io.decode_raw(winner, tf.float32)
+        q = tf.io.decode_raw(q, tf.float32)
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
@@ -426,7 +426,7 @@ class ChunkParserTest(unittest.TestCase):
         best_q = best_q.reshape(batch_size, 3)
 
         # Pass it through tensorflow
-        with tf.Session() as sess:
+        with tf.compat.v1.Session() as sess:
             graph = ChunkParser.parse_function(data[0], data[1], data[2], data[3])
             tf_planes, tf_probs, tf_winner, tf_q = sess.run(graph)
 

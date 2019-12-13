@@ -16,28 +16,15 @@ def main(cmd):
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
 
-    x = [
-        tf.placeholder(tf.float32, [None, 112, 8*8]),
-        tf.placeholder(tf.float32, [None, 1858]),
-        tf.placeholder(tf.float32, [None, 3]),
-        tf.placeholder(tf.float32, [None, 3]),
-    ]
-
     tfprocess = TFProcess(cfg)
-    tfprocess.init_net(x)
+    tfprocess.init_net_v2()
 
-    if os.path.exists(os.path.join(root_dir, 'checkpoint')):
-        cp = tf.train.latest_checkpoint(root_dir)
-        tfprocess.restore(cp)
+    tfprocess.restore_v2()
 
     START_FROM = cmd.start
 
-    update_global_step = tfprocess.global_step.assign(START_FROM)
-    tfprocess.session.run(update_global_step)
-    path = os.path.join(root_dir, cfg['name'])
-    save_path = tfprocess.saver.save(tfprocess.session, path, global_step=START_FROM)
-
-    tfprocess.session.close()
+    tfprocess.global_step.assign(START_FROM)
+    tfprocess.manager.save()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
