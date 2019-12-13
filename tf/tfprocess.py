@@ -145,7 +145,7 @@ class TFProcess:
         self.orig_optimizer = self.optimizer
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(self.optimizer, self.loss_scale)
-        def policy_loss(target, output):
+        def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
             if self.cfg['training'].get('mask_legal_moves'):
@@ -156,12 +156,18 @@ class TFProcess:
                 output = tf.where(move_is_legal, output, illegal_filler)
             # y_ still has -1 on illegal moves, flush them to 0
             target = tf.nn.relu(target)
-
+            return target, output
+        def policy_loss(target, output):
+            target, output = correct_policy(target, output)
             policy_cross_entropy = \
                 tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
                                                         logits=output)
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
         self.policy_loss_fn = policy_loss
+        def policy_accuracy(target, output):
+            target, output = correct_policy(target, output)
+            return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(input=target, axis=1), tf.argmax(input=output, axis=1)), tf.float32))
+        self.policy_accuracy_fn = policy_accuracy
 
 
         q_ratio = self.cfg['training'].get('q_ratio', 0)
@@ -505,7 +511,7 @@ class TFProcess:
     def calculate_test_summaries_inner_loop(self, x, y, z, q):
         policy, value = self.model(x, training=False)
         policy_loss = self.policy_loss_fn(y, policy)
-        policy_accuracy = self.accuracy_fn(y, policy)
+        policy_accuracy = self.policy_accuracy_fn(y, policy)
         if self.wdl:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
