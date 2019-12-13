@@ -25,6 +25,7 @@ import shufflebuffer as sb
 import struct
 import tensorflow as tf
 import unittest
+import lc0_az_policy_map
 
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
@@ -41,6 +42,11 @@ class ChunkDataSrc:
         return self.items.pop()
 
 
+def flip_vertex(v):
+    c = v % 8
+    r = v // 8
+    c = 7 - c
+    return 8 * r + c
 
 class ChunkParser:
     # static batch size
@@ -67,6 +73,15 @@ class ChunkParser:
         TensorFlow doesn't have a fast way to unpack bit vectors. 7950 bytes
         long.
         """
+
+        self.policy_flip_map = lc0_az_policy_map.make_map(kind='flip_permutation')
+
+        # Build full flip tables for flipping all input planes at once.
+        self.full_flip_map = np.array([flip_vertex(vertex) + p*8*8
+                for p in range(104) for vertex in range(8*8)], dtype=np.int32)
+
+        r = np.array(list(range(104*8*8)), dtype=np.int32)
+        assert np.array_equal((r[self.full_flip_map])[self.full_flip_map], r)
 
         # Build 2 flat float32 planes with values 0,1
         self.flat_planes = []
@@ -182,6 +197,12 @@ class ChunkParser:
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
         rule50_plane = (np.zeros(8*8, dtype=np.float32) + rule50_count) / 99
+        if us_ooo == us_oo == them_ooo == them_oo == 0:
+            if random.randrange(2) == 0:
+                planes = planes[self.full_flip_map]
+                probs = np.frombuffer(probs, dtype=np.float32)
+                probs = probs[self.policy_flip_map]
+                probs = probs.tobytes()
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
@@ -206,6 +227,11 @@ class ChunkParser:
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q)
+
+    def maybe_flip_data(self, data):
+        planes, probs, winner, best_q = data
+
+        self.policy_flip_permutation
 
 
     def sample_record(self, chunkdata):
