@@ -145,7 +145,7 @@ class TFProcess:
         self.orig_optimizer = self.optimizer
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(self.optimizer, self.loss_scale)
-        def policy_loss(target, output):
+        def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
             if self.cfg['training'].get('mask_legal_moves'):
@@ -156,23 +156,16 @@ class TFProcess:
                 output = tf.where(move_is_legal, output, illegal_filler)
             # y_ still has -1 on illegal moves, flush them to 0
             target = tf.nn.relu(target)
-
+            return target, output
+        def policy_loss(target, output):
+            target, output = correct_policy(target, output)
             policy_cross_entropy = \
                 tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
                                                         logits=output)
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
         self.policy_loss_fn = policy_loss
         def policy_accuracy(target, output):
-            output = tf.cast(output, tf.float32)
-            # Calculate loss on policy head
-            if self.cfg['training'].get('mask_legal_moves'):
-                # extract mask for legal moves from target policy
-                move_is_legal = tf.greater_equal(target, 0)
-                # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
-                illegal_filler = tf.zeros_like(output) - 1.0e10
-                output = tf.where(move_is_legal, output, illegal_filler)
-            # y_ still has -1 on illegal moves, flush them to 0
-            target = tf.nn.relu(target)
+            target, output = correct_policy(target, output)
             return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(input=target, axis=1), tf.argmax(input=output, axis=1)), tf.float32))
         self.policy_accuracy_fn = policy_accuracy
 
