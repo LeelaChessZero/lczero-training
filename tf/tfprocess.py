@@ -341,8 +341,7 @@ class TFProcess:
         return [w.read_value() for w in self.model.weights]
 
     @tf.function()
-    def process_inner_loop(self):
-        x, y, z, q = next(self.train_iter)
+    def process_inner_loop(self, x, y, z, q):
         with tf.GradientTape() as tape:
             policy, value = self.model(x, training=True)
             policy_loss = self.policy_loss_fn(y, policy)                    
@@ -406,7 +405,8 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for _ in range(batch_splits):
-            policy_loss, value_loss, mse_loss, reg_term, new_grads = self.process_inner_loop()
+            x, y, z, q = next(self.train_iter)
+            policy_loss, value_loss, mse_loss, reg_term, new_grads = self.process_inner_loop(x, y, z, q)
             if not grads:
                 grads = new_grads
             else:
@@ -502,8 +502,7 @@ class TFProcess:
             w.assign(old)
 
     @tf.function()
-    def calculate_test_summaries_inner_loop(self):
-        x, y, z, q = next(self.test_iter)
+    def calculate_test_summaries_inner_loop(self, x, y, z, q):
         policy, value = self.model(x, training=False)
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.accuracy_fn(y, policy)
@@ -524,7 +523,8 @@ class TFProcess:
         sum_policy = 0
         sum_value = 0
         for _ in range(0, test_batches):
-            policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.calculate_test_summaries_inner_loop()
+            x, y, z, q = next(self.test_iter)
+            policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.calculate_test_summaries_inner_loop(x, y, z, q)
             sum_policy_accuracy += policy_accuracy
             sum_mse += mse_loss
             sum_policy += policy_loss
