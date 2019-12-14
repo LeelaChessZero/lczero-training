@@ -100,7 +100,7 @@ def extract_inputs_outputs(raw):
     rule50_plane = tf.divide(rule50_plane, 99.)
     # zero plane and one plane
     zero_plane = tf.zeros_like(rule50_plane)
-    one_plane = tf.ones_like(rule50_plane)    
+    one_plane = tf.ones_like(rule50_plane)
     inputs = tf.reshape(tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1), [-1, 112, 64])
 
     # winner is stored in one signed byte and needs to be converted to one hot.
@@ -115,9 +115,9 @@ def extract_inputs_outputs(raw):
     best_q_l = 0.5 * (1.0 - best_d - best_q)
 
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
-    
+
     return (inputs, policy, z, q)
-    
+
 def sample(x):
     return tf.math.equal(tf.random.uniform([], 0, SKIP-1, dtype=tf.int32), 0)
 
@@ -138,13 +138,15 @@ def main(cmd):
         chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks, allow_less)
         if allow_less:
             num_train = int(len(chunks)*train_ratio)
-            num_test = len(chunks) - num_train            
+            num_test = len(chunks) - num_train
         train_chunks = chunks[:num_train]
         test_chunks = chunks[num_train:]
 
     shuffle_size = cfg['training']['shuffle_size']
     total_batch_size = cfg['training']['batch_size']
     batch_splits = cfg['training'].get('num_batch_splits', 1)
+    train_workers = cfg['dataset'].get('train_workers', None)
+    test_workers = cfg['dataset'].get('test_workers', None)
     if total_batch_size % batch_splits != 0:
         raise ValueError('num_batch_splits must divide batch_size evenly')
     split_batch_size = total_batch_size // batch_splits
@@ -163,7 +165,8 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         train_parser = ChunkParser(FileDataSrc(train_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
+                workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         train_dataset = train_dataset.map(ChunkParser.parse_function)
@@ -177,7 +180,8 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         test_parser = ChunkParser(FileDataSrc(test_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
+                workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
