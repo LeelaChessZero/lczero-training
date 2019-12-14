@@ -51,7 +51,8 @@ def flip_vertex(v):
 class ChunkParser:
     # static batch size
     BATCH_SIZE = 8
-    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, buffer_size=1, batch_size=256, workers=None):
+    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, buffer_size=1,
+            batch_size=256, workers=None, flip=False):
         """
         Read data and yield batches of raw tensors.
 
@@ -74,14 +75,16 @@ class ChunkParser:
         long.
         """
 
-        self.policy_flip_map = lc0_az_policy_map.make_map(kind='flip_permutation')
+        self.flip = flip
+        if self.flip:
+            self.policy_flip_map = lc0_az_policy_map.make_map(kind='flip_permutation')
 
-        # Build full flip tables for flipping all input planes at once.
-        self.full_flip_map = np.array([flip_vertex(vertex) + p*8*8
-                for p in range(104) for vertex in range(8*8)], dtype=np.int32)
+            # Build full flip tables for flipping all input planes at once.
+            self.full_flip_map = np.array([flip_vertex(vertex) + p*8*8
+                    for p in range(104) for vertex in range(8*8)], dtype=np.int32)
 
-        r = np.array(list(range(104*8*8)), dtype=np.int32)
-        assert np.array_equal((r[self.full_flip_map])[self.full_flip_map], r)
+            r = np.array(list(range(104*8*8)), dtype=np.int32)
+            assert np.array_equal((r[self.full_flip_map])[self.full_flip_map], r)
 
         # Build 2 flat float32 planes with values 0,1
         self.flat_planes = []
@@ -197,7 +200,7 @@ class ChunkParser:
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
         rule50_plane = (np.zeros(8*8, dtype=np.float32) + rule50_count) / 99
-        if us_ooo == us_oo == them_ooo == them_oo == 0:
+        if self.flip and (us_ooo == us_oo == them_ooo == them_oo == 0):
             if random.randrange(2) == 0:
                 planes = planes[self.full_flip_map]
                 probs = np.frombuffer(probs, dtype=np.float32)
@@ -227,11 +230,6 @@ class ChunkParser:
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q)
-
-    def maybe_flip_data(self, data):
-        planes, probs, winner, best_q = data
-
-        self.policy_flip_permutation
 
 
     def sample_record(self, chunkdata):
