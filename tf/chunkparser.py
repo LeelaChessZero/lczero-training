@@ -200,8 +200,34 @@ class ChunkParser:
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
         rule50_plane = (np.zeros(8*8, dtype=np.float32) + rule50_count) / 99
-        if self.flip and (us_ooo == us_oo == them_ooo == them_oo == 0):
-            if random.randrange(2) == 0:
+
+        if self.flip:
+            can_flip = True
+            if not (us_ooo == us_oo == them_ooo == them_oo == 0):
+                can_flip = False
+            if can_flip and random.randrange(2) == 0:
+                can_flip = False
+            if can_flip:
+                # Count from the last position in the history.
+                pieces = np.sum(planes[13*7*64:-64])
+                if pieces > 16:
+                    can_flip = False
+            if can_flip:
+                # King plane of last position in the history.
+                our_king = planes[6144:6208]
+                their_king = planes[6528:6592]
+                our_king_pos = np.where(our_king == 1)[0]
+                their_king_pos = np.where(their_king == 1)[0]
+                if len(our_king_pos) != 1:
+                    return False, None
+                if len(their_king_pos) != 1:
+                    return False, None
+                # Default and castling positions.
+                if our_king_pos[0] in (2, 4, 6):
+                    can_flip = False
+                if their_king_pos[0] in (60, 62, 64):
+                    can_flip = False
+            if can_flip:
                 planes = planes[self.full_flip_map]
                 probs = np.frombuffer(probs, dtype=np.float32)
                 probs = probs[self.policy_flip_map]
@@ -219,17 +245,20 @@ class ChunkParser:
                  self.flat_planes[move_count].tobytes() + \
                  self.flat_planes[1].tobytes()
 
-        assert len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)
+        if not (len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)):
+            return False, None
         winner = float(winner)
-        assert winner == 1.0 or winner == -1.0 or winner == 0.0
+        if not (winner == 1.0 or winner == -1.0 or winner == 0.0):
+            return False, None
         winner = struct.pack('fff', winner == 1.0, winner == 0.0, winner == -1.0)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
-        assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
+        if not (-1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0):
+            return False, None
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q)
+        return True, (planes, probs, winner, best_q)
 
 
     def sample_record(self, chunkdata):
@@ -306,7 +335,9 @@ class ChunkParser:
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v4_to_tuple(r)
+            success, data = self.convert_v4_to_tuple(r)
+            if success:
+                yield data
 
 
     def batch_gen(self, gen):
