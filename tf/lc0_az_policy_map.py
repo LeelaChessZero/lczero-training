@@ -16,6 +16,12 @@ def index_to_position(x):
 def position_to_index(p):
     return col_index[p[0]], row_index[p[1]]
 
+def flip_position_lr(p):
+    if p == None:
+        return None
+    c, r = position_to_index(p)
+    return index_to_position([7 - c, r])
+
 def valid_index(i):
     if i[0] > 7 or i[0] < 0:
         return False
@@ -46,16 +52,23 @@ def knight_move(start, direction, steps):
 def make_map(kind='matrix'):
     # 56 planes of queen moves
     moves = []
+    flip_moves = []
     for direction in ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
         for steps in range(1, 8):
             for r0 in rows:
                 for c0 in columns:
                     start = c0 + r0
                     end = queen_move(start, direction, steps)
+                    flip_start = flip_position_lr(start)
+                    flip_end = flip_position_lr(end)
                     if end == None:
                         moves.append('illegal')
                     else:
                         moves.append(start+end)
+                    if flip_end == None:
+                        flip_moves.append('illegal')
+                    else:
+                        flip_moves.append(flip_start+flip_end)
 
     # 8 planes of knight moves
     for direction in ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
@@ -63,10 +76,16 @@ def make_map(kind='matrix'):
             for c0 in columns:
                 start = c0 + r0
                 end = knight_move(start, direction, 1)
+                flip_start = flip_position_lr(start)
+                flip_end = flip_position_lr(end)
                 if end == None:
                     moves.append('illegal')
                 else:
                     moves.append(start+end)
+                if flip_end == None:
+                    flip_moves.append('illegal')
+                else:
+                    flip_moves.append(flip_start+flip_end)
 
     # 9 promotions
     for direction in ['NW', 'N', 'NE']:
@@ -76,20 +95,30 @@ def make_map(kind='matrix'):
                     # Promotion only in the second last rank
                     if r0 != '7':
                         moves.append('illegal')
+                        flip_moves.append('illegal')
                         continue
                     start = c0 + r0
                     end = queen_move(start, direction, 1)
+                    flip_start = flip_position_lr(start)
+                    flip_end = flip_position_lr(end)
                     if end == None:
                         moves.append('illegal')
                     else:
                         moves.append(start+end+promotion)
+                    if flip_end == None:
+                        flip_moves.append('illegal')
+                    else:
+                        flip_moves.append(flip_start+flip_end+promotion)
 
     for m in policy_index:
         if m not in moves:
             raise ValueError('Missing move: {}'.format(m))
+        if m not in flip_moves:
+            raise ValueError('Missing move: {}'.format(m))
 
     az_to_lc0 = np.zeros((80*8*8, len(policy_index)), dtype=np.float32)
     indices = []
+    flip_permutation = np.zeros(1858, dtype=np.int32)
     legal_moves = 0
     for e, m in enumerate(moves):
         if m == 'illegal':
@@ -100,18 +129,22 @@ def make_map(kind='matrix'):
         if m not in policy_index:
             raise ValueError('Missing move: {}'.format(m))
         i = policy_index.index(m)
+        flip_i = policy_index.index(flip_moves[e])
+        flip_permutation[i] = flip_i
         indices.append(i)
         az_to_lc0[e][i] = 1
 
+    # Verify that applying flip permutation twice gives back the original policy.
+    assert np.array_equal(flip_permutation[flip_permutation], list(range(1858)))
+
     assert legal_moves == len(policy_index)
     assert np.sum(az_to_lc0) == legal_moves
-    for e in range(80*8*8):
-        for i in range(len(policy_index)):
-            pass
     if kind == 'matrix':
         return az_to_lc0
     elif kind == 'index':
         return indices
+    elif kind == 'flip_permutation':
+        return flip_permutation
 
 if __name__ == "__main__":
     # Generate policy map include file for lc0

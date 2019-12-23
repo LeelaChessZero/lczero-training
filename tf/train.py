@@ -129,6 +129,7 @@ def main(cmd):
     allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
     experimental_parser = cfg['dataset'].get('experimental_v4_only_dataset', False)
+    flip = cfg['dataset']['flip_augmentation']
     num_train = int(num_chunks*train_ratio)
     num_test = num_chunks - num_train
     if 'input_test' in cfg['dataset']:
@@ -163,7 +164,8 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         train_parser = ChunkParser(FileDataSrc(train_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
+                flip=flip)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         train_dataset = train_dataset.map(ChunkParser.parse_function)
@@ -177,7 +179,8 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         test_parser = ChunkParser(FileDataSrc(test_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
+                flip=False)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
