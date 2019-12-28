@@ -386,7 +386,6 @@ class TFProcess:
         reg_term = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, reg_term, axis=None)
         return policy_loss, value_loss, mse_loss, reg_term, new_grads
 
-    @tf.function()
     def apply_grads(self, grads, batch_splits):
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
