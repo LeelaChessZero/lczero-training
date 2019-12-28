@@ -139,7 +139,7 @@ class TFProcess:
         if self.swa_enabled:
             # Count of networks accumulated into SWA
             self.swa_weights = [tf.Variable(w, trainable=False) for w in self.model.weights]
-        
+
         self.active_lr = 0.01
         self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
         self.orig_optimizer = self.optimizer
@@ -210,7 +210,7 @@ class TFProcess:
             output = tf.cast(output, tf.float32)
             return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(input=target, axis=1), tf.argmax(input=output, axis=1)), tf.float32))
         self.accuracy_fn = accuracy
-       
+
         self.avg_policy_loss = []
         self.avg_value_loss = []
         self.avg_mse_loss = []
@@ -231,7 +231,7 @@ class TFProcess:
         self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
         self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
-            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
+            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24, checkpoint_name=self.cfg['name'])
 
     def replace_weights_v2(self, new_weights_orig):
         new_weights = [w for w in new_weights_orig]
@@ -350,7 +350,7 @@ class TFProcess:
     def process_inner_loop(self, x, y, z, q):
         with tf.GradientTape() as tape:
             policy, value = self.model(x, training=True)
-            policy_loss = self.policy_loss_fn(y, policy)                    
+            policy_loss = self.policy_loss_fn(y, policy)
             reg_term = sum(self.model.losses)
             if self.wdl:
                 value_loss = self.value_loss_fn(self.qMix(z, q), value)
@@ -484,17 +484,16 @@ class TFProcess:
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
-            self.manager.save()
-            print("Model saved in file: {}".format(self.manager.latest_checkpoint))
             evaled_steps = steps.numpy()
-            leela_path = self.manager.latest_checkpoint + "-" + str(evaled_steps)
-            swa_path = self.manager.latest_checkpoint + "-swa-" + str(evaled_steps)
+            self.manager.save(checkpoint_number=evaled_steps)
+            print("Model saved in file: {}".format(self.manager.latest_checkpoint))
+            path = os.path.join(self.root_dir, self.cfg['name'])
+            leela_path = path + "-" + str(evaled_steps)
+            swa_path = path + "-swa-" + str(evaled_steps)
             self.net.pb.training_params.training_steps = evaled_steps
             self.save_leelaz_weights_v2(leela_path)
-            print("Weights saved in file: {}".format(leela_path))
             if self.swa_enabled:
                 self.save_swa_weights_v2(swa_path)
-                print("SWA Weights saved in file: {}".format(swa_path))
 
     def calculate_swa_summaries_v2(self, test_batches, steps):
         backup = self.read_weights()
@@ -691,10 +690,10 @@ class TFProcess:
             return tf.keras.layers.BatchNormalization(
                 epsilon=1e-5, axis=1, fused=False, center=True,
                 scale=scale, virtual_batch_size=64)(input)
-            
+
     def squeeze_excitation_v2(self, inputs, channels):
         assert channels % self.SE_ratio == 0
-        
+
         pooled = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_first')(inputs)
         squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
         excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
@@ -710,7 +709,7 @@ class TFProcess:
         conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(out1)
         out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, scale=True), channels)
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
-        
+
     def construct_net_v2(self, inputs):
         flow = self.conv_block_v2(inputs, filter_size=3, output_channels=self.RESIDUAL_FILTERS, bn_scale=True)
         for _ in range(0, self.RESIDUAL_BLOCKS):
@@ -737,4 +736,4 @@ class TFProcess:
         else:
             h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh')(h_fc2)
         return h_fc1, h_fc3
-        
+

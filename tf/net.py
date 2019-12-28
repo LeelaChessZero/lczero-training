@@ -176,7 +176,7 @@ class Net:
             f.write(data)
 
         size = os.path.getsize(filename) / 1024**2
-        print("saved as '{}' {}M".format(filename, round(size, 2)))
+        print("Weights saved as '{}' {}M".format(filename, round(size, 2)))
 
     def get_weights(self):
         """Returns the weights as floats per layer"""
