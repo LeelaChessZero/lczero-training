@@ -231,7 +231,7 @@ class TFProcess:
         self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
         self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
-            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24)
+            self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24, checkpoint_name=self.cfg['name'])
 
     def replace_weights_v2(self, new_weights_orig):
         new_weights = [w for w in new_weights_orig]
