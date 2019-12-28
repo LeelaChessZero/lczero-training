@@ -484,9 +484,9 @@ class TFProcess:
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
-            self.manager.save()
-            print("Model saved in file: {}".format(self.manager.latest_checkpoint))
             evaled_steps = steps.numpy()
+            self.manager.save(checkpoint_number=evaled_steps)
+            print("Model saved in file: {}".format(self.manager.latest_checkpoint))
             path = os.path.join(self.root_dir, self.cfg['name'])
             leela_path = path + "-" + str(evaled_steps)
             swa_path = path + "-swa-" + str(evaled_steps)
