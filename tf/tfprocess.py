@@ -558,7 +558,7 @@ class TFProcess:
             if self.wdl:
                 tf.summary.scalar("Value Accuracy", sum_value_accuracy, step=steps)
             for w in self.model.weights:
-                tf.summary.histogram(w.name, w, buckets=1000, step=steps)
+                tf.summary.histogram(w.name, w, step=steps)
         self.test_writer.flush()
 
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
