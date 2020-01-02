@@ -24,7 +24,7 @@ def main(cmd):
     START_FROM = cmd.start
 
     tfprocess.global_step.assign(START_FROM)
-    tfprocess.manager.save()
+    tfprocess.manager.save(checkpoint_number=START_FROM)
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\

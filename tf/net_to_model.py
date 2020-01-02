@@ -35,5 +35,5 @@ tfp.global_step.assign(START_FROM)
 root_dir = os.path.join(cfg['training']['path'], cfg['name'])
 if not os.path.exists(root_dir):
     os.makedirs(root_dir)
-tfp.manager.save()
+tfp.manager.save(checkpoint_number=START_FROM)
 print("Wrote model to {}".format(tfp.manager.latest_checkpoint))
