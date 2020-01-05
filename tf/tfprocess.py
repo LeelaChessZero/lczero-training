@@ -121,11 +121,12 @@ class TFProcess:
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
-    def init_v2(self, train_dataset, test_dataset):
+    def init_v2(self, train_dataset, test_dataset, validation_dataset=None):
         self.train_dataset = train_dataset
         self.train_iter = iter(train_dataset)
         self.test_dataset = test_dataset
         self.test_iter = iter(test_dataset)
+        self.validation_dataset = validation_dataset
         self.init_net_v2()
 
     def init_net_v2(self):
@@ -225,9 +226,13 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])))
         self.train_writer = tf.summary.create_file_writer(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])))
+        self.validation_writer = tf.summary.create_file_writer(
+            os.path.join(os.getcwd(), "leelalogs/{}-validation".format(self.cfg['name'])))
         if self.swa_enabled:
             self.swa_writer = tf.summary.create_file_writer(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
+            self.swa_validation_writer = tf.summary.create_file_writer(
+                os.path.join(os.getcwd(), "leelalogs/{}-swa-validation".format(self.cfg['name'])))
         self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer, model=self.model, global_step=self.global_step, swa_count=self.swa_count)
         self.checkpoint.listed = self.swa_weights
         self.manager = tf.train.CheckpointManager(
@@ -481,6 +486,12 @@ class TFProcess:
             if self.swa_enabled:
                 self.calculate_swa_summaries_v2(test_batches, steps)
 
+        if self.validation_dataset is not None and (steps % self.cfg['training']['validation_steps'] == 0 or steps % self.cfg['training']['total_steps'] == 0):
+            if self.swa_enabled:
+                self.calculate_swa_validations_v2(steps)
+            else:
+                self.calculate_test_validations_v2(steps)
+
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training'] and steps % self.cfg['training']['checkpoint_steps'] == 0):
@@ -562,6 +573,54 @@ class TFProcess:
         self.test_writer.flush()
 
         print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
+
+    def calculate_swa_validations_v2(self, steps):
+        backup = self.read_weights()
+        for (swa, w) in zip(self.swa_weights, self.model.weights):
+            w.assign(swa.read_value())
+        true_validation_writer, self.validation_writer = self.validation_writer, self.swa_validation_writer
+        print('swa', end=' ')
+        self.calculate_test_validations_v2(steps)
+        self.validation_writer = true_validation_writer
+        for (old, w) in zip(backup, self.model.weights):
+            w.assign(old)
+
+    def calculate_test_validations_v2(self, steps):
+        sum_policy_accuracy = 0
+        sum_value_accuracy = 0
+        sum_mse = 0
+        sum_policy = 0
+        sum_value = 0
+        counter = 0
+        for (x,y,z,q) in self.validation_dataset:
+            policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.calculate_test_summaries_inner_loop(x, y, z, q)
+            sum_policy_accuracy += policy_accuracy
+            sum_mse += mse_loss
+            sum_policy += policy_loss
+            counter += 1
+            if self.wdl:
+                sum_value_accuracy += value_accuracy
+                sum_value += value_loss
+        sum_policy_accuracy /= counter
+        sum_policy_accuracy *= 100
+        sum_policy /= counter
+        sum_value /= counter
+        if self.wdl:
+            sum_value_accuracy /= counter
+            sum_value_accuracy *= 100
+        # Additionally rescale to [0, 1] so divide by 4
+        sum_mse /= (4.0 * counter)
+        with self.validation_writer.as_default():
+            tf.summary.scalar("Policy Loss", sum_policy, step=steps)
+            tf.summary.scalar("Value Loss", sum_value, step=steps)
+            tf.summary.scalar("MSE Loss", sum_mse, step=steps)
+            tf.summary.scalar("Policy Accuracy", sum_policy_accuracy, step=steps)
+            if self.wdl:
+                tf.summary.scalar("Value Accuracy", sum_value_accuracy, step=steps)
+        self.validation_writer.flush()
+
+        print("step {}, validation: policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
             format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse))
 
     @tf.function()
