@@ -34,12 +34,14 @@ SKIP = 32
 def get_chunks(data_prefix):
     return glob.glob(data_prefix + "*.gz")
 
-
-def get_latest_chunks(path, num_chunks, allow_less):
+def get_all_chunks(path):
     chunks = []
     for d in glob.glob(path):
         chunks += get_chunks(d)
+    return chunks
 
+def get_latest_chunks(path, num_chunks, allow_less):
+    chunks = get_all_chunks(path)
     if len(chunks) < num_chunks:
         if allow_less:
             print("sorting {} chunks...".format(len(chunks)), end='')
@@ -187,7 +189,13 @@ def main(cmd):
         test_dataset = test_dataset.map(ChunkParser.parse_function)
         test_dataset = test_dataset.prefetch(4)
 
-    tfprocess.init_v2(train_dataset, test_dataset)
+    validation_dataset = None
+    if 'input_validation' in cfg['dataset']:
+        valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
+        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8292, compression_type='GZIP', num_parallel_reads=1)\
+                               .batch(split_batch_size, drop_remainder=True).map(extract_inputs_outputs).prefetch(4)
+
+    tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 
     tfprocess.restore_v2()
 
