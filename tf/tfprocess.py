@@ -146,6 +146,7 @@ class TFProcess:
         self.orig_optimizer = self.optimizer
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(self.optimizer, self.loss_scale)
+
         def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
@@ -158,13 +159,13 @@ class TFProcess:
             # y_ still has -1 on illegal moves, flush them to 0
             target = tf.nn.relu(target)
             return target, output
+
         def policy_loss(target, output):
             target, output = correct_policy(target, output)
-            policy_cross_entropy = \
-                tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
-                                                        logits=output)
+            policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target), logits=output)
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
         self.policy_loss_fn = policy_loss
+
         def policy_accuracy(target, output):
             target, output = correct_policy(target, output)
             return tf.reduce_mean(tf.cast(tf.equal(tf.argmax(input=target, axis=1), tf.argmax(input=output, axis=1)), tf.float32))
@@ -182,25 +183,29 @@ class TFProcess:
         if self.wdl:
             def value_loss(target, output):
                 output = tf.cast(output, tf.float32)
-                value_cross_entropy = \
-                    tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target),
-                                                    logits=output)
+                value_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target), logits=output)
                 return tf.reduce_mean(input_tensor=value_cross_entropy)
+
             self.value_loss_fn = value_loss
+
             def mse_loss(target, output):
                 output = tf.cast(output, tf.float32)
                 scalar_z_conv = tf.matmul(tf.nn.softmax(output), wdl)
                 scalar_target = tf.matmul(target, wdl)
                 return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, scalar_z_conv))
+
             self.mse_loss_fn = mse_loss
         else:
             def value_loss(target, output):
                 return tf.constant(0)
+
             self.value_loss_fn = value_loss
+
             def mse_loss(target, output):
                 output = tf.cast(output, tf.float32)
                 scalar_target = tf.matmul(target, wdl)
                 return tf.reduce_mean(input_tensor=tf.math.squared_difference(scalar_target, output))
+
             self.mse_loss_fn = mse_loss
 
         pol_loss_w = self.cfg['training']['policy_loss_weight']
@@ -226,8 +231,9 @@ class TFProcess:
             os.path.join(os.getcwd(), "leelalogs/{}-test".format(self.cfg['name'])))
         self.train_writer = tf.summary.create_file_writer(
             os.path.join(os.getcwd(), "leelalogs/{}-train".format(self.cfg['name'])))
-        self.validation_writer = tf.summary.create_file_writer(
-            os.path.join(os.getcwd(), "leelalogs/{}-validation".format(self.cfg['name'])))
+        if vars(self).get('validation_dataset', None) is not None:
+            self.validation_writer = tf.summary.create_file_writer(
+                os.path.join(os.getcwd(), "leelalogs/{}-validation".format(self.cfg['name'])))
         if self.swa_enabled:
             self.swa_writer = tf.summary.create_file_writer(
                 os.path.join(os.getcwd(), "leelalogs/{}-swa-test".format(self.cfg['name'])))
@@ -238,53 +244,44 @@ class TFProcess:
         self.manager = tf.train.CheckpointManager(
             self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24, checkpoint_name=self.cfg['name'])
 
-    def replace_weights_v2(self, new_weights_orig):
-        new_weights = [w for w in new_weights_orig]
-        # self.model.weights ordering doesn't match up nicely, so first shuffle the new weights to match up.
-        # input order is (for convolutional policy):
-        # policy conv
-        # policy bn * 4
-        # policy raw conv and bias
-        # value conv
-        # value bn * 4
-        # value dense with bias
-        # value dense with bias
-        #
-        # output order is (for convolutional policy):
-        # value conv
-        # policy conv
-        # value bn * 4
-        # policy bn * 4
-        # policy raw conv and bias
-        # value dense with bias
-        # value dense with bias
-        new_weights[-5] = new_weights_orig[-10]
-        new_weights[-6] = new_weights_orig[-11]
-        new_weights[-7] = new_weights_orig[-12]
-        new_weights[-8] = new_weights_orig[-13]
-        new_weights[-9] = new_weights_orig[-14]
-        new_weights[-10] = new_weights_orig[-15]
-        new_weights[-11] = new_weights_orig[-5]
-        new_weights[-12] = new_weights_orig[-6]
-        new_weights[-13] = new_weights_orig[-7]
-        new_weights[-14] = new_weights_orig[-8]
-        new_weights[-15] = new_weights_orig[-16]
-        new_weights[-16] = new_weights_orig[-9]
+    def replace_weights_v2(self, proto_filename):
+        self.net.parse_proto(proto_filename)
 
-        all_evals = []
-        offset = 0
-        last_was_gamma = False
-        for e, weights in enumerate(self.model.weights):
-            source_idx = e+offset
-            if weights.shape.ndims == 4:
+        filters, blocks = self.net.filters(), self.net.blocks()
+        if self.RESIDUAL_FILTERS != filters:
+            raise ValueError("Number of filters doesn't match the network")
+        if self.RESIDUAL_BLOCKS != blocks:
+            raise ValueError("Number of blocks doesn't match the network")
+        if self.POLICY_HEAD != self.net.pb.format.network_format.policy:
+            raise ValueError("Policy head type doesn't match the network")
+        if self.VALUE_HEAD != self.net.pb.format.network_format.value:
+            raise ValueError("Value head type doesn't match the network")
+
+        # List all tensor names we need weights for.
+        names = []
+        for weight in self.model.weights:
+            names.append(weight.name)
+
+        new_weights = self.net.get_weights_v2(names)
+        for weight in self.model.weights:
+            if 'renorm' in weight.name:
+                # Renorm variables are not populated.
+                continue
+
+            try:
+                new_weight = new_weights[weight.name]
+            except KeyError:
+                raise KeyError('No values for tensor {} in protobuf'.format(weight.name))
+
+            if weight.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
-                if e == 0:
+                if weight.name == 'input/conv2d/kernel:0':
                     num_inputs = 112
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109
-                    for i in range(len(new_weights[source_idx])):
+                    for i in range(len(new_weight)):
                         if (i % (num_inputs*9))//9 == rule50_input:
-                            new_weights[source_idx][i] = new_weights[source_idx][i]*99
+                            new_weight[i] = new_weight[i] * 99
 
                 # Convolution weights need a transpose
                 #
@@ -293,40 +290,25 @@ class TFProcess:
                 #
                 # Leela/cuDNN/Caffe (kOutputInputYX)
                 # [output, input, filter_size, filter_size]
-                s = weights.shape.as_list()
+                s = weight.shape.as_list()
                 shape = [s[i] for i in [3, 2, 0, 1]]
-                new_weight = tf.constant(new_weights[source_idx], shape=shape)
-                weights.assign(
+                new_weight = tf.constant(new_weight, shape=shape)
+                weight.assign(
                     tf.transpose(a=new_weight, perm=[2, 3, 1, 0]))
-            elif weights.shape.ndims == 2:
+            elif weight.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
                 # [out, in] in Leela
                 #
-                s = weights.shape.as_list()
+                s = weight.shape.as_list()
                 shape = [s[i] for i in [1, 0]]
-                new_weight = tf.constant(new_weights[source_idx], shape=shape)
-                weights.assign(
+                new_weight = tf.constant(new_weight, shape=shape)
+                weight.assign(
                     tf.transpose(a=new_weight, perm=[1, 0]))
             else:
-                # Can't populate renorm weights, but the current new_weight will need using elsewhere.
-                if 'renorm' in weights.name:
-                    offset-=1
-                    continue
-                # betas without gamms need to skip the gamma in the input.
-                if 'beta:' in weights.name and not last_was_gamma:
-                    source_idx+=1
-                    offset+=1
                 # Biases, batchnorm etc
-                new_weight = tf.constant(new_weights[source_idx], shape=weights.shape)
-                if 'stddev:' in weights.name:
-                    weights.assign(tf.math.sqrt(new_weight + 1e-5))
-                else:
-                    weights.assign(new_weight)
-                # need to use the variance to also populate the stddev for renorm, so adjust offset.
-                if 'variance:' in weights.name and self.renorm_enabled:
-                    offset-=1
-            last_was_gamma = 'gamma:' in weights.name
+                new_weight = tf.constant(new_weight, shape=weight.shape)
+                weight.assign(new_weight)
         # Replace the SWA weights as well, ensuring swa accumulation is reset.
         if self.swa_enabled:
             self.swa_count.assign(tf.constant(0.))
@@ -395,8 +377,7 @@ class TFProcess:
         # Make sure that ghost batch norm can be applied
         if batch_size % 64 != 0:
             # Adjust required batch size for batch splitting.
-            required_factor = 64 * \
-                self.cfg['training'].get('num_batch_splits', 1)
+            required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
             raise ValueError(
                 'batch_size must be a multiple of {}'.format(required_factor))
 
@@ -655,86 +636,13 @@ class TFProcess:
             w.assign(old)
 
     def save_leelaz_weights_v2(self, filename):
-        all_tensors = []
-        all_weights = []
-        last_was_gamma = False
-        for weights in self.model.weights:
-            work_weights = None
-            if weights.shape.ndims == 4:
-                # Convolution weights need a transpose
-                #
-                # TF (kYXInputOutput)
-                # [filter_height, filter_width, in_channels, out_channels]
-                #
-                # Leela/cuDNN/Caffe (kOutputInputYX)
-                # [output, input, filter_size, filter_size]
-                work_weights = tf.transpose(a=weights, perm=[3, 2, 0, 1])
-            elif weights.shape.ndims == 2:
-                # Fully connected layers are [in, out] in TF
-                #
-                # [out, in] in Leela
-                #
-                work_weights = tf.transpose(a=weights, perm=[1, 0])
-            else:
-                # batch renorm has extra weights, but we don't know what to do with them.
-                if 'renorm' in weights.name:
-                    continue
-                # renorm has variance, but it is not the primary source of truth
-                if 'variance:' in weights.name and self.renorm_enabled:
-                    continue
-                # Renorm has moving stddev not variance, undo the transform to make it compatible.
-                if 'stddev:' in weights.name:
-                    all_tensors.append(tf.math.square(weights) - 1e-5)
-                    continue
-                # Biases, batchnorm etc
-                # pb expects every batch norm to have gammas, but not all of our
-                # batch norms have gammas, so manually add pretend gammas.
-                if 'beta:' in weights.name and not last_was_gamma:
-                    all_tensors.append(tf.ones_like(weights))
-                work_weights = weights.read_value()
-            all_tensors.append(work_weights)
-            last_was_gamma = 'gamma:' in weights.name
-
-        # HACK: model weights ordering is some kind of breadth first traversal,
-        # but pb expects a specific ordering which BFT is not a match for once
-        # we get to the heads. Apply manual permutation.
-        # This is fragile and at minimum should have some checks to ensure it isn't breaking things.
-        #TODO: also support classic policy head as it has a different set of layers and hence changes the permutation.
-        permuted_tensors = [w for w in all_tensors]
-        permuted_tensors[-5] = all_tensors[-11]
-        permuted_tensors[-6] = all_tensors[-12]
-        permuted_tensors[-7] = all_tensors[-13]
-        permuted_tensors[-8] = all_tensors[-14]
-        permuted_tensors[-9] = all_tensors[-16]
-        permuted_tensors[-10] = all_tensors[-5]
-        permuted_tensors[-11] = all_tensors[-6]
-        permuted_tensors[-12] = all_tensors[-7]
-        permuted_tensors[-13] = all_tensors[-8]
-        permuted_tensors[-14] = all_tensors[-9]
-        permuted_tensors[-15] = all_tensors[-10]
-        permuted_tensors[-16] = all_tensors[-15]
-        all_tensors = permuted_tensors
-
-        for e, nparray in enumerate(all_tensors):
-            # Rescale rule50 related weights as clients do not normalize the input.
-            if e == 0:
-                num_inputs = 112
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                rule50_input = 109
-                wt_flt = []
-                for i, weight in enumerate(np.ravel(nparray)):
-                    if (i % (num_inputs*9))//9 == rule50_input:
-                        wt_flt.append(weight/99)
-                    else:
-                        wt_flt.append(weight)
-            else:
-                wt_flt = [wt for wt in np.ravel(nparray)]
-            all_weights.append(wt_flt)
-
-        self.net.fill_net(all_weights)
+        numpy_weights = []
+        for weight in self.model.weights:
+            numpy_weights.append([weight.name, weight.numpy()])
+        self.net.fill_net_v2(numpy_weights)
         self.net.save_proto(filename)
 
-    def batch_norm_v2(self, input, scale=False):
+    def batch_norm_v2(self, input, name, scale=False):
         if self.renorm_enabled:
             clipping = {
                 "rmin": 1.0/self.renorm_max_r,
@@ -744,55 +652,57 @@ class TFProcess:
             return tf.keras.layers.BatchNormalization(
                 epsilon=1e-5, axis=1, fused=False, center=True,
                 scale=scale, renorm=True, renorm_clipping=clipping,
-                renorm_momentum=self.renorm_momentum)(input)
+                renorm_momentum=self.renorm_momentum, name=name)(input)
         else:
             return tf.keras.layers.BatchNormalization(
                 epsilon=1e-5, axis=1, fused=False, center=True,
-                scale=scale, virtual_batch_size=64)(input)
+                scale=scale, virtual_batch_size=64, name=name)(input)
 
-    def squeeze_excitation_v2(self, inputs, channels):
+    def squeeze_excitation_v2(self, inputs, channels, name):
         assert channels % self.SE_ratio == 0
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(data_format='channels_first')(inputs)
-        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(pooled))
-        excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg)(squeezed)
+        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(channels // self.SE_ratio, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, name=name + '/se/dense1')(pooled))
+        excited = tf.keras.layers.Dense(2 * channels, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, name=name + '/se/dense2')(squeezed)
         return ApplySqueezeExcitation()([inputs, excited])
 
-    def conv_block_v2(self, inputs, filter_size, output_channels, bn_scale=False):
-        conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
-        return tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv, scale=bn_scale))
+    def conv_block_v2(self, inputs, filter_size, output_channels, name, bn_scale=False):
+        conv = tf.keras.layers.Conv2D(output_channels, filter_size, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first', name=name + '/conv2d')(inputs)
+        return tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv, name=name + '/bn', scale=bn_scale))
 
-    def residual_block_v2(self, inputs, channels):
-        conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(inputs)
-        out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv1, scale=False))
-        conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first')(out1)
-        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, scale=True), channels)
+    def residual_block_v2(self, inputs, channels, name):
+        conv1 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first', name=name + '/1/conv2d')(inputs)
+        out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(conv1, name + '/1/bn', scale=False))
+        conv2 = tf.keras.layers.Conv2D(channels, 3, use_bias=False, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, data_format='channels_first', name=name + '/2/conv2d')(out1)
+        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2, name + '/2/bn', scale=True), channels, name=name + '/se')
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add([inputs, out2]))
 
     def construct_net_v2(self, inputs):
-        flow = self.conv_block_v2(inputs, filter_size=3, output_channels=self.RESIDUAL_FILTERS, bn_scale=True)
-        for _ in range(0, self.RESIDUAL_BLOCKS):
-            flow = self.residual_block_v2(flow, self.RESIDUAL_FILTERS)
+        flow = self.conv_block_v2(inputs, filter_size=3, output_channels=self.RESIDUAL_FILTERS, name='input', bn_scale=True)
+        for i in range(self.RESIDUAL_BLOCKS):
+            flow = self.residual_block_v2(flow, self.RESIDUAL_FILTERS, name='residual_{}'.format(i+1))
+
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
-            conv_pol = self.conv_block_v2(flow, filter_size=3, output_channels=self.RESIDUAL_FILTERS)
-            conv_pol2 = tf.keras.layers.Conv2D(80, 3, use_bias=True, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, data_format='channels_first')(conv_pol)
+            conv_pol = self.conv_block_v2(flow, filter_size=3, output_channels=self.RESIDUAL_FILTERS, name='policy1')
+            conv_pol2 = tf.keras.layers.Conv2D(80, 3, use_bias=True, padding='same', kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, data_format='channels_first', name='policy')(conv_pol)
             h_fc1 = ApplyPolicyMap()(conv_pol2)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
-            conv_pol = self.conv_block_v2(flow, filter_size=1, output_channels=self.policy_channels)
+            conv_pol = self.conv_block_v2(flow, filter_size=1, output_channels=self.policy_channels, name='policy')
             h_conv_pol_flat = tf.keras.layers.Flatten()(conv_pol)
-            h_fc1 = tf.keras.layers.Dense(1858, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_conv_pol_flat)
+            h_fc1 = tf.keras.layers.Dense(1858, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, name='policy/dense')(h_conv_pol_flat)
         else:
             raise ValueError(
                 "Unknown policy head type {}".format(self.POLICY_HEAD))
 
         # Value head
-        conv_val = self.conv_block_v2(flow, filter_size=1, output_channels=32)
+        conv_val = self.conv_block_v2(flow, filter_size=1, output_channels=32, name='value')
         h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
-        h_fc2 = tf.keras.layers.Dense(128, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu')(h_conv_val_flat)
+        h_fc2 = tf.keras.layers.Dense(128, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='value/dense1')(h_conv_val_flat)
         if self.wdl:
-            h_fc3 = tf.keras.layers.Dense(3, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg)(h_fc2)
+            h_fc3 = tf.keras.layers.Dense(3, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, bias_regularizer=self.l2reg, name='value/dense2')(h_fc2)
         else:
-            h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh')(h_fc2)
+            h_fc3 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='tanh', name='value/dense2')(h_fc2)
+
         return h_fc1, h_fc3
 
