@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import tensorflow as tf
 import os
 import yaml
 import tfprocess
@@ -17,19 +16,10 @@ args = argparser.parse_args()
 cfg = yaml.safe_load(args.cfg.read())
 print(yaml.dump(cfg, default_flow_style=False))
 START_FROM = args.start
-net = Net()
-net.parse_proto(args.net)
-
-filters, blocks = net.filters(), net.blocks()
-if cfg['model']['filters'] != filters:
-    raise ValueError("Number of filters in YAML doesn't match the network")
-if cfg['model']['residual_blocks'] != blocks:
-    raise ValueError("Number of blocks in YAML doesn't match the network")
-weights = net.get_weights()
 
 tfp = tfprocess.TFProcess(cfg)
 tfp.init_net_v2()
-tfp.replace_weights_v2(weights)
+tfp.replace_weights_v2(args.net)
 tfp.global_step.assign(START_FROM)
 
 root_dir = os.path.join(cfg['training']['path'], cfg['name'])
