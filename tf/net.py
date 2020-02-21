@@ -280,7 +280,6 @@ class Net:
         tensors = {}
 
         for tf_name in names:
-
             name = tf_name
             if 'stddev' in name:
                 # Get variance instead of stddev.
