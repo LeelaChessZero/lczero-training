@@ -24,6 +24,8 @@ import time
 import bisect
 import lc0_az_policy_map
 import proto.net_pb2 as pb
+from functools import reduce
+import operator
 
 from net import Net
 
@@ -155,6 +157,11 @@ class TFProcess:
         else:
             outputs = [policy, value]
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
+
+        for l in self.model.layers:
+            if 'moves_left' not in l.name:
+                l.trainable = False
+
         # swa_count initialized reguardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
         self.swa_weights = None
@@ -194,14 +201,9 @@ class TFProcess:
 
         self.policy_accuracy_fn = policy_accuracy
 
-        self.moves_left_array = tf.expand_dims(tf.constant(np.arange(self.MAX_MOVES_LEFT), dtype=tf.float32), 1)
-
         def moves_left_mean_error_fn(target, output):
-            # Average error in moves left expected value prediction.
             output = tf.cast(output, tf.float32)
-            moves_left_ev = tf.matmul(tf.nn.softmax(output), self.moves_left_array)
-            moves_left_abs = tf.abs(((tf.cast(target, tf.float32) - moves_left_ev)))
-            return tf.reduce_mean(moves_left_abs)
+            return tf.reduce_mean(tf.abs(target - output))
 
         self.moves_left_mean_error = moves_left_mean_error_fn
 
@@ -243,10 +245,12 @@ class TFProcess:
 
         if self.moves_left:
             def moves_left_loss(target, output):
-                output = tf.cast(output, tf.float32)
-                m_one_hot = tf.one_hot(target, self.MAX_MOVES_LEFT)
-                moves_left_cr = tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(m_one_hot), logits=output)
-                return tf.reduce_mean(moves_left_cr)
+                # Scale loss to a reasonable range.
+                scale = 1.0
+                target = target / scale
+                output = tf.cast(output, tf.float32) / scale
+                huber = tf.keras.losses.Huber(5.0/scale)
+                return tf.reduce_mean(huber(target, output))
         else:
             moves_left_loss = None
 
@@ -299,18 +303,19 @@ class TFProcess:
         self.manager = tf.train.CheckpointManager(
             self.checkpoint, directory=self.root_dir, max_to_keep=50, keep_checkpoint_every_n_hours=24, checkpoint_name=self.cfg['name'])
 
-    def replace_weights_v2(self, proto_filename):
+    def replace_weights_v2(self, proto_filename, ignore_errors=False):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
-        if self.RESIDUAL_FILTERS != filters:
-            raise ValueError("Number of filters doesn't match the network")
-        if self.RESIDUAL_BLOCKS != blocks:
-            raise ValueError("Number of blocks doesn't match the network")
-        if self.POLICY_HEAD != self.net.pb.format.network_format.policy:
-            raise ValueError("Policy head type doesn't match the network")
-        if self.VALUE_HEAD != self.net.pb.format.network_format.value:
-            raise ValueError("Value head type doesn't match the network")
+        if not ignore_errors:
+            if self.RESIDUAL_FILTERS != filters:
+                raise ValueError("Number of filters doesn't match the network")
+            if self.RESIDUAL_BLOCKS != blocks:
+                raise ValueError("Number of blocks doesn't match the network")
+            if self.POLICY_HEAD != self.net.pb.format.network_format.policy:
+                raise ValueError("Policy head type doesn't match the network")
+            if self.VALUE_HEAD != self.net.pb.format.network_format.value:
+                raise ValueError("Value head type doesn't match the network")
 
         # List all tensor names we need weights for.
         names = []
@@ -326,7 +331,20 @@ class TFProcess:
             try:
                 new_weight = new_weights[weight.name]
             except KeyError:
-                raise KeyError('No values for tensor {} in protobuf'.format(weight.name))
+                error_string = 'No values for tensor {} in protobuf'.format(weight.name)
+                if ignore_errors:
+                    print(error_string)
+                    continue
+                else:
+                    raise KeyError(error_string)
+
+            if reduce(operator.mul, weight.shape.as_list(), 1) != len(new_weight):
+                error_string = 'Tensor {} has wrong length. Tensorflow shape {}, size in protobuf {}'.format(weight.name, weight.shape.as_list(), len(new_weight))
+                if ignore_errors:
+                    print(error_string)
+                    continue
+                else:
+                    raise KeyError(error_string)
 
             if weight.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
@@ -823,12 +841,12 @@ class TFProcess:
         # Moves left head
         if self.moves_left:
             conv_mov = self.conv_block_v2(flow, filter_size=1,
-                                       output_channels=2,
+                                       output_channels=4,
                                        name='moves_left')
             h_conv_mov_flat = tf.keras.layers.Flatten()(conv_mov)
-            h_fc4 = tf.keras.layers.Dense(1024, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense1')(h_conv_mov_flat)
+            h_fc4 = tf.keras.layers.Dense(512, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense1')(h_conv_mov_flat)
 
-            h_fc5 = tf.keras.layers.Dense(self.MAX_MOVES_LEFT, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, name='moves_left/dense2')(h_fc4)
+            h_fc5 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense2')(h_fc4)
         else:
             h_fc5 = None
 
