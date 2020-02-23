@@ -147,7 +147,7 @@ def main(cmd):
                 shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
                 workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
-            train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
+            train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
         train_dataset = train_dataset.map(ChunkParser.parse_function)
         train_dataset = train_dataset.prefetch(4)
 
@@ -162,7 +162,7 @@ def main(cmd):
                 shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
                 workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
-            test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
+            test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
         test_dataset = test_dataset.prefetch(4)
 

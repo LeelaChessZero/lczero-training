@@ -181,7 +181,7 @@ class ChunkParser:
 
 
     @staticmethod
-    def parse_function(planes, probs, winner, q):
+    def parse_function(planes, probs, winner, q, moves_left):
         """
         Convert unpacked record batches to tensors for tensorflow training
         """
@@ -189,13 +189,15 @@ class ChunkParser:
         probs = tf.io.decode_raw(probs, tf.float32)
         winner = tf.io.decode_raw(winner, tf.float32)
         q = tf.io.decode_raw(q, tf.float32)
+        moves_left = tf.io.decode_raw(moves_left, tf.int32)
 
         planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8*8))
         probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
         winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
         q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 3))
+        moves_left = tf.reshape(moves_left, (ChunkParser.BATCH_SIZE,))
 
-        return (planes, probs, winner, q)
+        return (planes, probs, winner, q, moves_left)
 
 
     def convert_v4_to_tuple(self, content):
@@ -220,8 +222,7 @@ class ChunkParser:
             float32 best_d (4 bytes)
         """
         (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, move_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
-        # Enforce move_count to 0
-        move_count = 0
+        moves_left = struct.pack('i', move_count)
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
@@ -236,7 +237,7 @@ class ChunkParser:
                  self.flat_planes[them_oo].tobytes() + \
                  self.flat_planes[stm].tobytes() + \
                  rule50_plane.tobytes() + \
-                 self.flat_planes[move_count].tobytes() + \
+                 self.flat_planes[0].tobytes() + \
                  self.flat_planes[1].tobytes()
 
         assert len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)
@@ -249,7 +250,7 @@ class ChunkParser:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q)
+        return (planes, probs, winner, best_q, moves_left)
 
 
     def sample_record(self, chunkdata):
@@ -354,7 +355,9 @@ class ChunkParser:
             yield ( b''.join([x[0] for x in s]),
                     b''.join([x[1] for x in s]),
                     b''.join([x[2] for x in s]),
-                    b''.join([x[3] for x in s]))
+                    b''.join([x[3] for x in s]),
+                    b''.join([x[4] for x in s])
+                    )
 
 
     def parse(self):
