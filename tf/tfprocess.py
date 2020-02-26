@@ -63,7 +63,6 @@ class TFProcess:
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
-        self.MAX_MOVES_LEFT = 256
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
@@ -81,7 +80,7 @@ class TFProcess:
 
         policy_head = self.cfg['model'].get('policy', 'convolution')
         value_head  = self.cfg['model'].get('value', 'wdl')
-        moves_left_head = self.cfg['model'].get('moves_left', False)
+        moves_left_head = self.cfg['model'].get('moves_left', 'v1')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
@@ -245,12 +244,17 @@ class TFProcess:
 
         if self.moves_left:
             def moves_left_loss(target, output):
-                # Scale loss to a reasonable range.
-                scale = 1.0
+                # Scale the loss to similar range as other losses.
+                scale = 20.0
+                # Bigger loss for low amount of moves left.
+                # We care more about the accuracy of the prediction
+                # when close to the end of the game.
+                importance = tf.square(30.0 / (target + 30.0))
+                importance = importance / tf.reduce_mean(importance)
                 target = target / scale
                 output = tf.cast(output, tf.float32) / scale
-                huber = tf.keras.losses.Huber(5.0/scale)
-                return tf.reduce_mean(huber(target, output))
+                huber = tf.keras.losses.Huber(10.0 / scale)
+                return tf.reduce_mean(importance * huber(target, output))
         else:
             moves_left_loss = None
 

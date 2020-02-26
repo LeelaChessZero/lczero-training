@@ -43,6 +43,7 @@ class Net:
         self.pb.format.network_format.input = input
         self.set_policyformat(policy)
         self.set_valueformat(value)
+        self.set_movesleftformat(moves_left)
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
@@ -377,12 +378,14 @@ class Net:
         # without these fields.
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
             self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
+            self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
         elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
             self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
+            self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
 
     def parse_txt(self, filename):
         weights = []

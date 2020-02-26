@@ -77,6 +77,7 @@ def extract_inputs_outputs(raw):
     rule50_plane = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8273, 1), tf.uint8), -1), -1)
     rule50_plane = tf.cast(tf.tile(rule50_plane, [1, 1, 8, 8]), tf.float32)
     rule50_plane = tf.divide(rule50_plane, 99.)
+    ply_count = tf.cast(tf.io.decode_raw(tf.strings.substr(raw, 8274, 1), tf.uint8), tf.float32)
     # zero plane and one plane
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
@@ -95,7 +96,7 @@ def extract_inputs_outputs(raw):
 
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
 
-    return (inputs, policy, z, q)
+    return (inputs, policy, z, q, ply_count)
 
 def sample(x):
     return tf.math.equal(tf.random.uniform([], 0, SKIP-1, dtype=tf.int32), 0)
