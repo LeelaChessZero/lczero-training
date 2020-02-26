@@ -222,7 +222,7 @@ class ChunkParser:
             float32 best_d (4 bytes)
         """
         (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, ply_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
-        plies_left = struct.pack('f', 2 * ply_count)
+        plies_left = struct.pack('f', ply_count)
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
