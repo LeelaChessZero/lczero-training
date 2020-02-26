@@ -157,10 +157,6 @@ class TFProcess:
             outputs = [policy, value]
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
 
-        for l in self.model.layers:
-            if 'moves_left' not in l.name:
-                l.trainable = False
-
         # swa_count initialized reguardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
         self.swa_weights = None
