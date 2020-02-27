@@ -25,7 +25,6 @@ import shufflebuffer as sb
 import struct
 import tensorflow as tf
 import unittest
-import gzip
 
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
@@ -43,41 +42,14 @@ class ChunkDataSrc:
 
 
 
-def chunk_reader(chunk_filenames, output_pipes):
-    """
-    Reads chunk filenames from a list and writes them in shuffled
-    order to output_pipes.
-    """
-    chunks = []
-    done = chunk_filenames
-    n = 0
-
-    while True:
-        if not chunks:
-            chunks, done = done, chunks
-            random.shuffle(chunks)
-        if not chunks:
-            print("chunk_reader didn't find any chunks.")
-            return None
-        while len(chunks):
-            filename = chunks.pop()
-            done.append(filename)
-            output_pipes[n].send(filename)
-            n += 1
-            if n >= len(output_pipes):
-                n = 0
-    print("chunk_reader exiting.")
-    return None
-
 class ChunkParser:
     # static batch size
     BATCH_SIZE = 8
-    def __init__(self, chunks, shuffle_size=1, sample=1, buffer_size=1,
-            batch_size=256, workers=None):
+    def __init__(self, chunkdatasrc, shuffle_size=1, sample=1, buffer_size=1, batch_size=256, workers=None):
         """
         Read data and yield batches of raw tensors.
 
-        'chunks' list of chunk filenames.
+        'chunkdatasrc' is an object yeilding chunkdata
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
         'workers' is the number of child workers to use.
@@ -117,25 +89,13 @@ class ChunkParser:
         self.readers = []
         self.writers = []
         self.processes = []
-        self.chunk_writers = []
-        self.chunk_readers = []
         for _ in range(workers):
-            chunk_read, chunk_write = mp.Pipe(duplex=False)
             read, write = mp.Pipe(duplex=False)
-            p = mp.Process(target=self.task, args=(chunk_read, write))
-            p.daemon = True
+            p = mp.Process(target=self.task, args=(chunkdatasrc, write))
             self.processes.append(p)
             p.start()
             self.readers.append(read)
             self.writers.append(write)
-            self.chunk_readers.append(chunk_read)
-            self.chunk_writers.append(chunk_write)
-
-        self.chunk_process = mp.Process(target=chunk_reader, args=(chunks, self.chunk_writers))
-        self.chunk_process.daemon = True
-        self.chunk_process.start()
-
-
         self.init_structs()
 
 
@@ -148,10 +108,6 @@ class ChunkParser:
             self.processes[i].join()
             self.readers[i].close()
             self.writers[i].close()
-            self.chunk_readers[i].close()
-            self.chunk_writers[i].close()
-        self.chunk_process.terminate()
-        self.chunk_process.join()
 
 
     def init_structs(self):
@@ -277,35 +233,23 @@ class ChunkParser:
             yield record
 
 
-    def task(self, chunk_pipe, writer):
+    def task(self, chunkdatasrc, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
         sending v4 data through pipe back to main process.
         """
         self.init_structs()
         while True:
-            filename = chunk_pipe.recv()
-            try:
-                with gzip.open(filename, 'rb') as chunk_file:
-                    version = chunk_file.read(4)
-                    chunk_file.seek(0)
-                    if version == V4_VERSION:
-                        record_size = self.v4_struct.size
-                    elif version == V3_VERSION:
-                        record_size = self.v3_struct.size
-                    else:
-                        print('Unknown version {} in file {}'.format(version, filename))
-                        continue
-                    while True:
-                        chunkdata = chunk_file.read(512 * record_size)
-                        if len(chunkdata) == 0:
-                            break
-                        for item in self.sample_record(chunkdata):
-                            writer.send_bytes(item)
+            chunkdata = chunkdatasrc.next()
+            if chunkdata is None:
+                break
+            for item in self.sample_record(chunkdata):
+                # NOTE: This requires some more thinking, we can't just apply a
+                # reflection along the horizontal or vertical axes as we would
+                # also have to apply the reflection to the move probabilities
+                # which is non trivial for chess.
+                writer.send_bytes(item)
 
-            except:
-                print("failed to parse {}".format(filename))
-                continue
 
     def v4_gen(self):
         """
