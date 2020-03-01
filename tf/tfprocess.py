@@ -694,7 +694,7 @@ class TFProcess:
         sum_value = 0
         counter = 0
         for (x,y,z,q,m) in self.validation_dataset:
-            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy = self.calculate_test_summaries_inner_loop(x, y, z, q, m)
+            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error = self.calculate_test_summaries_inner_loop(x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
             sum_mse += mse_loss
             sum_policy += policy_loss
