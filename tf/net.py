@@ -22,7 +22,8 @@ class Net:
                  net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
                  input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
                  value=pb.NetworkFormat.VALUE_CLASSICAL,
-                 policy=pb.NetworkFormat.POLICY_CLASSICAL):
+                 policy=pb.NetworkFormat.POLICY_CLASSICAL,
+                 moves_left=pb.NetworkFormat.MOVES_LEFT_V1):
 
         if net == pb.NetworkFormat.NETWORK_SE:
             net = pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT
@@ -42,6 +43,7 @@ class Net:
         self.pb.format.network_format.input = input
         self.set_policyformat(policy)
         self.set_valueformat(value)
+        self.set_movesleftformat(moves_left)
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
@@ -57,6 +59,9 @@ class Net:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_WDL
         else:
             self.pb.format.network_format.output = pb.NetworkFormat.OUTPUT_CLASSICAL
+
+    def set_movesleftformat(self, moves_left):
+        self.pb.format.network_format.moves_left = moves_left
 
     def get_weight_amounts(self):
         value_weights = 8
@@ -243,6 +248,18 @@ class Net:
 
             return d[w]
 
+        def moves_left_to_bp(l, w):
+            if l == 'dense1':
+                n = 1
+            elif l == 'dense2':
+                n = 2
+            else:
+                raise ValueError('Unable to decode moves_left weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {'kernel':'ip{}_mov_w', 'bias':'ip{}_mov_b'}
+
+            return d[w].format(n)
+
         layers = name.split('/')
         base_layer = layers[0]
         weights_name = layers[-1]
@@ -263,6 +280,11 @@ class Net:
                 pb_name = value_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'value.' + convblock_to_bp(weights_name)
+        elif base_layer == 'moves_left':
+            if 'dense' in layers[1]:
+                pb_name = moves_left_to_bp(layers[1], weights_name)
+            else:
+                pb_name = 'moves_left.' + convblock_to_bp(weights_name)
         elif base_layer.startswith('residual'):
             block = int(base_layer.split('_')[1]) - 1 # 1 indexed
             if layers[1] == '1':
@@ -356,12 +378,14 @@ class Net:
         # without these fields.
         if self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_SE:
             self.set_networkformat(pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
+            self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
         elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
             self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
-            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL);
-            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL);
+            self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
+            self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
+            self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
 
     def parse_txt(self, filename):
         weights = []
