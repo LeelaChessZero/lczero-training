@@ -62,29 +62,6 @@ def get_latest_chunks(path, num_chunks, allow_less):
     random.shuffle(chunks)
     return chunks
 
-
-class FileDataSrc:
-    """
-        data source yielding chunkdata from chunk files.
-    """
-    def __init__(self, chunks):
-        self.chunks = []
-        self.done = chunks
-    def next(self):
-        if not self.chunks:
-            self.chunks, self.done = self.done, self.chunks
-            random.shuffle(self.chunks)
-        if not self.chunks:
-            return None
-        while len(self.chunks):
-            filename = self.chunks.pop()
-            try:
-                with gzip.open(filename, 'rb') as chunk_file:
-                    self.done.append(filename)
-                    return chunk_file.read()
-            except:
-                print("failed to parse {}".format(filename))
-
 def extract_inputs_outputs(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 7432 are easy, policy extraction.
@@ -167,7 +144,7 @@ def main(cmd):
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
-        train_parser = ChunkParser(FileDataSrc(train_chunks),
+        train_parser = ChunkParser(train_chunks,
                 shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
                 workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
@@ -182,7 +159,7 @@ def main(cmd):
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
-        test_parser = ChunkParser(FileDataSrc(test_chunks),
+        test_parser = ChunkParser(test_chunks,
                 shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE,
                 workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
@@ -228,6 +205,6 @@ if __name__ == "__main__":
     argparser.add_argument('--output', type=str,
         help='file to store weights in')
 
-    mp.set_start_method('spawn')
+    #mp.set_start_method('spawn')
     main(argparser.parse_args())
     mp.freeze_support()

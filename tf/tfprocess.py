@@ -66,6 +66,7 @@ class TFProcess:
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
+        self.virtual_batch_size = self.cfg['model'].get('virtual_batch_size', None)
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -456,9 +457,9 @@ class TFProcess:
                 self.calculate_swa_summaries_v2(test_batches, steps + 1)
 
         # Make sure that ghost batch norm can be applied
-        if batch_size % 64 != 0:
+        if self.virtual_batch_size and batch_size % self.virtual_batch_size != 0:
             # Adjust required batch size for batch splitting.
-            required_factor = 64 * self.cfg['training'].get('num_batch_splits', 1)
+            required_factor = self.virtual_batch_size * self.cfg['training'].get('num_batch_splits', 1)
             raise ValueError(
                 'batch_size must be a multiple of {}'.format(required_factor))
 
@@ -788,8 +789,8 @@ class TFProcess:
                 renorm_momentum=self.renorm_momentum, name=name)(input)
         else:
             return tf.keras.layers.BatchNormalization(
-                epsilon=1e-5, axis=1, fused=False, center=True,
-                scale=scale, virtual_batch_size=64, name=name)(input)
+                epsilon=1e-5, axis=1, center=True, scale=scale,
+                virtual_batch_size=self.virtual_batch_size, name=name)(input)
 
     def squeeze_excitation_v2(self, inputs, channels, name):
         assert channels % self.SE_ratio == 0
