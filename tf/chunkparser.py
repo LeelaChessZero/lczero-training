@@ -99,7 +99,7 @@ class ChunkParser:
         # Build 2 flat float32 planes with values 0,1
         self.flat_planes = []
         for i in range(2):
-            self.flat_planes.append(np.zeros(64, dtype=np.float32) + i)
+            self.flat_planes.append((np.zeros(64, dtype=np.float32) + i).tobytes())
 
         # set the down-sampling rate
         self.sample = sample
@@ -226,19 +226,19 @@ class ChunkParser:
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
-        rule50_plane = (np.zeros(8*8, dtype=np.float32) + rule50_count) / 99
+        rule50_plane = struct.pack('f', rule50_count / 99.0) * 64
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
         planes = planes.tobytes() + \
-                 self.flat_planes[us_ooo].tobytes() + \
-                 self.flat_planes[us_oo].tobytes() + \
-                 self.flat_planes[them_ooo].tobytes() + \
-                 self.flat_planes[them_oo].tobytes() + \
-                 self.flat_planes[stm].tobytes() + \
-                 rule50_plane.tobytes() + \
-                 self.flat_planes[0].tobytes() + \
-                 self.flat_planes[1].tobytes()
+                 self.flat_planes[us_ooo] + \
+                 self.flat_planes[us_oo] + \
+                 self.flat_planes[them_ooo] + \
+                 self.flat_planes[them_oo] + \
+                 self.flat_planes[stm] + \
+                 rule50_plane + \
+                 self.flat_planes[0] + \
+                 self.flat_planes[1]
 
         assert len(planes) == ((8*13*1 + 8*1*1) * 8 * 8 * 4)
         winner = float(winner)
@@ -297,7 +297,7 @@ class ChunkParser:
                         print('Unknown version {} in file {}'.format(version, filename))
                         continue
                     while True:
-                        chunkdata = chunk_file.read(512 * record_size)
+                        chunkdata = chunk_file.read(256 * record_size)
                         if len(chunkdata) == 0:
                             break
                         for item in self.sample_record(chunkdata):
