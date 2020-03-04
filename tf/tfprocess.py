@@ -435,6 +435,10 @@ class TFProcess:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
         return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, tape.gradient(total_loss, self.model.trainable_weights)
 
+    @tf.function()
+    def add_lists(self, x, y):
+        return [tf.math.add(a, b) for (a, b) in zip(x, y)]
+
     def process_v2(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
             self.time_start = time.time()
@@ -484,7 +488,7 @@ class TFProcess:
             if not grads:
                 grads = new_grads
             else:
-                grads = [tf.math.add(a, b) for (a, b) in zip(grads, new_grads)]
+                grads = self.add_lists(grads, new_grads)
             # Keep running averages
             # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
             # get comparable values.
@@ -579,16 +583,25 @@ class TFProcess:
             if self.swa_enabled:
                 self.save_swa_weights_v2(swa_path)
 
-    def calculate_swa_summaries_v2(self, test_batches, steps):
+    @tf.function()
+    def switch_to_swa(self):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
+        return backup
+
+    @tf.function()
+    def restore_weights(self, backup):
+        for (old, w) in zip(backup, self.model.weights):
+            w.assign(old)        
+
+    def calculate_swa_summaries_v2(self, test_batches, steps):
+        backup = self.switch_to_swa()
         true_test_writer, self.test_writer = self.test_writer, self.swa_writer
         print('swa', end=' ')
         self.calculate_test_summaries_v2(test_batches, steps)
         self.test_writer = true_test_writer
-        for (old, w) in zip(backup, self.model.weights):
-            w.assign(old)
+        self.restore_weights(backup)
 
     @tf.function()
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
@@ -755,19 +768,17 @@ class TFProcess:
         ratios = [tf.cond(r > 0, lambda: tf.math.log(r) / 2.30258509299, lambda: 200.) for (_, r) in ratios]
         tf.summary.histogram('update_ratios_log10', tf.stack(ratios), buckets=1000, step=steps)
 
+    @tf.function()
     def update_swa_v2(self):
         num = self.swa_count.read_value()
         for (w, swa) in zip(self.model.weights, self.swa_weights):
             swa.assign(swa.read_value() * (num / (num + 1.)) + w.read_value() * (1. / (num + 1.)))
-        self.swa_count.assign(min(num + 1., self.swa_max_n))
+        self.swa_count.assign(tf.math.minimum(num + 1., self.swa_max_n))
 
     def save_swa_weights_v2(self, filename):
-        backup = self.read_weights()
-        for (swa, w) in zip(self.swa_weights, self.model.weights):
-            w.assign(swa.read_value())
+        backup = self.switch_to_swa()
         self.save_leelaz_weights_v2(filename)
-        for (old, w) in zip(backup, self.model.weights):
-            w.assign(old)
+        self.restore_weights(backup)
 
     def save_leelaz_weights_v2(self, filename):
         numpy_weights = []
