@@ -26,6 +26,7 @@ import struct
 import tensorflow as tf
 import unittest
 import gzip
+from select import select
 
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
@@ -42,6 +43,9 @@ class ChunkDataSrc:
         return self.items.pop()
 
 
+def pipe_full(pipe):
+    r, w, x_ = select([], [pipe], [], 0)
+    return len(w) == 0
 
 def chunk_reader(chunk_filenames, output_pipes):
     """
@@ -60,9 +64,10 @@ def chunk_reader(chunk_filenames, output_pipes):
             print("chunk_reader didn't find any chunks.")
             return None
         while len(chunks):
-            filename = chunks.pop()
-            done.append(filename)
-            output_pipes[n].send(filename)
+            if not pipe_full(output_pipes[n]):
+                filename = chunks.pop()
+                done.append(filename)
+                output_pipes[n].send(filename)
             n += 1
             if n >= len(output_pipes):
                 n = 0
