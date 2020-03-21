@@ -277,11 +277,11 @@ class ChunkParser:
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
-            if version == V3_VERSION || version == V4_VERSION:
+            if version == V3_VERSION or version == V4_VERSION:
                 # add 12 bytes of fake root_m, best_m, plies_left to match V5 format
                 record += 12 * b'\x00'
                 # insert 4 bytes of classical input format tag to match v5 format
-                record[4:4] = CLASSICAL_INPUT
+                record = record[:4] + CLASSICAL_INPUT + record[4:]
             yield record
 
 
