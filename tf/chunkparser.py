@@ -192,7 +192,7 @@ class ChunkParser:
         return (planes, probs, winner, q, plies_left)
 
 
-    def convert_v4_to_tuple(self, content):
+    def convert_v5_to_tuple(self, content):
         """
         Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
 
@@ -317,12 +317,12 @@ class ChunkParser:
                 print("failed to parse {}".format(filename))
                 continue
 
-    def v4_gen(self):
+    def v5_gen(self):
         """
-        Read v4 records from child workers, shuffle, and yield
+        Read v5 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v4_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v5_struct.size, self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
@@ -349,7 +349,7 @@ class ChunkParser:
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v4_to_tuple(r)
+            yield self.convert_v5_to_tuple(r)
 
 
     def batch_gen(self, gen):
@@ -374,8 +374,8 @@ class ChunkParser:
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v4_gen()        # read from workers
-        gen = self.tuple_gen(gen)  # convert v4->tuple
+        gen = self.v5_gen()        # read from workers
+        gen = self.tuple_gen(gen)  # convert v5->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
             yield b
