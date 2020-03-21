@@ -202,11 +202,11 @@ class ChunkParser:
             float32 best_m (4 bytes)
             float32 plies_left (4 bytes)
         """
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d, best_d, root_m, best_m, ply_count) = self.v5_struct.unpack(content)
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d, best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
         # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
-        if ply_count == 0:
-            ply_count = dep_ply_count
-        plies_left = struct.pack('f', ply_count)
+        if plies_left == 0:
+            plies_left = dep_ply_count
+        m = struct.pack('f', plies_left)
         # Don't yet support FRC input format decoding.
         assert input_format == 1
 
@@ -236,7 +236,7 @@ class ChunkParser:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q, plies_left)
+        return (planes, probs, winner, best_q, m)
 
 
     def sample_record(self, chunkdata):
