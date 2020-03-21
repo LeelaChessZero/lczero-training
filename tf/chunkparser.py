@@ -206,7 +206,7 @@ class ChunkParser:
         # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
         if plies_left == 0:
             plies_left = dep_ply_count
-        m = struct.pack('f', plies_left)
+        plies_left = struct.pack('f', plies_left)
         # Don't yet support FRC input format decoding.
         assert input_format == 1
 
@@ -236,7 +236,7 @@ class ChunkParser:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q, m)
+        return (planes, probs, winner, best_q, plies_left)
 
 
     def sample_record(self, chunkdata):
