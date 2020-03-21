@@ -64,37 +64,41 @@ def get_latest_chunks(path, num_chunks, allow_less):
 
 def extract_inputs_outputs(raw):
     # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit panes.
+    # TODO: actually support FRC input format.
+    
     # Next 7432 are easy, policy extraction.
-    policy = tf.io.decode_raw(tf.strings.substr(raw, 4, 7432), tf.float32)
+    policy = tf.io.decode_raw(tf.strings.substr(raw, 8, 7432), tf.float32)
     # Next are 104 bit packed chess boards, they have to be expanded.
-    bit_planes = tf.expand_dims(tf.reshape(tf.io.decode_raw(tf.strings.substr(raw, 7436, 832), tf.uint8), [-1, 104, 8]), -1)
+    bit_planes = tf.expand_dims(tf.reshape(tf.io.decode_raw(tf.strings.substr(raw, 7440, 832), tf.uint8), [-1, 104, 8]), -1)
     bit_planes = tf.bitwise.bitwise_and(tf.tile(bit_planes, [1, 1, 1, 8]), [128, 64, 32, 16, 8, 4, 2, 1])
     bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
     # Next 5 planes are 1 or 0 to indicate 8x8 of 1 or 0.
-    unit_planes = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8268, 5), tf.uint8), -1), -1)
+    unit_planes = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8272, 5), tf.uint8), -1), -1)
     unit_planes = tf.cast(tf.tile(unit_planes, [1, 1, 8, 8]), tf.float32)
     # rule50 count plane.
-    rule50_plane = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8273, 1), tf.uint8), -1), -1)
+    rule50_plane = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8277, 1), tf.uint8), -1), -1)
     rule50_plane = tf.cast(tf.tile(rule50_plane, [1, 1, 8, 8]), tf.float32)
     rule50_plane = tf.divide(rule50_plane, 99.)
-    ply_count = tf.cast(tf.io.decode_raw(tf.strings.substr(raw, 8274, 1), tf.uint8), tf.float32)
     # zero plane and one plane
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
     inputs = tf.reshape(tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1), [-1, 112, 64])
 
     # winner is stored in one signed byte and needs to be converted to one hot.
-    winner = tf.cast(tf.io.decode_raw(tf.strings.substr(raw, 8275, 1), tf.int8), tf.float32)
+    winner = tf.cast(tf.io.decode_raw(tf.strings.substr(raw, 8279, 1), tf.int8), tf.float32)
     winner = tf.tile(winner, [1,3])
     z = tf.cast(tf.equal(winner, [1., 0., -1.]), tf.float32)
 
     # Outcome distribution needs to be calculated from q and d.
-    best_q = tf.io.decode_raw(tf.strings.substr(raw, 8280, 4), tf.float32)
-    best_d = tf.io.decode_raw(tf.strings.substr(raw, 8288, 4), tf.float32)
+    best_q = tf.io.decode_raw(tf.strings.substr(raw, 8284, 4), tf.float32)
+    best_d = tf.io.decode_raw(tf.strings.substr(raw, 8292, 4), tf.float32)
     best_q_w = 0.5 * (1.0 - best_d + best_q)
     best_q_l = 0.5 * (1.0 - best_d - best_q)
 
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
+
+    ply_count = tf.io.decode_raw(tf.strings.substr(raw, 8304, 4), tf.float32)
 
     return (inputs, policy, z, q, ply_count)
 
@@ -108,7 +112,7 @@ def main(cmd):
     num_chunks = cfg['dataset']['num_chunks']
     allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
-    experimental_parser = cfg['dataset'].get('experimental_v4_only_dataset', False)
+    experimental_parser = cfg['dataset'].get('experimental_v5_only_dataset', False)
     num_train = int(num_chunks*train_ratio)
     num_test = num_chunks - num_train
     if 'input_test' in cfg['dataset']:
@@ -140,7 +144,7 @@ def main(cmd):
 
     if experimental_parser:
         train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat()\
-                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8308, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
@@ -155,7 +159,7 @@ def main(cmd):
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     if experimental_parser:
         test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat()\
-                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+                         .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8308, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
@@ -170,7 +174,7 @@ def main(cmd):
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
-        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8292, compression_type='GZIP', num_parallel_reads=1)\
+        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=1)\
                                .batch(split_batch_size, drop_remainder=True).map(extract_inputs_outputs).prefetch(4)
 
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
