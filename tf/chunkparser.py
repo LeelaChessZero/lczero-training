@@ -46,18 +46,13 @@ class ChunkDataSrc:
         return self.items.pop()
 
 
-def pipe_full(pipe):
-    r, w, x_ = select([], [pipe], [], 0)
-    return len(w) == 0
-
-def chunk_reader(chunk_filenames, output_pipes):
+def chunk_reader(chunk_filenames, chunk_filename_queue):
     """
     Reads chunk filenames from a list and writes them in shuffled
     order to output_pipes.
     """
     chunks = []
     done = chunk_filenames
-    n = 0
 
     while True:
         if not chunks:
@@ -67,13 +62,9 @@ def chunk_reader(chunk_filenames, output_pipes):
             print("chunk_reader didn't find any chunks.")
             return None
         while len(chunks):
-            if not pipe_full(output_pipes[n]):
-                filename = chunks.pop()
-                done.append(filename)
-                output_pipes[n].send(filename)
-            n += 1
-            if n >= len(output_pipes):
-                n = 0
+            filename = chunks.pop()
+            done.append(filename)
+            chunk_filename_queue.put(filename)
     print("chunk_reader exiting.")
     return None
 
@@ -125,21 +116,17 @@ class ChunkParser:
         self.readers = []
         self.writers = []
         self.processes = []
-        self.chunk_writers = []
-        self.chunk_readers = []
+        self.chunk_filename_queue = mp.Queue(maxsize=4096)
         for _ in range(workers):
-            chunk_read, chunk_write = mp.Pipe(duplex=False)
             read, write = mp.Pipe(duplex=False)
-            p = mp.Process(target=self.task, args=(chunk_read, write))
+            p = mp.Process(target=self.task, args=(self.chunk_filename_queue, write))
             p.daemon = True
             self.processes.append(p)
             p.start()
             self.readers.append(read)
             self.writers.append(write)
-            self.chunk_readers.append(chunk_read)
-            self.chunk_writers.append(chunk_write)
 
-        self.chunk_process = mp.Process(target=chunk_reader, args=(chunks, self.chunk_writers))
+        self.chunk_process = mp.Process(target=chunk_reader, args=(chunks, self.chunk_filename_queue))
         self.chunk_process.daemon = True
         self.chunk_process.start()
 
@@ -156,8 +143,6 @@ class ChunkParser:
             self.processes[i].join()
             self.readers[i].close()
             self.writers[i].close()
-            self.chunk_readers[i].close()
-            self.chunk_writers[i].close()
         self.chunk_process.terminate()
         self.chunk_process.join()
 
@@ -285,14 +270,14 @@ class ChunkParser:
             yield record
 
 
-    def task(self, chunk_pipe, writer):
+    def task(self, chunk_filename_queue, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
         sending v5 data through pipe back to main process.
         """
         self.init_structs()
         while True:
-            filename = chunk_pipe.recv()
+            filename = chunk_filename_queue.get()
             try:
                 with gzip.open(filename, 'rb') as chunk_file:
                     version = chunk_file.read(4)
