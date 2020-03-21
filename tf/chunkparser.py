@@ -95,7 +95,7 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v4 format where each record
+        chunkdata: type Bytes. Multiple records of v5 format where each record
         consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
@@ -256,7 +256,7 @@ class ChunkParser:
 
     def sample_record(self, chunkdata):
         """
-        Randomly sample through the v4 chunk data and select records
+        Randomly sample through the v3/4/5 chunk data and select records in v5 format
         """
         version = chunkdata[0:4]
         if version == V5_VERSION:
@@ -288,7 +288,7 @@ class ChunkParser:
     def task(self, chunk_pipe, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
-        sending v4 data through pipe back to main process.
+        sending v5 data through pipe back to main process.
         """
         self.init_structs()
         while True:
@@ -345,7 +345,7 @@ class ChunkParser:
 
     def tuple_gen(self, gen):
         """
-        Take a generator producing v4 records and convert them to tuples.
+        Take a generator producing v5 records and convert them to tuples.
         applying a random symmetry on the way.
         """
         for r in gen:
