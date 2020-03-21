@@ -28,8 +28,11 @@ import unittest
 import gzip
 from select import select
 
+V5_VERSION = struct.pack('i', 5)
+CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
+V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
@@ -83,7 +86,7 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v4 format where each record
+        chunkdata: type Bytes. Multiple records of v5 format where each record
         consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
@@ -148,24 +151,8 @@ class ChunkParser:
         """
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
-
-        V4 Format (8292 bytes total)
-            int32 version (4 bytes)
-            1858 float32 probabilities (7432 bytes)  (removed 66*4 = 264 bytes unused under-promotions)
-            104 (13*8) packed bit planes of 8 bytes each (832 bytes)  (no rep2 plane)
-            uint8 castling us_ooo (1 byte)
-            uint8 castling us_oo (1 byte)
-            uint8 castling them_ooo (1 byte)
-            uint8 castling them_oo (1 byte)
-            uint8 side_to_move (1 byte) aka us_black
-            uint8 rule50_count (1 byte)
-            uint8 ply_count (1 byte)
-            int8 result (1 byte)
-            float32 root_q (4 bytes)
-            float32 best_q (4 bytes)
-            float32 root_d (4 bytes)
-            float32 best_d (4 bytes)
         """
+        self.v5_struct = struct.Struct(V5_STRUCT_STRING)
         self.v4_struct = struct.Struct(V4_STRUCT_STRING)
         self.v3_struct = struct.Struct(V3_STRUCT_STRING)
 
@@ -190,12 +177,13 @@ class ChunkParser:
         return (planes, probs, winner, q, plies_left)
 
 
-    def convert_v4_to_tuple(self, content):
+    def convert_v5_to_tuple(self, content):
         """
-        Unpack a v4 binary record to 4-tuple (state, policy pi, result, q)
+        Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
 
-        v4 struct format is (8292 bytes total)
+        v5 struct format is (8308 bytes total)
             int32 version (4 bytes)
+            int32 input_format (4 bytes)
             1858 float32 probabilities (7432 bytes)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)
             uint8 castling us_ooo (1 byte)
@@ -204,15 +192,23 @@ class ChunkParser:
             uint8 castling them_oo (1 byte)
             uint8 side_to_move (1 byte)
             uint8 rule50_count (1 byte)
-            uint8 ply_count (1 byte)
+            uint8 dep_ply_count (1 byte) (unused)
             int8 result (1 byte)
             float32 root_q (4 bytes)
             float32 best_q (4 bytes)
             float32 root_d (4 bytes)
             float32 best_d (4 bytes)
+            float32 root_m (4 bytes)
+            float32 best_m (4 bytes)
+            float32 plies_left (4 bytes)
         """
-        (ver, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, ply_count, winner, root_q, best_q, root_d, best_d) = self.v4_struct.unpack(content)
-        plies_left = struct.pack('f', ply_count)
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d, best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
+        # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
+        if plies_left == 0:
+            plies_left = dep_ply_count
+        plies_left = struct.pack('f', plies_left)
+        # Don't yet support FRC input format decoding.
+        assert input_format == 1
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(np.float32)
@@ -245,10 +241,12 @@ class ChunkParser:
 
     def sample_record(self, chunkdata):
         """
-        Randomly sample through the v4 chunk data and select records
+        Randomly sample through the v3/4/5 chunk data and select records in v5 format
         """
         version = chunkdata[0:4]
-        if version == V4_VERSION:
+        if version == V5_VERSION:
+            record_size = self.v5_struct.size
+        elif version == V4_VERSION:
             record_size = self.v4_struct.size
         elif version == V3_VERSION:
             record_size = self.v3_struct.size
@@ -264,13 +262,18 @@ class ChunkParser:
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
+            if version == V3_VERSION or version == V4_VERSION:
+                # add 12 bytes of fake root_m, best_m, plies_left to match V5 format
+                record += 12 * b'\x00'
+                # insert 4 bytes of classical input format tag to match v5 format
+                record = record[:4] + CLASSICAL_INPUT + record[4:]
             yield record
 
 
     def task(self, chunk_filename_queue, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
-        sending v4 data through pipe back to main process.
+        sending v5 data through pipe back to main process.
         """
         self.init_structs()
         while True:
@@ -279,7 +282,9 @@ class ChunkParser:
                 with gzip.open(filename, 'rb') as chunk_file:
                     version = chunk_file.read(4)
                     chunk_file.seek(0)
-                    if version == V4_VERSION:
+                    if version == V5_VERSION:
+                        record_size = self.v5_struct.size
+                    elif version == V4_VERSION:
                         record_size = self.v4_struct.size
                     elif version == V3_VERSION:
                         record_size = self.v3_struct.size
@@ -297,12 +302,12 @@ class ChunkParser:
                 print("failed to parse {}".format(filename))
                 continue
 
-    def v4_gen(self):
+    def v5_gen(self):
         """
-        Read v4 records from child workers, shuffle, and yield
+        Read v5 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v4_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v5_struct.size, self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
@@ -325,11 +330,11 @@ class ChunkParser:
 
     def tuple_gen(self, gen):
         """
-        Take a generator producing v4 records and convert them to tuples.
+        Take a generator producing v5 records and convert them to tuples.
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v4_to_tuple(r)
+            yield self.convert_v5_to_tuple(r)
 
 
     def batch_gen(self, gen):
@@ -354,8 +359,8 @@ class ChunkParser:
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v4_gen()        # read from workers
-        gen = self.tuple_gen(gen)  # convert v4->tuple
+        gen = self.v5_gen()        # read from workers
+        gen = self.tuple_gen(gen)  # convert v5->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
             yield b
