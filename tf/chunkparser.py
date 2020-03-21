@@ -217,7 +217,7 @@ class ChunkParser:
             float32 best_m (4 bytes)
             float32 plies_left (4 bytes)
         """
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d, best_d, root_m, best_m, plies_count) = self.v5_struct.unpack(content)
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d, best_d, root_m, best_m, ply_count) = self.v5_struct.unpack(content)
         # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
         if ply_count == 0:
             ply_count = dep_ply_count
