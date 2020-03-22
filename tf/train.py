@@ -65,7 +65,7 @@ def get_latest_chunks(path, num_chunks, allow_less):
 def extract_inputs_outputs(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
-    input_format = tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32)
+    input_format = tf.reshape(tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32), [-1, 1, 1, 1])
     
     # Next 7432 are easy, policy extraction.
     policy = tf.io.decode_raw(tf.strings.substr(raw, 8, 7432), tf.float32)
