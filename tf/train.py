@@ -88,7 +88,7 @@ def extract_inputs_outputs(raw):
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
     # For FRC unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then 4.
-    unit_planes = tf.cond(input_format == 2, lambda: tf.concat([tf.concat([bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 2:3, :1], 2), tf.concat([bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 3:4, :1], 2), zero_plane, zero_plane, unit_planes[:,4:]], 1), lambda: unit_planes)
+    unit_planes = tf.cond(input_format == 2, lambda: tf.concat([tf.concat([bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 2:3, :1]], 2), tf.concat([bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 3:4, :1]], 2), zero_plane, zero_plane, unit_planes[:,4:]], 1), lambda: unit_planes)
     inputs = tf.reshape(tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1), [-1, 112, 64])
 
     # winner is stored in one signed byte and needs to be converted to one hot.
