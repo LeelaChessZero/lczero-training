@@ -106,9 +106,6 @@ def extract_inputs_outputs(raw):
 def semi_sample(x):
     return tf.slice(tf.random.shuffle(x), [0], [SKIP_MULTIPLE])
 
-def read(x):
-    return tf.data.FixedLengthRecordDataset(x, 8308, compression_type='GZIP', num_parallel_reads=1)
-
 def main(cmd):
     cfg = yaml.safe_load(cmd.cfg.read())
     print(yaml.dump(cfg, default_flow_style=False))
@@ -145,10 +142,14 @@ def main(cmd):
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
     tfprocess = TFProcess(cfg)
+    experimental_reads = max(2, mp.cpu_count() - 2) // 2
+
+    def read(x):
+        return tf.data.FixedLengthRecordDataset(x, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)
 
     if experimental_parser:
-        train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat()\
-                         .interleave(read, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat().batch(256)\
+                         .interleave(read, num_parallel_calls=2)\
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
@@ -163,8 +164,8 @@ def main(cmd):
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     if experimental_parser:
-        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat()\
-                         .interleave(read, num_parallel_calls=tf.data.experimental.AUTOTUNE)\
+        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat().batch(256)\
+                         .interleave(read, num_parallel_calls=2)\
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
@@ -180,7 +181,7 @@ def main(cmd):
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
-        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=1)\
+        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
                                .batch(split_batch_size, drop_remainder=True).map(extract_inputs_outputs).prefetch(4)
 
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
