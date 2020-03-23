@@ -841,10 +841,10 @@ class TFProcess:
         # Moves left head
         if self.moves_left:
             conv_mov = self.conv_block_v2(flow, filter_size=1,
-                                       output_channels=4,
+                                       output_channels=8,
                                        name='moves_left')
             h_conv_mov_flat = tf.keras.layers.Flatten()(conv_mov)
-            h_fc4 = tf.keras.layers.Dense(512, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense1')(h_conv_mov_flat)
+            h_fc4 = tf.keras.layers.Dense(128, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense1')(h_conv_mov_flat)
 
             h_fc5 = tf.keras.layers.Dense(1, kernel_initializer='glorot_normal', kernel_regularizer=self.l2reg, activation='relu', name='moves_left/dense2')(h_fc4)
         else:
