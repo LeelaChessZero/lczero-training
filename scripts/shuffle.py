@@ -12,17 +12,20 @@ processes = 8
 shuffle = True
 record_length = 8292
 
+
 def split(a, n):
     k, m = divmod(len(a), n)
     return [a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n)]
 
+
 def positions(chunk):
     pos = []
     i = 0
-    while record_length*i < len(chunk):
-        pos.append(chunk[record_length*i:record_length*(i+1)])
+    while record_length * i < len(chunk):
+        pos.append(chunk[record_length * i:record_length * (i + 1)])
         i += 1
     return pos
+
 
 def shuffle(files):
     data = []
@@ -47,9 +50,10 @@ def shuffle(files):
     for filename in files:
         os.remove(filename)
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print('Expected one argument, got {}'.format(len(sys.argv)-1))
+        print('Expected one argument, got {}'.format(len(sys.argv) - 1))
         exit(1)
     s = sys.argv[1]
     files = glob.glob(os.path.join(sys.argv[1], '*.gz'))
@@ -57,7 +61,7 @@ if __name__ == "__main__":
     print('Found {} files'.format(len(files)))
     if len(files) == 0:
         exit(1)
-    files = split(files, len(files)//merge_files)
+    files = split(files, len(files) // merge_files)
     pool = Pool(processes)
 
     for _ in tqdm.tqdm(pool.imap_unordered(shuffle, files), total=len(files)):

@@ -26,11 +26,8 @@ def main(argv):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
             'Print diffset of input dir and output dirs.')
-    argparser.add_argument('-i', '--input', type=str,
-            help='input directory')
-    argparser.add_argument('-w', '--wsize', type=int,
-            help='window size')
-    argparser.add_argument('dirs', nargs='+',
-            help='output directories')
+    argparser.add_argument('-i', '--input', type=str, help='input directory')
+    argparser.add_argument('-w', '--wsize', type=int, help='window size')
+    argparser.add_argument('dirs', nargs='+', help='output directories')
 
     main(argparser.parse_args())
