@@ -6,14 +6,20 @@ import tfprocess
 from net import Net
 
 argparser = argparse.ArgumentParser(description='Convert net to model.')
-argparser.add_argument('net', type=str,
-    help='Net file to be converted to a model checkpoint.')
-argparser.add_argument('--start', type=int, default=0,
-    help='Offset to set global_step to.')
-argparser.add_argument('--cfg', type=argparse.FileType('r'),
-    help='yaml configuration with training parameters')
-argparser.add_argument('-e', '--ignore-errors', action='store_true',
-    help='Ignore missing and wrong sized values.')
+argparser.add_argument('net',
+                       type=str,
+                       help='Net file to be converted to a model checkpoint.')
+argparser.add_argument('--start',
+                       type=int,
+                       default=0,
+                       help='Offset to set global_step to.')
+argparser.add_argument('--cfg',
+                       type=argparse.FileType('r'),
+                       help='yaml configuration with training parameters')
+argparser.add_argument('-e',
+                       '--ignore-errors',
+                       action='store_true',
+                       help='Ignore missing and wrong sized values.')
 args = argparser.parse_args()
 cfg = yaml.safe_load(args.cfg.read())
 print(yaml.dump(cfg, default_flow_style=False))

@@ -23,7 +23,6 @@ def main(argv):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
             'Change modification time on training files to match their numeric order.')
-    argparser.add_argument('-i', '--input', type=str,
-            help='input directory')
+    argparser.add_argument('-i', '--input', type=str, help='input directory')
 
     main(argparser.parse_args())

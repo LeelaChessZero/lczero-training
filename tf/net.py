@@ -11,11 +11,13 @@ LC0_MINOR = 21
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
+
 def nested_getattr(obj, attr):
     attributes = attr.split(".")
     for a in attributes:
         obj = getattr(obj, a)
     return obj
+
 
 class Net:
     def __init__(self,
@@ -75,12 +77,12 @@ class Net:
         else:
             return {"input": 4, "residual": 8, "head": head_weights}
 
-
     def fill_layer_v2(self, layer, params):
         """Normalize and populate 16bit layer in protobuf"""
         params = params.flatten().astype(np.float32)
         layer.min_val = 0 if len(params) == 1 else float(np.min(params))
-        layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else float(np.max(params))
+        layer.max_val = 1 if len(params) == 1 and np.max(
+            params) == 0 else float(np.max(params))
         if layer.max_val == layer.min_val:
             # Avoid division by zero if max == min.
             params = (params - layer.min_val)
@@ -94,7 +96,8 @@ class Net:
         """Normalize and populate 16bit layer in protobuf"""
         params = np.array(weights.pop(), dtype=np.float32)
         layer.min_val = 0 if len(params) == 1 else float(np.min(params))
-        layer.max_val = 1 if len(params) == 1 and np.max(params) == 0 else float(np.max(params))
+        layer.max_val = 1 if len(params) == 1 and np.max(
+            params) == 0 else float(np.max(params))
         if layer.max_val == layer.min_val:
             # Avoid division by zero if max == min.
             params = (params - layer.min_val)
@@ -189,7 +192,8 @@ class Net:
         with gzip.open(filename, 'wb') as f:
             f.write("{}\n".format(version).encode('utf-8'))
             for row in weights:
-                f.write((" ".join(map(str, row.tolist())) + "\n").encode('utf-8'))
+                f.write(
+                    (" ".join(map(str, row.tolist())) + "\n").encode('utf-8'))
 
         size = os.path.getsize(filename) / 1024**2
         print("saved as '{}' {}M".format(filename, round(size, 2)))
@@ -209,12 +213,16 @@ class Net:
     def tf_name_to_pb_name(self, name):
         """Given Tensorflow variable name returns the protobuf name and index
         of residual block if weight belong in a residual block."""
-
         def convblock_to_bp(w):
             w = w.split(':')[0]
-            d = {'kernel':'weights', 'gamma':'bn_gammas', 'beta':'bn_betas',
-                    'moving_mean':'bn_means', 'moving_variance':'bn_stddivs',
-                    'bias':'biases'}
+            d = {
+                'kernel': 'weights',
+                'gamma': 'bn_gammas',
+                'beta': 'bn_betas',
+                'moving_mean': 'bn_means',
+                'moving_variance': 'bn_stddivs',
+                'bias': 'biases'
+            }
 
             return d[w]
 
@@ -224,9 +232,10 @@ class Net:
             elif l == 'dense2':
                 n = 2
             else:
-                raise ValueError('Unable to decode SE-weight {}/{}'.format(l, w))
+                raise ValueError('Unable to decode SE-weight {}/{}'.format(
+                    l, w))
             w = w.split(':')[0]
-            d = {'kernel':'w', 'bias':'b'}
+            d = {'kernel': 'w', 'bias': 'b'}
 
             return d[w] + str(n)
 
@@ -236,15 +245,16 @@ class Net:
             elif l == 'dense2':
                 n = 2
             else:
-                raise ValueError('Unable to decode value weight {}/{}'.format(l, w))
+                raise ValueError('Unable to decode value weight {}/{}'.format(
+                    l, w))
             w = w.split(':')[0]
-            d = {'kernel':'ip{}_val_w', 'bias':'ip{}_val_b'}
+            d = {'kernel': 'ip{}_val_w', 'bias': 'ip{}_val_b'}
 
             return d[w].format(n)
 
         def policy_to_bp(w):
             w = w.split(':')[0]
-            d = {'kernel':'ip_pol_w', 'bias':'ip_pol_b'}
+            d = {'kernel': 'ip_pol_w', 'bias': 'ip_pol_b'}
 
             return d[w]
 
@@ -254,9 +264,10 @@ class Net:
             elif l == 'dense2':
                 n = 2
             else:
-                raise ValueError('Unable to decode moves_left weight {}/{}'.format(l, w))
+                raise ValueError(
+                    'Unable to decode moves_left weight {}/{}'.format(l, w))
             w = w.split(':')[0]
-            d = {'kernel':'ip{}_mov_w', 'bias':'ip{}_mov_b'}
+            d = {'kernel': 'ip{}_mov_w', 'bias': 'ip{}_mov_b'}
 
             return d[w].format(n)
 
@@ -286,7 +297,7 @@ class Net:
             else:
                 pb_name = 'moves_left.' + convblock_to_bp(weights_name)
         elif base_layer.startswith('residual'):
-            block = int(base_layer.split('_')[1]) - 1 # 1 indexed
+            block = int(base_layer.split('_')[1]) - 1  # 1 indexed
             if layers[1] == '1':
                 pb_name = 'conv1.' + convblock_to_bp(weights_name)
             elif layers[1] == '2':
@@ -313,7 +324,9 @@ class Net:
             pb_name, block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
-                raise ValueError("Don't know where to store weight in protobuf: {}".format(name))
+                raise ValueError(
+                    "Don't know where to store weight in protobuf: {}".format(
+                        name))
 
             if block == None:
                 pb_weights = self.pb.weights
@@ -382,7 +395,8 @@ class Net:
             self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
             self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
         elif self.pb.format.network_format.network == pb.NetworkFormat.NETWORK_CLASSICAL:
-            self.set_networkformat(pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
+            self.set_networkformat(
+                pb.NetworkFormat.NETWORK_CLASSICAL_WITH_HEADFORMAT)
             self.set_valueformat(pb.NetworkFormat.VALUE_CLASSICAL)
             self.set_policyformat(pb.NetworkFormat.POLICY_CLASSICAL)
             self.set_movesleftformat(pb.NetworkFormat.MOVES_LEFT_NONE)
@@ -454,7 +468,9 @@ class Net:
             pb_name, block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
-                raise ValueError("Don't know where to store weight in protobuf: {}".format(name))
+                raise ValueError(
+                    "Don't know where to store weight in protobuf: {}".format(
+                        name))
 
             if block == None:
                 pb_weights = self.pb.weights
@@ -517,10 +533,12 @@ class Net:
 
         self.fill_conv_block(self.pb.weights.input, weights, gammas)
 
+
 def print_pb_stats(obj, parent=None):
     for descriptor in obj.DESCRIPTOR.fields:
         value = getattr(obj, descriptor.name)
-        if descriptor.name == "weights": return
+        if descriptor.name == "weights":
+            return
         if descriptor.type == descriptor.TYPE_MESSAGE:
             if descriptor.label == descriptor.LABEL_REPEATED:
                 map(print_pb_stats, value)
@@ -531,6 +549,7 @@ def print_pb_stats(obj, parent=None):
             print("%s: %s" % (descriptor.full_name, enum_name))
         else:
             print("%s: %s" % (descriptor.full_name, value))
+
 
 def main(argv):
     net = Net()
@@ -564,8 +583,12 @@ def main(argv):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
         description='Convert network textfile to proto.')
-    argparser.add_argument('-i', '--input', type=str,
+    argparser.add_argument('-i',
+                           '--input',
+                           type=str,
                            help='input network weight text file')
-    argparser.add_argument('-o', '--output', type=str,
+    argparser.add_argument('-o',
+                           '--output',
+                           type=str,
                            help='output filepath without extension')
     main(argparser.parse_args())
