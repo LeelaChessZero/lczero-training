@@ -234,10 +234,18 @@ class ChunkParser:
                               self.flat_planes[them_oo]
         elif input_format == 2:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
-            them_ooo_bytes = np.unpackbits(np.array([them_ooo], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            us_ooo_bytes = np.unpackbits(np.array([us_ooo], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            them_oo_bytes = np.unpackbits(np.array([them_oo], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            us_oo_bytes = np.unpackbits(np.array([us_oo], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            them_ooo_bytes = np.unpackbits(np.array(
+                [them_ooo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            us_ooo_bytes = np.unpackbits(np.array(
+                [us_ooo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            them_oo_bytes = np.unpackbits(np.array(
+                [them_oo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            us_oo_bytes = np.unpackbits(np.array(
+                [us_oo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
             castling_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
                               us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
                               self.flat_planes[0] + \

@@ -71,8 +71,10 @@ def get_latest_chunks(path, num_chunks, allow_less):
 def extract_inputs_outputs(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
-    input_format = tf.reshape(tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32), [-1, 1, 1, 1])
-    
+    input_format = tf.reshape(
+        tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+        [-1, 1, 1, 1])
+
     # Next 7432 are easy, policy extraction.
     policy = tf.io.decode_raw(tf.strings.substr(raw, 8, 7432), tf.float32)
     # Next are 104 bit packed chess boards, they have to be expanded.
@@ -84,11 +86,16 @@ def extract_inputs_outputs(raw):
                                         [128, 64, 32, 16, 8, 4, 2, 1])
     bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
     # Next 5 planes are 1 or 0 to indicate 8x8 of 1 or 0.
-    unit_planes = tf.expand_dims(tf.expand_dims(tf.io.decode_raw(tf.strings.substr(raw, 8272, 5), tf.uint8), -1), -1)
+    unit_planes = tf.expand_dims(
+        tf.expand_dims(
+            tf.io.decode_raw(tf.strings.substr(raw, 8272, 5), tf.uint8), -1),
+        -1)
     unit_planes = tf.tile(unit_planes, [1, 1, 8, 8])
     # In order to do the conditional for frc we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
-    bitsplat_unit_planes = tf.bitwise.bitwise_and(unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
-    bitsplat_unit_planes = tf.minimum(1., tf.cast(bitsplat_unit_planes, tf.float32))
+    bitsplat_unit_planes = tf.bitwise.bitwise_and(
+        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
+    bitsplat_unit_planes = tf.minimum(
+        1., tf.cast(bitsplat_unit_planes, tf.float32))
     unit_planes = tf.cast(unit_planes, tf.float32)
     # rule50 count plane.
     rule50_plane = tf.expand_dims(
@@ -101,10 +108,23 @@ def extract_inputs_outputs(raw):
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
     # For FRC unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then 4.
-    queenside = tf.concat([bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 2:3, :1]], 2)
-    kingside = tf.concat([bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6], bitsplat_unit_planes[:, 3:4, :1]], 2)
-    unit_planes = tf.where(input_format == 2, tf.concat([queenside, kingside, zero_plane, zero_plane, unit_planes[:,4:]], 1), unit_planes)
-    inputs = tf.reshape(tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1), [-1, 112, 64])
+    queenside = tf.concat([
+        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 2:3, :1]
+    ], 2)
+    kingside = tf.concat([
+        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 3:4, :1]
+    ], 2)
+    unit_planes = tf.where(
+        input_format == 2,
+        tf.concat(
+            [queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]],
+            1), unit_planes)
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
+        [-1, 112, 64])
 
     # winner is stored in one signed byte and needs to be converted to one hot.
     winner = tf.cast(
