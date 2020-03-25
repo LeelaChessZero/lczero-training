@@ -217,8 +217,8 @@ class ChunkParser:
         if plies_left == 0:
             plies_left = dep_ply_count
         plies_left = struct.pack('f', plies_left)
-        # Don't yet support FRC input format decoding.
-        assert input_format == 1
+
+        assert input_format == 1 or input_format == 2
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(
@@ -227,11 +227,32 @@ class ChunkParser:
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
+        if input_format == 1:
+            castling_planes = self.flat_planes[us_ooo] + \
+                              self.flat_planes[us_oo] + \
+                              self.flat_planes[them_ooo] + \
+                              self.flat_planes[them_oo]
+        elif input_format == 2:
+            # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
+            them_ooo_bytes = np.unpackbits(np.array(
+                [them_ooo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            us_ooo_bytes = np.unpackbits(np.array(
+                [us_ooo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            them_oo_bytes = np.unpackbits(np.array(
+                [them_oo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            us_oo_bytes = np.unpackbits(np.array(
+                [us_oo],
+                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+            castling_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
+                              us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
+                              self.flat_planes[0] + \
+                              self.flat_planes[0]
+
         planes = planes.tobytes() + \
-                 self.flat_planes[us_ooo] + \
-                 self.flat_planes[us_oo] + \
-                 self.flat_planes[them_ooo] + \
-                 self.flat_planes[them_oo] + \
+                 castling_planes + \
                  self.flat_planes[stm] + \
                  rule50_plane + \
                  self.flat_planes[0] + \
