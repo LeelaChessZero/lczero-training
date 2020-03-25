@@ -1,7 +1,7 @@
 # OS Support:
 
-Ubuntu 16.04/18.04
-Windows (with more effort)
+- Ubuntu 16.04/18.04
+- Windows (with more effort)
 
 # Training
 
