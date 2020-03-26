@@ -77,6 +77,7 @@ class ChunkParser:
 
     def __init__(self,
                  chunks,
+                 expected_input_format,
                  shuffle_size=1,
                  sample=1,
                  buffer_size=1,
@@ -103,6 +104,8 @@ class ChunkParser:
         TensorFlow doesn't have a fast way to unpack bit vectors. 7950 bytes
         long.
         """
+
+        self.expected_input_format = expected_input_format
 
         # Build 2 flat float32 planes with values 0,1
         self.flat_planes = []
@@ -218,7 +221,7 @@ class ChunkParser:
             plies_left = dep_ply_count
         plies_left = struct.pack('f', plies_left)
 
-        assert input_format == 1 or input_format == 2
+        assert input_format == self.expected_input_format
 
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(

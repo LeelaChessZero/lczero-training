@@ -206,6 +206,7 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         train_parser = ChunkParser(train_chunks,
+                                   tfprocess.INPUT_MODE,
                                    shuffle_size=shuffle_size,
                                    sample=SKIP,
                                    batch_size=ChunkParser.BATCH_SIZE,
@@ -226,6 +227,7 @@ def main(cmd):
                          .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
     else:
         test_parser = ChunkParser(test_chunks,
+                                  tfprocess.INPUT_MODE,
                                   shuffle_size=shuffle_size,
                                   sample=SKIP,
                                   batch_size=ChunkParser.BATCH_SIZE,

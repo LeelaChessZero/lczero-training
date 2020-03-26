@@ -65,6 +65,9 @@ class Net:
     def set_movesleftformat(self, moves_left):
         self.pb.format.network_format.moves_left = moves_left
 
+    def set_input(self, input_format):
+        self.pb.format.network_format.input = input_format
+
     def get_weight_amounts(self):
         value_weights = 8
         policy_weights = 6

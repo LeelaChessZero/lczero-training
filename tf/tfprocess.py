@@ -88,10 +88,12 @@ class TFProcess:
         policy_head = self.cfg['model'].get('policy', 'convolution')
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
+        input_mode = self.cfg['model'].get('input_type', 'classic')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
+        self.INPUT_MODE = None
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
@@ -126,6 +128,16 @@ class TFProcess:
                 "Unknown moves left head format: {}".format(moves_left_head))
 
         self.net.set_movesleftformat(self.MOVES_LEFT_HEAD)
+
+        if input_mode == "classic":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+        elif input_mode == "frc_castling":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
+        else:
+            raise ValueError(
+                "Unknown input mode format: {}".format(input_mode))
+
+        self.net.set_input(self.INPUT_MODE)
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
