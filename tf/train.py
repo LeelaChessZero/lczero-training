@@ -158,21 +158,20 @@ def main(cmd):
     train_ratio = cfg['dataset']['train_ratio']
     experimental_parser = cfg['dataset'].get('experimental_v5_only_dataset',
                                              False)
-    num_train = int(num_chunks * train_ratio)
-    num_test = num_chunks - num_train
-    if 'input_test' in cfg['dataset']:
-        train_chunks = get_latest_chunks(cfg['dataset']['input_train'],
-                                         num_train, allow_less)
-        test_chunks = get_latest_chunks(cfg['dataset']['input_test'], num_test,
-                                        allow_less)
-    else:
-        chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks,
-                                   allow_less)
-        if allow_less:
-            num_train = int(len(chunks) * train_ratio)
-            num_test = len(chunks) - num_train
+    if 'input' in cfg['dataset']:
+        path = cfg['dataset']['input']
+        chunks = get_latest_chunks(path, num_chunks, allow_less)
+        num_train = int(len(chunks) * train_ratio)
+        num_test = len(chunks) - num_train
         train_chunks = chunks[:num_train]
         test_chunks = chunks[num_train:]
+    else:
+        train_path = cfg['dataset']['input_train']
+        test_path = cfg['dataset']['input_test']
+        num_train = int(num_chunks * train_ratio)
+        num_test = num_chunks - num_train
+        train_chunks = get_latest_chunks(train_path, num_train, allow_less)
+        test_chunks = get_latest_chunks(test_path, num_test, allow_less)
 
     shuffle_size = cfg['training']['shuffle_size']
     total_batch_size = cfg['training']['batch_size']
