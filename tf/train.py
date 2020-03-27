@@ -156,8 +156,6 @@ def main(cmd):
     num_chunks = cfg['dataset']['num_chunks']
     allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
-    experimental_parser = cfg['dataset'].get('experimental_v5_only_dataset',
-                                             False)
     num_train = int(num_chunks * train_ratio)
     num_test = num_chunks - num_train
     if 'input_test' in cfg['dataset']:
@@ -174,11 +172,8 @@ def main(cmd):
         train_chunks = chunks[:num_train]
         test_chunks = chunks[num_train:]
 
-    shuffle_size = cfg['training']['shuffle_size']
     total_batch_size = cfg['training']['batch_size']
     batch_splits = cfg['training'].get('num_batch_splits', 1)
-    train_workers = cfg['dataset'].get('train_workers', None)
-    test_workers = cfg['dataset'].get('test_workers', None)
     if total_batch_size % batch_splits != 0:
         raise ValueError('num_batch_splits must divide batch_size evenly')
     split_batch_size = total_batch_size // batch_splits
@@ -198,52 +193,54 @@ def main(cmd):
             compression_type='GZIP',
             num_parallel_reads=experimental_reads)
 
-    if experimental_parser:
-        train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat().batch(256)\
-                         .interleave(read, num_parallel_calls=2)\
-                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
-                         .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
-    else:
-        train_parser = ChunkParser(train_chunks,
-                                   tfprocess.INPUT_MODE,
-                                   shuffle_size=shuffle_size,
-                                   sample=SKIP,
-                                   batch_size=ChunkParser.BATCH_SIZE,
-                                   workers=train_workers)
-        train_dataset = tf.data.Dataset.from_generator(
-            train_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        train_dataset = train_dataset.map(ChunkParser.parse_function)
-        train_dataset = train_dataset.prefetch(4)
+    parsers = []
+    def parse(chunks, shuffle_size, workers):
+        parser = ChunkParser(chunks,
+                             tfprocess.INPUT_MODE,
+                             shuffle_size=shuffle_size,
+                             sample=SKIP,
+                             batch_size=ChunkParser.BATCH_SIZE,
+                             workers=workers)
+        parsers.append(parser)
+        result = tf.data.Dataset\
+            .from_generator(parser.parse, output_types=(tf.string,)*5)\
+            .map(ChunkParser.parse_function)\
+            .prefetch(4)
+        return result
 
-    shuffle_size = int(shuffle_size * (1.0 - train_ratio))
-    if experimental_parser:
-        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat().batch(256)\
-                         .interleave(read, num_parallel_calls=2)\
-                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
-                         .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+    def parse_experimental(chunks, shuffle_size):
+        return tf.data.Dataset\
+            .from_tensor_slices(chunks)\
+            .shuffle(len(chunks))\
+            .repeat()\
+            .batch(256)\
+            .interleave(read, num_parallel_calls=2)\
+            .batch(SKIP_MULTIPLE*SKIP)\
+            .map(semi_sample)\
+            .unbatch()\
+            .shuffle(shuffle_size)\
+            .batch(split_batch_size)\
+            .map(extract_inputs_outputs)\
+            .prefetch(4)
+
+    train_shuffle_size = cfg['training']['shuffle_size']
+    test_shuffle_size = int(train_shuffle_size * (1.0 - train_ratio))
+    if cfg['dataset'].get('experimental_v5_only_dataset', False):
+        train_dataset = parse_experimental(train_chunks, train_shuffle_size)
+        test_dataset = parse_experimental(test_chunks, test_shuffle_size)
     else:
-        test_parser = ChunkParser(test_chunks,
-                                  tfprocess.INPUT_MODE,
-                                  shuffle_size=shuffle_size,
-                                  sample=SKIP,
-                                  batch_size=ChunkParser.BATCH_SIZE,
-                                  workers=test_workers)
-        test_dataset = tf.data.Dataset.from_generator(
-            test_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        test_dataset = test_dataset.map(ChunkParser.parse_function)
-        test_dataset = test_dataset.prefetch(4)
+        train_workers = cfg['dataset'].get('train_workers', None)
+        test_workers = cfg['dataset'].get('test_workers', None)
+        train_dataset = parse(train_chunks, train_shuffle_size, train_workers)
+        test_dataset = parse(test_chunks, test_shuffle_size, test_workers)
 
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
-        valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
-        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
-                               .batch(split_batch_size, drop_remainder=True).map(extract_inputs_outputs).prefetch(4)
+        validation_chunks = get_all_chunks(cfg['dataset']['input_validation'])
+        validation_dataset = read(validation_chunks)\
+            .batch(split_batch_size, drop_remainder=True)\
+            .map(extract_inputs_outputs)\
+            .prefetch(4)
 
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 
@@ -269,9 +266,8 @@ def main(cmd):
         else:
             tfprocess.save_leelaz_weights_v2(cmd.output)
 
-    train_parser.shutdown()
-    test_parser.shutdown()
-
+    for parser in parsers:
+        parser.shutdown()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=\
@@ -283,6 +279,5 @@ if __name__ == "__main__":
                            type=str,
                            help='file to store weights in')
 
-    #mp.set_start_method('spawn')
     main(argparser.parse_args())
     mp.freeze_support()
