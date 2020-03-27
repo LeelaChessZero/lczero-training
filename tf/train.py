@@ -32,33 +32,21 @@ SKIP = 32
 SKIP_MULTIPLE = 1024
 
 
-def get_chunks(data_prefix):
-    return glob.glob(data_prefix + "*.gz")
-
-
 def get_all_chunks(path):
     chunks = []
     for d in glob.glob(path):
-        chunks += get_chunks(d)
+        chunks += glob.glob(f"{d}*.gz")
     return chunks
 
 
 def get_latest_chunks(path, num_chunks, allow_less):
     chunks = get_all_chunks(path)
     if len(chunks) < num_chunks:
-        if allow_less:
-            print("sorting {} chunks...".format(len(chunks)), end='')
-            chunks.sort(key=os.path.getmtime, reverse=True)
-            print("[done]")
-            print("{} - {}".format(os.path.basename(chunks[-1]),
-                                   os.path.basename(chunks[0])))
-            random.shuffle(chunks)
-            return chunks
-        else:
-            print("Not enough chunks {}".format(len(chunks)))
+        if not allow_less:
+            print(f"Not enough chunks {len(chunks)}")
             sys.exit(1)
 
-    print("sorting {} chunks...".format(len(chunks)), end='')
+    print(f"sorting {len(chunks)} chunks...", end='')
     chunks.sort(key=os.path.getmtime, reverse=True)
     print("[done]")
     chunks = chunks[:num_chunks]
