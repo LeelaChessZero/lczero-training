@@ -69,44 +69,51 @@ def get_latest_chunks(path, num_chunks, allow_less):
 
 
 def extract_inputs_outputs(raw):
-    # first 4 bytes in each batch entry are boring.
+    def read(pos, len, type):
+        return tf.io.decode_raw(tf.strings.substr(raw, pos, len), type)
+
+    # First 4 bytes in each batch entry are boring.
+
     # Next 4 change how we construct some of the unit planes.
-    input_format = tf.reshape(
-        tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
-        [-1, 1, 1, 1])
+    input_format = read(4, 4, tf.int32)
+    input_format = tf.reshape(input_format, [-1, 1, 1, 1])
 
     # Next 7432 are easy, policy extraction.
-    policy = tf.io.decode_raw(tf.strings.substr(raw, 8, 7432), tf.float32)
+    policy = read(8, 7432, tf.float32)
+
     # Next are 104 bit packed chess boards, they have to be expanded.
-    bit_planes = tf.expand_dims(
-        tf.reshape(
-            tf.io.decode_raw(tf.strings.substr(raw, 7440, 832), tf.uint8),
-            [-1, 104, 8]), -1)
-    bit_planes = tf.bitwise.bitwise_and(tf.tile(bit_planes, [1, 1, 1, 8]),
-                                        [128, 64, 32, 16, 8, 4, 2, 1])
-    bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
-    # Next 5 planes are 1 or 0 to indicate 8x8 of 1 or 0.
-    unit_planes = tf.expand_dims(
-        tf.expand_dims(
-            tf.io.decode_raw(tf.strings.substr(raw, 8272, 5), tf.uint8), -1),
-        -1)
+    bit_planes = read(7440, 832, tf.uint8)
+    bit_planes = tf.reshape(bit_planes, [-1, 104, 8])
+    bit_planes = tf.expand_dims(bit_planes, -1)
+    bit_planes = tf.tile(bit_planes, [1, 1, 1, 8])
+    bit_planes = tf.bitwise.bitwise_and(bit_planes, [128, 64, 32, 16, 8, 4, 2, 1])
+    bit_planes = tf.cast(bit_planes, tf.float32)
+    bit_planes = tf.minimum(bit_planes, 1.)
+
+    # Next 5 bytes are 1 or 0 to indicate 8x8 planes of 1 or 0.
+    unit_planes = read(8272, 5, tf.uint8)
+    unit_planes = tf.expand_dims(unit_planes, -1)
+    unit_planes = tf.expand_dims(unit_planes, -1)
     unit_planes = tf.tile(unit_planes, [1, 1, 8, 8])
-    # In order to do the conditional for frc we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
-    bitsplat_unit_planes = tf.bitwise.bitwise_and(
-        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
-    bitsplat_unit_planes = tf.minimum(
-        1., tf.cast(bitsplat_unit_planes, tf.float32))
+    # In order to do the conditional for FRC we need to make bit unpacked versions.
+    # Note little endian for these fields so the bitwise_and array is reversed.
+    bitsplat_unit_planes = tf.bitwise.bitwise_and(unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
+    bitsplat_unit_planes = tf.cast(bitsplat_unit_planes, tf.float32)
+    bitsplat_unit_planes = tf.minimum(bitsplat_unit_planes, 1.)
     unit_planes = tf.cast(unit_planes, tf.float32)
-    # rule50 count plane.
-    rule50_plane = tf.expand_dims(
-        tf.expand_dims(
-            tf.io.decode_raw(tf.strings.substr(raw, 8277, 1), tf.uint8), -1),
-        -1)
-    rule50_plane = tf.cast(tf.tile(rule50_plane, [1, 1, 8, 8]), tf.float32)
+
+    # Fifty-move rule count plane.
+    rule50_plane = read(8277, 1, tf.uint8)
+    rule50_plane = tf.expand_dims(rule50_plane, -1)
+    rule50_plane = tf.expand_dims(rule50_plane, -1)
+    rule50_plane = tf.tile(rule50_plane, [1, 1, 8, 8])
+    rule50_plane = tf.cast(rule50_plane, tf.float32)
     rule50_plane = tf.divide(rule50_plane, 99.)
-    # zero plane and one plane
+
+    # Zero plane and one plane.
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
+
     # For FRC unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then 4.
     queenside = tf.concat([
         bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
@@ -116,31 +123,29 @@ def extract_inputs_outputs(raw):
         bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
         bitsplat_unit_planes[:, 3:4, :1]
     ], 2)
-    unit_planes = tf.where(
-        input_format == 2,
-        tf.concat(
-            [queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]],
-            1), unit_planes)
-    inputs = tf.reshape(
-        tf.concat(
-            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
-        [-1, 112, 64])
 
-    # winner is stored in one signed byte and needs to be converted to one hot.
-    winner = tf.cast(
-        tf.io.decode_raw(tf.strings.substr(raw, 8279, 1), tf.int8), tf.float32)
+    unit_planes_2 = tf.concat([queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]], 1)
+    unit_planes = tf.where(input_format == 2, unit_planes_2, unit_planes)
+
+    inputs = tf.concat([bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1)
+    inputs = tf.reshape(inputs, [-1, 112, 64])
+
+    # Winner is stored in one signed byte and needs to be converted to one hot.
+    winner = read(8279, 1, tf.int8)
+    winner = tf.cast(winner, tf.float32)
     winner = tf.tile(winner, [1, 3])
-    z = tf.cast(tf.equal(winner, [1., 0., -1.]), tf.float32)
+    winner = tf.equal(winner, [1., 0., -1.])
+    z = tf.cast(winner, tf.float32)
 
     # Outcome distribution needs to be calculated from q and d.
-    best_q = tf.io.decode_raw(tf.strings.substr(raw, 8284, 4), tf.float32)
-    best_d = tf.io.decode_raw(tf.strings.substr(raw, 8292, 4), tf.float32)
+    best_q = read(8284, 4, tf.float32)
+    best_d = read(8292, 4, tf.float32)
     best_q_w = 0.5 * (1.0 - best_d + best_q)
     best_q_l = 0.5 * (1.0 - best_d - best_q)
 
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
 
-    ply_count = tf.io.decode_raw(tf.strings.substr(raw, 8304, 4), tf.float32)
+    ply_count = read(8304, 4, tf.float32)
 
     return (inputs, policy, z, q, ply_count)
 
