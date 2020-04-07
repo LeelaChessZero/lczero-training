@@ -68,13 +68,7 @@ def get_latest_chunks(path, num_chunks, allow_less):
     return chunks
 
 
-def extract_inputs_outputs(raw):
-    # first 4 bytes in each batch entry are boring.
-    # Next 4 change how we construct some of the unit planes.
-    input_format = tf.reshape(
-        tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
-        [-1, 1, 1, 1])
-
+def extract_policy_bits(raw):
     # Next 7432 are easy, policy extraction.
     policy = tf.io.decode_raw(tf.strings.substr(raw, 8, 7432), tf.float32)
     # Next are 104 bit packed chess boards, they have to be expanded.
@@ -85,18 +79,20 @@ def extract_inputs_outputs(raw):
     bit_planes = tf.bitwise.bitwise_and(tf.tile(bit_planes, [1, 1, 1, 8]),
                                         [128, 64, 32, 16, 8, 4, 2, 1])
     bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
-    # Next 5 planes are 1 or 0 to indicate 8x8 of 1 or 0.
+    return policy, bit_planes
+
+
+def extract_byte_planes(raw):
+    # 5 bytes in input are expanded and tiled
     unit_planes = tf.expand_dims(
         tf.expand_dims(
             tf.io.decode_raw(tf.strings.substr(raw, 8272, 5), tf.uint8), -1),
         -1)
     unit_planes = tf.tile(unit_planes, [1, 1, 8, 8])
-    # In order to do the conditional for frc we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
-    bitsplat_unit_planes = tf.bitwise.bitwise_and(
-        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
-    bitsplat_unit_planes = tf.minimum(
-        1., tf.cast(bitsplat_unit_planes, tf.float32))
-    unit_planes = tf.cast(unit_planes, tf.float32)
+    return unit_planes
+
+
+def extract_rule50_zero_one(raw):
     # rule50 count plane.
     rule50_plane = tf.expand_dims(
         tf.expand_dims(
@@ -107,25 +103,10 @@ def extract_inputs_outputs(raw):
     # zero plane and one plane
     zero_plane = tf.zeros_like(rule50_plane)
     one_plane = tf.ones_like(rule50_plane)
-    # For FRC unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then 4.
-    queenside = tf.concat([
-        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 2:3, :1]
-    ], 2)
-    kingside = tf.concat([
-        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 3:4, :1]
-    ], 2)
-    unit_planes = tf.where(
-        input_format == 2,
-        tf.concat(
-            [queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]],
-            1), unit_planes)
-    inputs = tf.reshape(
-        tf.concat(
-            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
-        [-1, 112, 64])
+    return rule50_plane, zero_plane, one_plane
 
+
+def extract_outputs(raw):
     # winner is stored in one signed byte and needs to be converted to one hot.
     winner = tf.cast(
         tf.io.decode_raw(tf.strings.substr(raw, 8279, 1), tf.int8), tf.float32)
@@ -141,8 +122,130 @@ def extract_inputs_outputs(raw):
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
 
     ply_count = tf.io.decode_raw(tf.strings.substr(raw, 8304, 4), tf.float32)
+    return z, q, ply_count
+
+
+def extract_inputs_outputs_if1(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit planes.
+    #input_format = tf.reshape(
+    #    tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+    #    [-1, 1, 1, 1])
+    # tf.debugging.assert_equal(input_format, tf.ones_like(input_format))
+
+    policy, bit_planes = extract_policy_bits(raw)
+
+    # Next 5 are castling + stm, all of which simply copy the byte value to all squares.
+    unit_planes = tf.cast(extract_byte_planes(raw), tf.float32)
+
+    rule50_plane, zero_plane, one_plane = extract_rule50_zero_one(raw)
+
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
+        [-1, 112, 64])
+
+    z, q, ply_count = extract_outputs(raw)
 
     return (inputs, policy, z, q, ply_count)
+
+
+def extract_inputs_outputs_if2(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit planes.
+    #input_format = tf.reshape(
+    #    tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+    #    [-1, 1, 1, 1])
+    # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 2))
+
+    policy, bit_planes = extract_policy_bits(raw)
+
+    # Next 5 inputs are 4 frc castling and 1 stm.
+    unit_planes = extract_byte_planes(raw)
+    # In order to do frc we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
+    # Although we only need bit unpacked for first 4 of 5 planes, its simpler just to create them all.
+    bitsplat_unit_planes = tf.bitwise.bitwise_and(
+        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
+    bitsplat_unit_planes = tf.minimum(
+        1., tf.cast(bitsplat_unit_planes, tf.float32))
+    unit_planes = tf.cast(unit_planes, tf.float32)
+
+    rule50_plane, zero_plane, one_plane = extract_rule50_zero_one(raw)
+
+    # For FRC the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then original 4.
+    queenside = tf.concat([
+        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 2:3, :1]
+    ], 2)
+    kingside = tf.concat([
+        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 3:4, :1]
+    ], 2)
+    unit_planes = tf.concat(
+        [queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]], 1)
+
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
+        [-1, 112, 64])
+
+    z, q, ply_count = extract_outputs(raw)
+
+    return (inputs, policy, z, q, ply_count)
+
+
+def extract_inputs_outputs_if3(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit planes.
+    #input_format = tf.reshape(
+    #    tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+    #    [-1, 1, 1, 1])
+    # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 3))
+
+    policy, bit_planes = extract_policy_bits(raw)
+
+    # Next 5 inputs are 4 castling and 1 enpassant.
+    unit_planes = extract_byte_planes(raw)
+    # In order to do the frc castling and if3 enpassant plane we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
+    bitsplat_unit_planes = tf.bitwise.bitwise_and(
+        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
+    bitsplat_unit_planes = tf.minimum(
+        1., tf.cast(bitsplat_unit_planes, tf.float32))
+
+    rule50_plane, zero_plane, one_plane = extract_rule50_zero_one(raw)
+
+    # For input format 3 the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then en-passant.
+    queenside = tf.concat([
+        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 2:3, :1]
+    ], 2)
+    kingside = tf.concat([
+        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 3:4, :1]
+    ], 2)
+    enpassant = tf.concat(
+        [zero_plane[:, :, :7], bitsplat_unit_planes[:, 4:, :1]], 2)
+    unit_planes = tf.concat(
+        [queenside, kingside, zero_plane, zero_plane, enpassant], 1)
+
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
+        [-1, 112, 64])
+
+    z, q, ply_count = extract_outputs(raw)
+
+    return (inputs, policy, z, q, ply_count)
+
+
+def select_extractor(mode):
+    if mode == 1:
+        return extract_inputs_outputs_if1
+    if mode == 2:
+        return extract_inputs_outputs_if2
+    if mode == 3:
+        return extract_inputs_outputs_if3
+    assert (false)
 
 
 def semi_sample(x):
@@ -190,6 +293,7 @@ def main(cmd):
         os.makedirs(root_dir)
     tfprocess = TFProcess(cfg)
     experimental_reads = max(2, mp.cpu_count() - 2) // 2
+    extractor = select_extractor(tfprocess.INPUT_MODE)
 
     def read(x):
         return tf.data.FixedLengthRecordDataset(
@@ -203,7 +307,7 @@ def main(cmd):
                          .interleave(read, num_parallel_calls=2)\
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+                         .batch(split_batch_size).map(extractor).prefetch(4)
     else:
         train_parser = ChunkParser(train_chunks,
                                    tfprocess.INPUT_MODE,
@@ -224,7 +328,7 @@ def main(cmd):
                          .interleave(read, num_parallel_calls=2)\
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+                         .batch(split_batch_size).map(extractor).prefetch(4)
     else:
         test_parser = ChunkParser(test_chunks,
                                   tfprocess.INPUT_MODE,
@@ -243,7 +347,7 @@ def main(cmd):
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
         validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
-                               .batch(split_batch_size, drop_remainder=True).map(extract_inputs_outputs).prefetch(4)
+                               .batch(split_batch_size, drop_remainder=True).map(extractor).prefetch(4)
 
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 

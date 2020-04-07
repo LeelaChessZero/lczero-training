@@ -188,6 +188,10 @@ class ChunkParser:
 
         return (planes, probs, winner, q, plies_left)
 
+    def reverse_expand_bits(plane):
+        return np.unpackbits(np.array(
+            [plane], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
+
     def convert_v5_to_tuple(self, content):
         """
         Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
@@ -228,35 +232,40 @@ class ChunkParser:
             np.float32)
         rule50_plane = struct.pack('f', rule50_count / 99.0) * 64
 
-        # Concatenate all byteplanes. Make the last plane all 1's so the NN can
-        # detect edges of the board more easily
         if input_format == 1:
-            castling_planes = self.flat_planes[us_ooo] + \
-                              self.flat_planes[us_oo] + \
-                              self.flat_planes[them_ooo] + \
-                              self.flat_planes[them_oo]
+            middle_planes = self.flat_planes[us_ooo] + \
+                            self.flat_planes[us_oo] + \
+                            self.flat_planes[them_ooo] + \
+                            self.flat_planes[them_oo] + \
+                            self.flat_planes[stm]
         elif input_format == 2:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
-            them_ooo_bytes = np.unpackbits(np.array(
-                [them_ooo],
-                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            us_ooo_bytes = np.unpackbits(np.array(
-                [us_ooo],
-                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            them_oo_bytes = np.unpackbits(np.array(
-                [them_oo],
-                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            us_oo_bytes = np.unpackbits(np.array(
-                [us_oo],
-                dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
-            castling_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
-                              us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
-                              self.flat_planes[0] + \
-                              self.flat_planes[0]
+            them_ooo_bytes = reverse_expand_bits(them_ooo)
+            us_ooo_bytes = reverse_expand_bits(us_ooo)
+            them_oo_bytes = reverse_expand_bits(them_oo)
+            us_oo_bytes = reverse_expand_bits(us_oo)
+            middle_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
+                            us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[stm]
+        elif input_format == 3:
+            # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
+            them_ooo_bytes = reverse_expand_bits(them_ooo)
+            us_ooo_bytes = reverse_expand_bits(us_ooo)
+            them_oo_bytes = reverse_expand_bits(them_oo)
+            us_oo_bytes = reverse_expand_bits(us_oo)
+            enpassant_bytes = reverse_expand_bits(stm)
+            middle_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
+                            us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[0] + \
+                            (7*8*4) * b'\x00' + enpassant_bytes
 
+        # Concatenate all byteplanes. Make the last plane all 1's so the NN can
+        # detect edges of the board more easily
         planes = planes.tobytes() + \
-                 castling_planes + \
-                 self.flat_planes[stm] + \
+                 middle_planes + \
                  rule50_plane + \
                  self.flat_planes[0] + \
                  self.flat_planes[1]
