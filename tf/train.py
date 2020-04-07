@@ -148,7 +148,7 @@ def extract_inputs_outputs_if1(raw):
     return (inputs, policy, z, q, ply_count)
 
 
-def extract_inputs_output_if2(raw):
+def extract_inputs_outputs_if2(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
     #input_format = tf.reshape(
@@ -192,7 +192,7 @@ def extract_inputs_output_if2(raw):
     return (inputs, policy, z, q, ply_count)
 
 
-def extract_inputs_output_if3(raw):
+def extract_inputs_outputs_if3(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
     #input_format = tf.reshape(
