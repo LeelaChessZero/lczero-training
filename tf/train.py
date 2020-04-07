@@ -120,7 +120,7 @@ def extract_outputs(raw):
     q = tf.concat([best_q_w, best_d, best_q_l], 1)
 
     ply_count = tf.io.decode_raw(tf.strings.substr(raw, 8304, 4), tf.float32)
-    return policy, z, q, ply_count
+    return z, q, ply_count
 
 
 def extract_inputs_outputs_if1(raw):
@@ -143,7 +143,7 @@ def extract_inputs_outputs_if1(raw):
             [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
         [-1, 112, 64])
 
-    policy, z, q, ply_count = extract_outputs(raw)
+    z, q, ply_count = extract_outputs(raw)
 
     return (inputs, policy, z, q, ply_count)
 
@@ -187,7 +187,7 @@ def extract_inputs_output_if2(raw):
             [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
         [-1, 112, 64])
 
-    policy, z, q, ply_count = extract_outputs(raw)
+    z, q, ply_count = extract_outputs(raw)
 
     return (inputs, policy, z, q, ply_count)
 
@@ -231,7 +231,7 @@ def extract_inputs_output_if3(raw):
             [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
         [-1, 112, 64])
 
-    policy, z, q, ply_count = extract_outputs(raw)
+    z, q, ply_count = extract_outputs(raw)
 
     return (inputs, policy, z, q, ply_count)
 
