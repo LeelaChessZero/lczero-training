@@ -131,7 +131,7 @@ def extract_inputs_outputs_if1(raw):
     #    [-1, 1, 1, 1])
     # tf.debugging.assert_equal(input_format, tf.ones_like(input_format))
 
-    policy, bit_planes = extra_policy_bits(raw)
+    policy, bit_planes = extract_policy_bits(raw)
 
     # Next 5 are castling + stm, all of which simply copy the byte value to all squares.
     unit_planes = tf.cast(extract_byte_planes(raw), tf.float32)
@@ -156,7 +156,7 @@ def extract_inputs_output_if2(raw):
     #    [-1, 1, 1, 1])
     # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 2))
 
-    policy, bit_planes = extra_policy_bits(raw)
+    policy, bit_planes = extract_policy_bits(raw)
 
     # Next 5 inputs are 4 frc castling and 1 stm.
     unit_planes = extract_byte_planes(raw)
@@ -200,7 +200,7 @@ def extract_inputs_output_if3(raw):
     #    [-1, 1, 1, 1])
     # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 3))
 
-    policy, bit_planes = extra_policy_bits(raw)
+    policy, bit_planes = extract_policy_bits(raw)
 
     # Next 5 inputs are 4 castling and 1 enpassant.
     unit_planes = extract_byte_planes(raw)
