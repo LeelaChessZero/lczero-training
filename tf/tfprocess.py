@@ -133,6 +133,8 @@ class TFProcess:
             self.INPUT_MODE = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
         elif input_mode == "frc_castling":
             self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
+        elif input_mode == "cannonical":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
         else:
             raise ValueError(
                 "Unknown input mode format: {}".format(input_mode))
