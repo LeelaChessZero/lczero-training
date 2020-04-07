@@ -234,10 +234,10 @@ class ChunkParser:
 
         if input_format == 1:
             middle_planes = self.flat_planes[us_ooo] + \
-                              self.flat_planes[us_oo] + \
-                              self.flat_planes[them_ooo] + \
-                              self.flat_planes[them_oo] + \
-                              self.flat_planes[stm]
+                            self.flat_planes[us_oo] + \
+                            self.flat_planes[them_ooo] + \
+                            self.flat_planes[them_oo] + \
+                            self.flat_planes[stm]
         elif input_format == 2:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
@@ -245,10 +245,10 @@ class ChunkParser:
             them_oo_bytes = reverse_expand_bits(them_oo)
             us_oo_bytes = reverse_expand_bits(us_oo)
             middle_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
-                              us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
-                              self.flat_planes[0] + \
-                              self.flat_planes[0] + \
-                              self.flat_planes[stm]
+                            us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[stm]
         elif input_format == 3:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
@@ -257,10 +257,10 @@ class ChunkParser:
             us_oo_bytes = reverse_expand_bits(us_oo)
             enpassant_bytes = reverse_expand_bits(stm)
             middle_planes = us_ooo_bytes + (6*8*4) * b'\x00' + them_ooo_bytes + \
-                              us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
-                              self.flat_planes[0] + \
-                              self.flat_planes[0] + \
-                              (7*8*4) * b'\x00' + enpassant_bytes
+                            us_oo_bytes + (6*8*4) * b'\x00' + them_oo_bytes + \
+                            self.flat_planes[0] + \
+                            self.flat_planes[0] + \
+                            (7*8*4) * b'\x00' + enpassant_bytes
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
