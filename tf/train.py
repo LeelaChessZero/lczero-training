@@ -81,6 +81,7 @@ def extract_policy_bits(raw):
     bit_planes = tf.minimum(1., tf.cast(bit_planes, tf.float32))
     return policy, bit_planes
 
+
 def extract_byte_planes(raw):
     # 5 bytes in input are expanded and tiled
     unit_planes = tf.expand_dims(
@@ -89,6 +90,7 @@ def extract_byte_planes(raw):
         -1)
     unit_planes = tf.tile(unit_planes, [1, 1, 8, 8])
     return unit_planes
+
 
 def extract_rule50_zero_one(raw):
     # rule50 count plane.
@@ -243,7 +245,7 @@ def select_extractor(mode):
         return extract_inputs_outputs_if2
     if mode == 3:
         return extract_inputs_outputs_if3
-    assert(false)
+    assert (false)
 
 
 def semi_sample(x):
