@@ -80,13 +80,13 @@ class ChunkParser:
                  expected_input_format,
                  shuffle_size=1,
                  sample=1,
-                 buffer_size=1,
                  batch_size=256,
                  workers=None):
         """
         Read data and yield batches of raw tensors.
 
         'chunks' list of chunk filenames.
+        'expected_input_format' is an int, one of [1, 2, 3]. Determines the middle planes in convert_v5_to_tuple
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
         'workers' is the number of child workers to use.
@@ -99,7 +99,7 @@ class ChunkParser:
         chunkdata: type Bytes. Multiple records of v5 format where each record
         consists of (state, policy, result, q)
 
-        raw: A byte string holding raw tensors contenated together. This is
+        raw: A byte string holding raw tensors concatenated together. This is
         used to pass data from the workers to the parent. Exists because
         TensorFlow doesn't have a fast way to unpack bit vectors. 7950 bytes
         long.
