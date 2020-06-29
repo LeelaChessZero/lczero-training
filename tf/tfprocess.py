@@ -135,6 +135,10 @@ class TFProcess:
             self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
         elif input_mode == "canonical":
             self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
+        elif input_mode == "canonical_100":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
+        elif input_mode == "canonical_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
         else:
             raise ValueError(
                 "Unknown input mode format: {}".format(input_mode))
@@ -410,7 +414,7 @@ class TFProcess:
 
             if weight.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
-                if weight.name == 'input/conv2d/kernel:0':
+                if weight.name == 'input/conv2d/kernel:0' and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
                     num_inputs = 112
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109

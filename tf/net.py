@@ -9,6 +9,7 @@ import proto.net_pb2 as pb
 LC0_MAJOR = 0
 LC0_MINOR = 21
 LC0_MINOR_WITH_INPUT_TYPE_3 = 25
+LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -68,8 +69,10 @@ class Net:
 
     def set_input(self, input_format):
         self.pb.format.network_format.input = input_format
+        if input_format >= pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+            self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_4
         # Input type 2 was available before 3, but it was buggy, so also limit it to same version as 3.
-        if input_format != pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE:
+        elif input_format != pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE:
             self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_3
 
     def get_weight_amounts(self):
@@ -468,7 +471,7 @@ class Net:
                     weights = np.square(weights) - 1e-5
                     name = name.replace('stddev', 'variance')
 
-            if name == 'input/conv2d/kernel:0':
+            if name == 'input/conv2d/kernel:0' and self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
                 # 50 move rule is the 110th input, or 109 starting from 0.
                 weights[:, 109, :, :] /= 99
 
