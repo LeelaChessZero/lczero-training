@@ -120,6 +120,15 @@ def extract_rule50_100_zero_one(raw):
     return rule50_plane, zero_plane, one_plane
 
 
+def extract_invariance(raw):
+    # invariance plane.
+    invariance_plane = tf.expand_dims(
+        tf.expand_dims(
+            tf.io.decode_raw(tf.strings.substr(raw, 8278, 1), tf.uint8), -1),
+        -1)
+    return tf.cast(tf.tile(invariance_plane, [1, 1, 8, 8]), tf.float32)
+
+
 def extract_outputs(raw):
     # winner is stored in one signed byte and needs to be converted to one hot.
     winner = tf.cast(
@@ -306,9 +315,9 @@ def extract_inputs_outputs_if132(raw):
 
     rule50_plane, zero_plane, one_plane = extract_rule50_100_zero_one(raw)
 
-    armageddon_stm = make_armageddon_stm(unit_planes[:, 4:])
-
     unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, zero_plane)
+
+    armageddon_stm = make_armageddon_stm(extract_invariance(raw))
 
     inputs = tf.reshape(
         tf.concat(
