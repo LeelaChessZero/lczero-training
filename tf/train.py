@@ -106,6 +106,29 @@ def extract_rule50_zero_one(raw):
     return rule50_plane, zero_plane, one_plane
 
 
+def extract_rule50_100_zero_one(raw):
+    # rule50 count plane.
+    rule50_plane = tf.expand_dims(
+        tf.expand_dims(
+            tf.io.decode_raw(tf.strings.substr(raw, 8277, 1), tf.uint8), -1),
+        -1)
+    rule50_plane = tf.cast(tf.tile(rule50_plane, [1, 1, 8, 8]), tf.float32)
+    rule50_plane = tf.divide(rule50_plane, 100.)
+    # zero plane and one plane
+    zero_plane = tf.zeros_like(rule50_plane)
+    one_plane = tf.ones_like(rule50_plane)
+    return rule50_plane, zero_plane, one_plane
+
+
+def extract_invariance(raw):
+    # invariance plane.
+    invariance_plane = tf.expand_dims(
+        tf.expand_dims(
+            tf.io.decode_raw(tf.strings.substr(raw, 8278, 1), tf.uint8), -1),
+        -1)
+    return tf.cast(tf.tile(invariance_plane, [1, 1, 8, 8]), tf.float32)
+
+
 def extract_outputs(raw):
     # winner is stored in one signed byte and needs to be converted to one hot.
     winner = tf.cast(
@@ -150,6 +173,28 @@ def extract_inputs_outputs_if1(raw):
     return (inputs, policy, z, q, ply_count)
 
 
+def extract_unit_planes_with_bitsplat(raw):
+    unit_planes = extract_byte_planes(raw)
+    bitsplat_unit_planes = tf.bitwise.bitwise_and(
+        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
+    bitsplat_unit_planes = tf.minimum(
+        1., tf.cast(bitsplat_unit_planes, tf.float32))
+    unit_planes = tf.cast(unit_planes, tf.float32)
+    return unit_planes, bitsplat_unit_planes
+
+
+def make_frc_castling(bitsplat_unit_planes, zero_plane):
+    queenside = tf.concat([
+        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 2:3, :1]
+    ], 2)
+    kingside = tf.concat([
+        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
+        bitsplat_unit_planes[:, 3:4, :1]
+    ], 2)
+    return queenside, kingside
+
+
 def extract_inputs_outputs_if2(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
@@ -161,26 +206,14 @@ def extract_inputs_outputs_if2(raw):
     policy, bit_planes = extract_policy_bits(raw)
 
     # Next 5 inputs are 4 frc castling and 1 stm.
-    unit_planes = extract_byte_planes(raw)
     # In order to do frc we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
     # Although we only need bit unpacked for first 4 of 5 planes, its simpler just to create them all.
-    bitsplat_unit_planes = tf.bitwise.bitwise_and(
-        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
-    bitsplat_unit_planes = tf.minimum(
-        1., tf.cast(bitsplat_unit_planes, tf.float32))
-    unit_planes = tf.cast(unit_planes, tf.float32)
+    unit_planes, bitsplat_unit_planes = extract_unit_planes_with_bitsplat(raw)
 
     rule50_plane, zero_plane, one_plane = extract_rule50_zero_one(raw)
 
     # For FRC the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then original 4.
-    queenside = tf.concat([
-        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 2:3, :1]
-    ], 2)
-    kingside = tf.concat([
-        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 3:4, :1]
-    ], 2)
+    queenside, kingside = make_frc_castling(bitsplat_unit_planes, zero_plane)
     unit_planes = tf.concat(
         [queenside, kingside, zero_plane, zero_plane, unit_planes[:, 4:]], 1)
 
@@ -194,6 +227,16 @@ def extract_inputs_outputs_if2(raw):
     return (inputs, policy, z, q, ply_count)
 
 
+def make_canonical_unit_planes(bitsplat_unit_planes, zero_plane):
+    # For canonical the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then en-passant.
+    queenside, kingside = make_frc_castling(bitsplat_unit_planes, zero_plane)
+    enpassant = tf.concat(
+        [zero_plane[:, :, :7], bitsplat_unit_planes[:, 4:, :1]], 2)
+    unit_planes = tf.concat(
+        [queenside, kingside, zero_plane, zero_plane, enpassant], 1)
+    return unit_planes
+
+
 def extract_inputs_outputs_if3(raw):
     # first 4 bytes in each batch entry are boring.
     # Next 4 change how we construct some of the unit planes.
@@ -205,33 +248,81 @@ def extract_inputs_outputs_if3(raw):
     policy, bit_planes = extract_policy_bits(raw)
 
     # Next 5 inputs are 4 castling and 1 enpassant.
-    unit_planes = extract_byte_planes(raw)
     # In order to do the frc castling and if3 enpassant plane we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
-    bitsplat_unit_planes = tf.bitwise.bitwise_and(
-        unit_planes, [1, 2, 4, 8, 16, 32, 64, 128])
-    bitsplat_unit_planes = tf.minimum(
-        1., tf.cast(bitsplat_unit_planes, tf.float32))
+    unit_planes, bitsplat_unit_planes = extract_unit_planes_with_bitsplat(raw)
 
     rule50_plane, zero_plane, one_plane = extract_rule50_zero_one(raw)
 
-    # For input format 3 the old unit planes must be replaced with 0 and 2 merged, 1 and 3 merged, two zero planes and then en-passant.
-    queenside = tf.concat([
-        bitsplat_unit_planes[:, :1, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 2:3, :1]
-    ], 2)
-    kingside = tf.concat([
-        bitsplat_unit_planes[:, 1:2, :1], zero_plane[:, :, :6],
-        bitsplat_unit_planes[:, 3:4, :1]
-    ], 2)
-    enpassant = tf.concat(
-        [zero_plane[:, :, :7], bitsplat_unit_planes[:, 4:, :1]], 2)
-    unit_planes = tf.concat(
-        [queenside, kingside, zero_plane, zero_plane, enpassant], 1)
+    unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, zero_plane)
 
     inputs = tf.reshape(
         tf.concat(
             [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
         [-1, 112, 64])
+
+    z, q, ply_count = extract_outputs(raw)
+
+    return (inputs, policy, z, q, ply_count)
+
+
+def extract_inputs_outputs_if4(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit planes.
+    #input_format = tf.reshape(
+    #    tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+    #    [-1, 1, 1, 1])
+    # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 3))
+
+    policy, bit_planes = extract_policy_bits(raw)
+
+    # Next 5 inputs are 4 castling and 1 enpassant.
+    # In order to do the frc castling and if3 enpassant plane we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
+    unit_planes, bitsplat_unit_planes = extract_unit_planes_with_bitsplat(raw)
+
+    rule50_plane, zero_plane, one_plane = extract_rule50_100_zero_one(raw)
+
+    unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, zero_plane)
+
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, zero_plane, one_plane], 1),
+        [-1, 112, 64])
+
+    z, q, ply_count = extract_outputs(raw)
+
+    return (inputs, policy, z, q, ply_count)
+
+
+def make_armageddon_stm(invariance_plane):
+    # invariance_plane contains values of 128 or higher if its black side to move, 127 or lower otherwise.
+    # Convert this to 0,1 by subtracting off 127 and then clipping.
+    return tf.clip_by_value(invariance_plane - 127., 0., 1.)
+
+
+def extract_inputs_outputs_if132(raw):
+    # first 4 bytes in each batch entry are boring.
+    # Next 4 change how we construct some of the unit planes.
+    #input_format = tf.reshape(
+    #    tf.io.decode_raw(tf.strings.substr(raw, 4, 4), tf.int32),
+    #    [-1, 1, 1, 1])
+    # tf.debugging.assert_equal(input_format, tf.multiply(tf.ones_like(input_format), 3))
+
+    policy, bit_planes = extract_policy_bits(raw)
+
+    # Next 5 inputs are 4 castling and 1 enpassant.
+    # In order to do the frc castling and if3 enpassant plane we need to make bit unpacked versions.  Note little endian for these fields so the bitwise_and array is reversed.
+    unit_planes, bitsplat_unit_planes = extract_unit_planes_with_bitsplat(raw)
+
+    rule50_plane, zero_plane, one_plane = extract_rule50_100_zero_one(raw)
+
+    unit_planes = make_canonical_unit_planes(bitsplat_unit_planes, zero_plane)
+
+    armageddon_stm = make_armageddon_stm(extract_invariance(raw))
+
+    inputs = tf.reshape(
+        tf.concat(
+            [bit_planes, unit_planes, rule50_plane, armageddon_stm, one_plane],
+            1), [-1, 112, 64])
 
     z, q, ply_count = extract_outputs(raw)
 
@@ -245,6 +336,10 @@ def select_extractor(mode):
         return extract_inputs_outputs_if2
     if mode == 3:
         return extract_inputs_outputs_if3
+    if mode == 4:
+        return extract_inputs_outputs_if4
+    if mode == 132:
+        return extract_inputs_outputs_if132
     assert (false)
 
 

@@ -230,7 +230,10 @@ class ChunkParser:
         # Unpack bit planes and cast to 32 bit float
         planes = np.unpackbits(np.frombuffer(planes, dtype=np.uint8)).astype(
             np.float32)
-        rule50_plane = struct.pack('f', rule50_count / 99.0) * 64
+        rule50_divisor = 99.0
+        if input_format > 3:
+            rule50_divisor = 100.0
+        rule50_plane = struct.pack('f', rule50_count / rule50_divisor) * 64
 
         if input_format == 1:
             middle_planes = self.flat_planes[us_ooo] + \
@@ -249,7 +252,7 @@ class ChunkParser:
                             self.flat_planes[0] + \
                             self.flat_planes[0] + \
                             self.flat_planes[stm]
-        elif input_format == 3:
+        elif input_format == 3 or input_format == 4 or input_format == 132:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
             us_ooo_bytes = reverse_expand_bits(us_ooo)
@@ -264,10 +267,13 @@ class ChunkParser:
 
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
+        aux_plus_6_plane = self.flat_planes[0]
+        if input_format == 132 and dep_ply_count >= 128:
+            aux_plus_6_plane = self.flat_planes[1]
         planes = planes.tobytes() + \
                  middle_planes + \
                  rule50_plane + \
-                 self.flat_planes[0] + \
+                 aux_plus_6_plane + \
                  self.flat_planes[1]
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
