@@ -858,6 +858,8 @@ class TFProcess:
             tf.summary.scalar("Policy Accuracy",
                               sum_policy_accuracy,
                               step=steps)
+            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
+            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
             if self.wdl:
                 tf.summary.scalar("Value Accuracy",
                                   sum_value_accuracy,
