@@ -311,15 +311,10 @@ class TFProcess:
             def moves_left_loss(target, output):
                 # Scale the loss to similar range as other losses.
                 scale = 20.0
-                # Bigger loss for low amount of moves left.
-                # We care more about the accuracy of the prediction
-                # when close to the end of the game.
-                importance = tf.square(30.0 / (target + 30.0))
-                importance = importance / tf.reduce_mean(importance)
                 target = target / scale
                 output = tf.cast(output, tf.float32) / scale
                 huber = tf.keras.losses.Huber(10.0 / scale)
-                return tf.reduce_mean(importance * huber(target, output))
+                return tf.reduce_mean(huber(target, output))
         else:
             moves_left_loss = None
 
