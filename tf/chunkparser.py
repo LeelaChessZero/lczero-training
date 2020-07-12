@@ -38,8 +38,8 @@ V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
 
 def reverse_expand_bits(plane):
-    return np.unpackbits(np.array(
-        [plane], dtype=np.uint8))[::-1].astype(np.float32).tobytes()
+    return np.unpackbits(np.array([plane], dtype=np.uint8))[::-1].astype(
+        np.float32).tobytes()
 
 
 # Interface for a chunk data source.
