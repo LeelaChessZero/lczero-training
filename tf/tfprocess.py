@@ -242,6 +242,29 @@ class TFProcess:
 
         self.moves_left_mean_error = moves_left_mean_error_fn
 
+        def policy_entropy(target, output):
+            target, output = correct_policy(target, output)
+            softmaxed = tf.nn.softmax(output)
+            return tf.math.negative(
+                tf.reduce_mean(
+                    tf.reduce_sum(tf.math.xlogy(softmaxed, softmaxed),
+                                  axis=1)))
+
+        self.policy_entropy_fn = policy_entropy
+
+        def policy_uniform_loss(target, output):
+            uniform = tf.where(tf.greater_equal(target, 0),
+                               tf.ones_like(target), tf.zeros_like(target))
+            balanced_uniform = uniform / tf.reduce_sum(
+                uniform, axis=1, keepdims=True)
+            target, output = correct_policy(target, output)
+            policy_cross_entropy = \
+                tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(balanced_uniform),
+                                                        logits=output)
+            return tf.reduce_mean(input_tensor=policy_cross_entropy)
+
+        self.policy_uniform_loss_fn = policy_uniform_loss
+
         q_ratio = self.cfg['training'].get('q_ratio', 0)
         assert 0 <= q_ratio <= 1
 
@@ -288,15 +311,10 @@ class TFProcess:
             def moves_left_loss(target, output):
                 # Scale the loss to similar range as other losses.
                 scale = 20.0
-                # Bigger loss for low amount of moves left.
-                # We care more about the accuracy of the prediction
-                # when close to the end of the game.
-                importance = tf.square(30.0 / (target + 30.0))
-                importance = importance / tf.reduce_mean(importance)
                 target = target / scale
                 output = tf.cast(output, tf.float32) / scale
                 huber = tf.keras.losses.Huber(10.0 / scale)
-                return tf.reduce_mean(importance * huber(target, output))
+                return tf.reduce_mean(huber(target, output))
         else:
             moves_left_loss = None
 
@@ -687,6 +705,8 @@ class TFProcess:
         value = outputs[1]
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.policy_accuracy_fn(y, policy)
+        policy_entropy = self.policy_entropy_fn(y, policy)
+        policy_ul = self.policy_uniform_loss_fn(y, policy)
         if self.wdl:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
@@ -703,7 +723,7 @@ class TFProcess:
             moves_left_loss = tf.constant(0.)
             moves_left_mean_error = tf.constant(0.)
 
-        return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error
+        return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
 
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = 0
@@ -713,11 +733,15 @@ class TFProcess:
         sum_mse = 0
         sum_policy = 0
         sum_value = 0
+        sum_policy_entropy = 0
+        sum_policy_ul = 0
         for _ in range(0, test_batches):
             x, y, z, q, m = next(self.test_iter)
-            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error = self.calculate_test_summaries_inner_loop(
+            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
                 x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
+            sum_policy_entropy += policy_entropy
+            sum_policy_ul += policy_ul
             sum_mse += mse_loss
             sum_policy += policy_loss
             if self.wdl:
@@ -750,6 +774,8 @@ class TFProcess:
             tf.summary.scalar("Policy Accuracy",
                               sum_policy_accuracy,
                               step=steps)
+            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
+            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
             if self.wdl:
                 tf.summary.scalar("Value Accuracy",
                                   sum_value_accuracy,
@@ -765,8 +791,8 @@ class TFProcess:
                 tf.summary.histogram(w.name, w, step=steps)
         self.test_writer.flush()
 
-        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse), end = '')
+        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end = '')
 
         if self.moves_left:
             print(" moves={:g} moves mean={:g}".format(
@@ -793,11 +819,15 @@ class TFProcess:
         sum_mse = 0
         sum_policy = 0
         sum_value = 0
+        sum_policy_entropy = 0
+        sum_policy_ul = 0
         counter = 0
         for (x, y, z, q, m) in self.validation_dataset:
-            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error = self.calculate_test_summaries_inner_loop(
+            policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
                 x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
+            sum_policy_entropy += policy_entropy
+            sum_policy_ul += policy_ul
             sum_mse += mse_loss
             sum_policy += policy_loss
             if self.moves_left:
@@ -810,6 +840,8 @@ class TFProcess:
         sum_policy_accuracy /= counter
         sum_policy_accuracy *= 100
         sum_policy /= counter
+        sum_policy_entropy /= counter
+        sum_policy_ul /= counter
         sum_value /= counter
         if self.wdl:
             sum_value_accuracy /= counter
@@ -826,6 +858,8 @@ class TFProcess:
             tf.summary.scalar("Policy Accuracy",
                               sum_policy_accuracy,
                               step=steps)
+            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
+            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
             if self.wdl:
                 tf.summary.scalar("Value Accuracy",
                                   sum_value_accuracy,
@@ -839,8 +873,8 @@ class TFProcess:
                                   step=steps)
         self.validation_writer.flush()
 
-        print("step {}, validation: policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse), end='')
+        print("step {}, validation: policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
+            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end='')
 
         if self.moves_left:
             print(" moves={:g} moves mean={:g}".format(

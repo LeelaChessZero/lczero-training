@@ -37,6 +37,11 @@ V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
 
 
+def reverse_expand_bits(plane):
+    return np.unpackbits(np.array([plane], dtype=np.uint8))[::-1].astype(
+        np.float32).tobytes()
+
+
 # Interface for a chunk data source.
 class ChunkDataSrc:
     def __init__(self, items):
@@ -187,10 +192,6 @@ class ChunkParser:
         plies_left = tf.reshape(plies_left, (ChunkParser.BATCH_SIZE, ))
 
         return (planes, probs, winner, q, plies_left)
-
-    def reverse_expand_bits(plane):
-        return np.unpackbits(np.array(
-            [plane], dtype=np.uint8))[:, ::-1].astype(np.float32).tobytes()
 
     def convert_v5_to_tuple(self, content):
         """
