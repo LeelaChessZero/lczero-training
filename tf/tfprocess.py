@@ -139,6 +139,10 @@ class TFProcess:
             self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
         elif input_mode == "canonical_armageddon":
             self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
+        elif input_mode == "canonical_v2":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2
+        elif input_mode == "canonical_v2_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON
         else:
             raise ValueError(
                 "Unknown input mode format: {}".format(input_mode))
