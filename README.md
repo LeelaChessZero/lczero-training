@@ -8,15 +8,12 @@ Install the requirements under `tf/requirements.txt`. And call `./init.sh` to co
 
 ## Data preparation
 
-In order to start a training session you first need to download trainingdata from https://storage.lczero.org/files/training_data/. This data is packed in tar.gz balls each containing 10'000 games or chunks as we call them. Preparing data requires the following steps:
+In order to start a training session you first need to download training data from https://storage.lczero.org/files/training_data/. This data is packed in a tar file each contains several chunks, where each chunk is one hours worth of training data. Preparing data requires the following steps:
 
 ```
 wget https://storage.lczero.org/files/training_data/training-run1--20200711-2017.tar
 tar -xzf training-run1--20200711-2017.tar
-ls training.* | parallel gzip {}
 ```
-
-This repacks each chunk into a gzipped file ready to be parsed by the training pipeline. Note that the `parallel` command uses all your cores and can be installed with `apt-get install parallel`.
 
 ## Training pipeline
 
