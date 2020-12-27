@@ -37,18 +37,25 @@ def get_chunks(data_prefix):
 
 
 def get_all_chunks(path):
+    if isinstance(path, list):
+        print("getting chunks for", path)
+        chunks = []
+        for i in path:
+            chunks += get_all_chunks(i)
+        return chunks
     chunks = []
     for d in glob.glob(path):
         chunks += get_chunks(d)
+    print("got", len(chunks), "chunks for", path)
     return chunks
 
 
-def get_latest_chunks(path, num_chunks, allow_less):
+def get_latest_chunks(path, num_chunks, allow_less, sort_key_fn):
     chunks = get_all_chunks(path)
     if len(chunks) < num_chunks:
         if allow_less:
-            print("sorting {} chunks...".format(len(chunks)), end='')
-            chunks.sort(key=os.path.getmtime, reverse=True)
+            print("sorting {} chunks...".format(len(chunks)), end='', flush=True)
+            chunks.sort(key=sort_key_fn, reverse=True)
             print("[done]")
             print("{} - {}".format(os.path.basename(chunks[-1]),
                                    os.path.basename(chunks[0])))
@@ -58,14 +65,23 @@ def get_latest_chunks(path, num_chunks, allow_less):
             print("Not enough chunks {}".format(len(chunks)))
             sys.exit(1)
 
-    print("sorting {} chunks...".format(len(chunks)), end='')
-    chunks.sort(key=os.path.getmtime, reverse=True)
+    print("sorting {} chunks...".format(len(chunks)), end='', flush=True)
+    chunks.sort(key=sort_key_fn, reverse=True)
     print("[done]")
     chunks = chunks[:num_chunks]
     print("{} - {}".format(os.path.basename(chunks[-1]),
                            os.path.basename(chunks[0])))
     random.shuffle(chunks)
     return chunks
+
+
+def identity_function(name):
+    return name
+
+
+def game_number_for_name(name):
+    num_str = os.path.basename(name).upper().strip("ABCDEFGHIJKLMNOPQRSTUVWXYZ_-.")
+    return int(num_str)
 
 
 def extract_policy_bits(raw):
@@ -358,14 +374,23 @@ def main(cmd):
                                              False)
     num_train = int(num_chunks * train_ratio)
     num_test = num_chunks - num_train
+    sort_type = cfg['dataset'].get('sort_type', 'mtime')
+    if sort_type == 'mtime':
+        sort_key_fn = os.path.getmtime
+    elif sort_type == 'number':
+        sort_key_fn = game_number_for_name
+    elif sort_type == 'name':
+        sort_key_fn = identity_function
+    else:
+        raise ValueError('Unknown dataset sort_type: {}'.format(sort_type))
     if 'input_test' in cfg['dataset']:
         train_chunks = get_latest_chunks(cfg['dataset']['input_train'],
-                                         num_train, allow_less)
+                                         num_train, allow_less, sort_key_fn)
         test_chunks = get_latest_chunks(cfg['dataset']['input_test'], num_test,
-                                        allow_less)
+                                        allow_less, sort_key_fn)
     else:
         chunks = get_latest_chunks(cfg['dataset']['input'], num_chunks,
-                                   allow_less)
+                                   allow_less, sort_key_fn)
         if allow_less:
             num_train = int(len(chunks) * train_ratio)
             num_test = len(chunks) - num_train
