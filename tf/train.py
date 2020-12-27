@@ -352,9 +352,9 @@ def select_extractor(mode):
         return extract_inputs_outputs_if2
     if mode == 3:
         return extract_inputs_outputs_if3
-    if mode == 4:
+    if mode == 4 or mode == 5:
         return extract_inputs_outputs_if4
-    if mode == 132:
+    if mode == 132 or mode == 133:
         return extract_inputs_outputs_if132
     assert (false)
 

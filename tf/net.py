@@ -10,6 +10,7 @@ LC0_MAJOR = 0
 LC0_MINOR = 21
 LC0_MINOR_WITH_INPUT_TYPE_3 = 25
 LC0_MINOR_WITH_INPUT_TYPE_4 = 26
+LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -69,7 +70,9 @@ class Net:
 
     def set_input(self, input_format):
         self.pb.format.network_format.input = input_format
-        if input_format >= pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+        if input_format == pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2 or input_format == pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON:
+            self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_5
+        elif input_format >= pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
             self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_4
         # Input type 2 was available before 3, but it was buggy, so also limit it to same version as 3.
         elif input_format != pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE:

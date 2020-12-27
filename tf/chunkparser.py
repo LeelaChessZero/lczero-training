@@ -253,7 +253,7 @@ class ChunkParser:
                             self.flat_planes[0] + \
                             self.flat_planes[0] + \
                             self.flat_planes[stm]
-        elif input_format == 3 or input_format == 4 or input_format == 132:
+        elif input_format == 3 or input_format == 4 or input_format == 132 or input_format == 5 or input_format == 133:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
             us_ooo_bytes = reverse_expand_bits(us_ooo)
@@ -269,7 +269,7 @@ class ChunkParser:
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
         aux_plus_6_plane = self.flat_planes[0]
-        if input_format == 132 and dep_ply_count >= 128:
+        if (input_format == 132 or input_format == 133) and dep_ply_count >= 128:
             aux_plus_6_plane = self.flat_planes[1]
         planes = planes.tobytes() + \
                  middle_planes + \
