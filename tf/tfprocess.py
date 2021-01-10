@@ -70,6 +70,7 @@ class TFProcess:
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
+        self.only_prenorm_regularization = self.cfg['model'].get('only_prenorm_regularization', False)
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         self.virtual_batch_size = self.cfg['model'].get(
@@ -1048,8 +1049,8 @@ class TFProcess:
                 use_bias=True,
                 padding='same',
                 kernel_initializer='glorot_normal',
-                kernel_regularizer=self.l2reg,
-                bias_regularizer=self.l2reg,
+                kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
+                bias_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                 data_format='channels_first',
                 name='policy')(conv_pol)
             h_fc1 = ApplyPolicyMap()(conv_pol2)
@@ -1061,8 +1062,8 @@ class TFProcess:
             h_conv_pol_flat = tf.keras.layers.Flatten()(conv_pol)
             h_fc1 = tf.keras.layers.Dense(1858,
                                           kernel_initializer='glorot_normal',
-                                          kernel_regularizer=self.l2reg,
-                                          bias_regularizer=self.l2reg,
+                                          kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
+                                          bias_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                                           name='policy/dense')(h_conv_pol_flat)
         else:
             raise ValueError("Unknown policy head type {}".format(
@@ -1076,19 +1077,19 @@ class TFProcess:
         h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
         h_fc2 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
-                                      kernel_regularizer=self.l2reg,
+                                      kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                                       activation='relu',
                                       name='value/dense1')(h_conv_val_flat)
         if self.wdl:
             h_fc3 = tf.keras.layers.Dense(3,
                                           kernel_initializer='glorot_normal',
-                                          kernel_regularizer=self.l2reg,
-                                          bias_regularizer=self.l2reg,
+                                          kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
+                                          bias_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                                           name='value/dense2')(h_fc2)
         else:
             h_fc3 = tf.keras.layers.Dense(1,
                                           kernel_initializer='glorot_normal',
-                                          kernel_regularizer=self.l2reg,
+                                          kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                                           activation='tanh',
                                           name='value/dense2')(h_fc2)
 
@@ -1102,13 +1103,13 @@ class TFProcess:
             h_fc4 = tf.keras.layers.Dense(
                 128,
                 kernel_initializer='glorot_normal',
-                kernel_regularizer=self.l2reg,
+                kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                 activation='relu',
                 name='moves_left/dense1')(h_conv_mov_flat)
 
             h_fc5 = tf.keras.layers.Dense(1,
                                           kernel_initializer='glorot_normal',
-                                          kernel_regularizer=self.l2reg,
+                                          kernel_regularizer=self.l2reg if not self.only_prenorm_regularization else None,
                                           activation='relu',
                                           name='moves_left/dense2')(h_fc4)
         else:
