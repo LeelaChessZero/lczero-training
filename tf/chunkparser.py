@@ -34,7 +34,7 @@ CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
 # jhorthos query - not sure i understand Struct format strings fully
-V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHHH'
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHH4H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -104,7 +104,7 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v5 format where each record
+        chunkdata: type Bytes. Multiple records of v5 or v6 format where each record
         consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
@@ -197,27 +197,25 @@ class ChunkParser:
 
         return (planes, probs, winner, q, plies_left)
 
-    # jhorthos stub - needs to be modified for v6 to tuple
+    # jhorthos query - not sure about the v6_struct.unpack() statement
+    # and the winner = struct.pack() statement
     def convert_v6_to_tuple(self, content):
-        return None
-        
-    def convert_v5_to_tuple(self, content):
         """
-        Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
+        Unpack a v6 binary record to 5-tuple (state, policy pi, result, q, m)
 
-        v5 struct format is (8308 bytes total)
-            int32 version (4 bytes)
-            int32 input_format (4 bytes)
+        v6 struct format is (8356 bytes total)
+            uint32 version (4 bytes)
+            uint32 input_format (4 bytes)
             1858 float32 probabilities (7432 bytes)
             104 (13*8) packed bit planes of 8 bytes each (832 bytes)
             uint8 castling us_ooo (1 byte)
             uint8 castling us_oo (1 byte)
             uint8 castling them_ooo (1 byte)
             uint8 castling them_oo (1 byte)
-            uint8 side_to_move (1 byte)
+            uint8 side_to_move_or_enpassant (1 byte)
             uint8 rule50_count (1 byte)
-            uint8 dep_ply_count (1 byte) (unused)
-            int8 result (1 byte)
+            uint8 invariance_info (1 byte bitfield)
+            uint8 dummy (1 byte, unused, used to hold result)
             float32 root_q (4 bytes)
             float32 best_q (4 bytes)
             float32 root_d (4 bytes)
@@ -225,10 +223,23 @@ class ChunkParser:
             float32 root_m (4 bytes)
             float32 best_m (4 bytes)
             float32 plies_left (4 bytes)
+            float32 result_q (4 bytes)
+            float32 result_d (4 bytes)
+            float32 played_q (4 bytes)
+            float32 played_d (4 bytes)
+            float32 played_m (4 bytes)
+            float32 orig_q (4 bytes) may be NaN if not found in cache
+            float32 orig_d (4 bytes)
+            float32 orig_m (4 bytes)
+            uint32  visits (4 bytes)
+            uint16_t played_idx (2 bytes)
+            uint16_t best_idx (2 bytes)
+            uint64_t reserved (8 bytes)
         """
         (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
          stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d,
-         best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
+         best_d, root_m, best_m, plies_left) = self.v6_struct.unpack(content)
+         
         # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
         if plies_left == 0:
             plies_left = dep_ply_count
@@ -261,7 +272,7 @@ class ChunkParser:
                             self.flat_planes[0] + \
                             self.flat_planes[0] + \
                             self.flat_planes[stm]
-        elif input_format == 3 or input_format == 4 or input_format == 132 or input_format == 5 or input_format == 133:
+        elif input_format == 6 or input_format == 5 input_format == 4 or input_format == 3 or input_format == 132 input_format == 133:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
             us_ooo_bytes = reverse_expand_bits(us_ooo)
@@ -286,8 +297,9 @@ class ChunkParser:
                  self.flat_planes[1]
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
-        winner = float(winner)
-        assert winner == 1.0 or winner == -1.0 or winner == 0.0
+        #winner = float(winner) now should unpack as float
+        assert winner >= -1.0 and winner <= 1.0
+        # jhorthos query - don't know what to do here
         winner = struct.pack('fff', winner == 1.0, winner == 0.0,
                              winner == -1.0)
 
@@ -297,6 +309,7 @@ class ChunkParser:
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q, plies_left)
+
 
     def sample_record(self, chunkdata):
         """
@@ -320,6 +333,9 @@ class ChunkParser:
                 if random.randint(0, self.sample - 1) != 0:
                     continue  # Skip this record.
             record = chunkdata[i:i + record_size]
+            
+            # value focus code will go here
+            
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
@@ -328,9 +344,11 @@ class ChunkParser:
                 record += 12 * b'\x00'
                 # insert 4 bytes of classical input format tag to match v5 format
                 record = record[:4] + CLASSICAL_INPUT + record[4:]
-            # jhorthos need to add padding for v5 to v6 format here
+                
+            # jhorthos query - i don't understand how this gets handled correctly downstream
             if version == V5_VERSION:
-                pass
+                # add 48 byes at end
+                record += 48 * b'\x00' 
             yield record
 
     def task(self, chunk_filename_queue, writer):
