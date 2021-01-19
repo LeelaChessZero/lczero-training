@@ -297,11 +297,10 @@ class ChunkParser:
                  self.flat_planes[1]
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
-        #winner = float(winner) now should unpack as float
-        assert winner >= -1.0 and winner <= 1.0
-        # jhorthos query - don't know what to do here
-        winner = struct.pack('fff', winner == 1.0, winner == 0.0,
-                             winner == -1.0)
+
+        # jhorthos query - check this
+        winner = struct.pack('fff', (1.0 - result_d + result_q)/2, result_d,
+                              (1.0 - result_d - result_q)/2)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
