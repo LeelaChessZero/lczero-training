@@ -28,10 +28,13 @@ import unittest
 import gzip
 from select import select
 
+V6_VERSION = struct.pach('i', 6)
 V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
+# query - not sure i understand Struct format strings fully
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHHH'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -170,6 +173,7 @@ class ChunkParser:
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
         """
+        self.v6_struct = struct.Struct(V6_STRUCT_STRING)
         self.v5_struct = struct.Struct(V5_STRUCT_STRING)
         self.v4_struct = struct.Struct(V4_STRUCT_STRING)
         self.v3_struct = struct.Struct(V3_STRUCT_STRING)
@@ -193,6 +197,10 @@ class ChunkParser:
 
         return (planes, probs, winner, q, plies_left)
 
+    # jhorthos stub - needs to be modified for v6 to tuple
+    def convert_v6_to_tuple(self, content):
+        return None
+        
     def convert_v5_to_tuple(self, content):
         """
         Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
@@ -292,10 +300,12 @@ class ChunkParser:
 
     def sample_record(self, chunkdata):
         """
-        Randomly sample through the v3/4/5 chunk data and select records in v5 format
+        Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
         """
         version = chunkdata[0:4]
-        if version == V5_VERSION:
+        if version == V6_VERSION:
+            record_size = self.v6_struct.size
+        elif version == V5_VERSION:
             record_size = self.v5_struct.size
         elif version == V4_VERSION:
             record_size = self.v4_struct.size
@@ -318,12 +328,15 @@ class ChunkParser:
                 record += 12 * b'\x00'
                 # insert 4 bytes of classical input format tag to match v5 format
                 record = record[:4] + CLASSICAL_INPUT + record[4:]
+            # jhorthos need to add padding for v5 to v6 format here
+            if version == V5_VERSION:
+                pass
             yield record
 
     def task(self, chunk_filename_queue, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
-        sending v5 data through pipe back to main process.
+        sending v6 data through pipe back to main process.
         """
         self.init_structs()
         while True:
@@ -332,7 +345,9 @@ class ChunkParser:
                 with gzip.open(filename, 'rb') as chunk_file:
                     version = chunk_file.read(4)
                     chunk_file.seek(0)
-                    if version == V5_VERSION:
+                    if version == V6_VERSION:
+                        record_size = self.v6_struct.size
+                    elif version == V5_VERSION:
                         record_size = self.v5_struct.size
                     elif version == V4_VERSION:
                         record_size = self.v4_struct.size
@@ -353,12 +368,12 @@ class ChunkParser:
                 print("failed to parse {}".format(filename))
                 continue
 
-    def v5_gen(self):
+    def v6_gen(self):
         """
-        Read v5 records from child workers, shuffle, and yield
+        Read v6 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v5_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v6_struct.size, self.shuffle_size)
         while len(self.readers):
             #for r in mp.connection.wait(self.readers):
             for r in self.readers:
@@ -380,11 +395,11 @@ class ChunkParser:
 
     def tuple_gen(self, gen):
         """
-        Take a generator producing v5 records and convert them to tuples.
+        Take a generator producing v6 records and convert them to tuples.
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v5_to_tuple(r)
+            yield self.convert_v6_to_tuple(r)
 
     def batch_gen(self, gen):
         """
@@ -404,8 +419,8 @@ class ChunkParser:
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v5_gen()  # read from workers
-        gen = self.tuple_gen(gen)  # convert v5->tuple
+        gen = self.v6_gen()  # read from workers
+        gen = self.tuple_gen(gen)  # convert v6->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
             yield b
