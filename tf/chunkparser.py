@@ -90,6 +90,8 @@ class ChunkParser:
                  sample=1,
                  buffer_size=1,
                  batch_size=256,
+                 value_focus_min=1,
+                 value_focus_slope=0,
                  workers=None):
         """
         Read data and yield batches of raw tensors.
@@ -123,6 +125,9 @@ class ChunkParser:
 
         # set the down-sampling rate
         self.sample = sample
+        # set the min and slope for value focus, defaults accept all positions
+        self.value_focus_min = value_focus_min
+        self.value_focus_slope = value_focus_slope
         # set the mini-batch size
         self.batch_size = batch_size
         # set number of elements in the shuffle buffer.
@@ -333,7 +338,9 @@ class ChunkParser:
                     continue  # Skip this record.
             record = chunkdata[i:i + record_size]
             
-            # value focus code will go here
+            # value focus code will go here, using self.value_focus_min and self.value_focus_slope
+            # 1) extract orig_q and best_q from bytes (allowing for possible Nan)
+            # 2) compute probability of accepting this record
             
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
