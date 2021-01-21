@@ -33,8 +33,9 @@ V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
-# jhorthos query - not sure i understand Struct format strings fully
-V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHH4H'
+# jhorthos query - not sure i understand Struct format strings fully B? b?
+# followed by 15 floats, 1 uint_32, 2 uint_16, and 4x16 reserved
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbBfffffffffffffffIHH4H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -99,6 +100,7 @@ class ChunkParser:
         'chunks' list of chunk filenames.
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
+        'value_focus_min' and 'value_focus_slope' control value focus
         'workers' is the number of child workers to use.
 
         The data is represented in a number of formats through this dataflow
@@ -202,53 +204,65 @@ class ChunkParser:
 
         return (planes, probs, winner, q, plies_left)
 
-    # jhorthos query - not sure about the v6_struct.unpack() statement
-    # and the winner = struct.pack() statement
     def convert_v6_to_tuple(self, content):
         """
         Unpack a v6 binary record to 5-tuple (state, policy pi, result, q, m)
 
-        v6 struct format is (8356 bytes total)
-            uint32 version (4 bytes)
-            uint32 input_format (4 bytes)
-            1858 float32 probabilities (7432 bytes)
-            104 (13*8) packed bit planes of 8 bytes each (832 bytes)
-            uint8 castling us_ooo (1 byte)
-            uint8 castling us_oo (1 byte)
-            uint8 castling them_ooo (1 byte)
-            uint8 castling them_oo (1 byte)
-            uint8 side_to_move_or_enpassant (1 byte)
-            uint8 rule50_count (1 byte)
-            uint8 invariance_info (1 byte bitfield)
-            uint8 dummy (1 byte, unused, used to hold result)
-            float32 root_q (4 bytes)
-            float32 best_q (4 bytes)
-            float32 root_d (4 bytes)
-            float32 best_d (4 bytes)
-            float32 root_m (4 bytes)
-            float32 best_m (4 bytes)
-            float32 plies_left (4 bytes)
-            float32 result_q (4 bytes)
-            float32 result_d (4 bytes)
-            float32 played_q (4 bytes)
-            float32 played_d (4 bytes)
-            float32 played_m (4 bytes)
-            float32 orig_q (4 bytes) may be NaN if not found in cache
-            float32 orig_d (4 bytes)
-            float32 orig_m (4 bytes)
-            uint32  visits (4 bytes)
-            uint16_t played_idx (2 bytes)
-            uint16_t best_idx (2 bytes)
-            uint64_t reserved (8 bytes)
+        v6 struct format is (8356 bytes total):
+                                  size         1st byte index
+        uint32_t version;                               0
+        uint32_t input_format;                          4
+        float probabilities[1858];  7432 bytes          8
+        uint64_t planes[104];        832 bytes       7440
+        uint8_t castling_us_ooo;                     8272
+        uint8_t castling_us_oo;                      8273
+        uint8_t castling_them_ooo;                   8274
+        uint8_t castling_them_oo;                    8275
+        uint8_t side_to_move_or_enpassant;           8276
+        uint8_t rule50_count;                        8277
+        // Bitfield with the following allocation:
+        //  bit 7: side to move (input type 3)
+        //  bit 6: position marked for deletion by the rescorer (never set by lc0)
+        //  bit 5: game adjudicated (v6)
+        //  bit 4: max game length exceeded (v6)
+        //  bit 3: best_q is for proven best move (v6)
+        //  bit 2: transpose transform (input type 3)
+        //  bit 1: mirror transform (input type 3)
+        //  bit 0: flip transform (input type 3)
+        uint8_t invariance_info;                     8278
+        uint8_t dummy;                               8279
+        float root_q;                                8280
+        float best_q;                                8284
+        float root_d;                                8288
+        float best_d;                                8292
+        float root_m;      // In plies.              8296
+        float best_m;      // In plies.              8300
+        float plies_left;                            8304
+        float result_q;                              8308
+        float result_d;                              8312
+        float played_q;                              8316
+        float played_d;                              8320
+        float played_m;                              8324
+        // The folowing may be NaN if not found in cache.
+        float orig_q;      // For value repair.      8328
+        float orig_d;                                8332
+        float orig_m;                                8336
+        uint32_t visits;                             8340
+        // Indices in the probabilities array.
+        uint16_t played_idx;                         8344
+        uint16_t best_idx;                           8346
+        uint64_t reserved;                           8348
         """
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
-         stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d,
-         best_d, root_m, best_m, plies_left) = self.v6_struct.unpack(content)
+        # unpack the content from raw byte array
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
+        rule50_count, invariance_info, dummy, root_q, best_q, root_d, best_d, root_m,
+        best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
+        orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
          
-        # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
-        if plies_left == 0:
-            plies_left = dep_ply_count
-        plies_left = struct.pack('f', plies_left)
+        #jhorthos query ?? v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
+        #if plies_left == 0:
+        #    plies_left = dep_ply_count
+        #plies_left = struct.pack('f', plies_left)
 
         assert input_format == self.expected_input_format
 
@@ -303,14 +317,14 @@ class ChunkParser:
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
 
-        # jhorthos query - check this
+        # jhorthos query - pls check this
         winner = struct.pack('fff', (1.0 - result_d + result_q)/2, result_d,
                               (1.0 - result_d - result_q)/2)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
-        best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
+        # jhorthos query ?? best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q, plies_left)
 
@@ -318,6 +332,8 @@ class ChunkParser:
     def sample_record(self, chunkdata):
         """
         Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
+        Downsampling to avoid highly correlated positions skips most records, and 
+        value focus may also skip some records.
         """
         version = chunkdata[0:4]
         if version == V6_VERSION:
@@ -336,12 +352,20 @@ class ChunkParser:
                 # Downsample, using only 1/Nth of the items.
                 if random.randint(0, self.sample - 1) != 0:
                     continue  # Skip this record.
+                    
             record = chunkdata[i:i + record_size]
             
-            # value focus code will go here, using self.value_focus_min and self.value_focus_slope
-            # 1) extract orig_q and best_q from bytes (allowing for possible Nan)
-            # 2) compute probability of accepting this record
+            # peak at best_q and orig_q from record
+            best_q = struct.unpack('f', record[8284:8288])
+            orig_q = struct.unpack('f', record[8328:8332])
             
+            # if orig_q is NaN, accept, else accept based on value focus
+            if not np.isnan(orig_q):
+                diff_q = abs(best_q - orig_q)
+                p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
+                if p_thresh < 1.0 and random.random() < p_thresh:
+                    continue
+                
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
