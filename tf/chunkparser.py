@@ -390,13 +390,21 @@ class ChunkParser:
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
 
         # jhorthos query - pls check this
-        winner = struct.pack('fff', (1.0 - result_d + result_q)/2, result_d,
+        if version == V6_VERSION:
+            winner = struct.pack('fff', (1.0 - result_d + result_q)/2, result_d,
                               (1.0 - result_d - result_q)/2)
+        else:
+            winner = float(winner)
+            assert winner == 1.0 or winner == -1.0 or winner == 0.0
+            winner = struct.pack('fff', winner == 1.0, winner == 0.0,
+                             winner == -1.0)
+                          
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
-
+        best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
+        
         return (planes, probs, winner, best_q, plies_left)
         
 
