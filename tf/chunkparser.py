@@ -17,6 +17,47 @@
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Chess.  If not, see <http://www.gnu.org/licenses/>.
 
+"""
+General comments on how chunkparser works.
+
+A "training record" or just "record" is a fixed-length packed byte array. Typically
+records are generated during training and are stored together by game, one record for 
+each position in the game, but this arrangement is not required.
+Over dev time additional fields have been added to the training record, most of which 
+just put additional information after the end of the byte array used in the previous 
+version. Currently supported training record versions are V3, V4, V5, and V6.
+
+shufflebuffer.ShuffleBuffer is a simple structure holding an array of training
+records that are efficiently randomized and replaced as needed. All records in
+ShuffleBuffer are adjusted to be the same number of bytes by appending unused 
+bytes *before* being put in the shuffler. 
+byte padding is done in chunkparser.ChunkParser.sample_record()
+sample_record() also skips most training records to avoid sampling over-correlated
+positions since they typically are from sequential positions in a game.
+
+Current implementation of "value focus" also is in sample_record() and works by
+probabilistically skipping records according to how accurate the no-search 
+eval ('orig_q') is compared to eval after search ('best_q'). It does not use
+draw values at this point. Putting value focus here is efficient because
+it runs in parallel workers and peeks at the records without requiring any
+unpacking.
+
+The constructor for chunkparser.ChunkParser() sets a bunch of class constants
+and creates a fixed number of parallel Python multiprocessing.Pipe objects,
+which consist of a "reader" and a "writer". The writer(s) get data directly
+from training data files and write them into the pipe using the writer.send_bytes()
+method. The reader(s) get data out of the pipe using the reader.rev_bytes()
+method and feed them to the ShuffleBuffer using its insert_or_replace() method,
+which also handles the shuffling itself.
+
+Records come back out of the ShuffleBuffer (already a fixed byte number
+regardless of training version) using the multiplexed generators specified in
+the ChunkParser.parse() method. They are first recovered as raw byte records
+in the vX_gen() method (currently v6_gen), then converted to tuples of more
+interpretable data in the convert_vX_to_tuple() method and finally sent on
+to tensorflow in training batches by the batch_gen() method.
+"""
+
 import itertools
 import multiprocessing as mp
 import numpy as np
@@ -28,7 +69,7 @@ import unittest
 import gzip
 from select import select
 
-V6_VERSION = struct.pach('i', 6)
+V6_VERSION = struct.pack('i', 6)
 V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
@@ -253,17 +294,48 @@ class ChunkParser:
         uint16_t best_idx;                           8346
         uint64_t reserved;                           8348
         """
-        # unpack the content from raw byte array
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
-        rule50_count, invariance_info, dummy, root_q, best_q, root_d, best_d, root_m,
-        best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
-        orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
-         
-        #jhorthos query ?? v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
-        #if plies_left == 0:
-        #    plies_left = dep_ply_count
-        #plies_left = struct.pack('f', plies_left)
 
+        version = content[0:4]
+        if version == V6_VERSION:
+            # unpack the V6 content from raw byte array
+            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
+            rule50_count, invariance_info, dummy, root_q, best_q, root_d, best_d, root_m,
+            best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
+            orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
+            
+        """
+        v5 struct format is (8308 bytes total)
+            int32 version (4 bytes)
+            int32 input_format (4 bytes)
+            1858 float32 probabilities (7432 bytes)
+            104 (13*8) packed bit planes of 8 bytes each (832 bytes)
+            uint8 castling us_ooo (1 byte)
+            uint8 castling us_oo (1 byte)
+            uint8 castling them_ooo (1 byte)
+            uint8 castling them_oo (1 byte)
+            uint8 side_to_move (1 byte)
+            uint8 rule50_count (1 byte)
+            uint8 dep_ply_count (1 byte) (unused)
+            int8 result (1 byte)
+            float32 root_q (4 bytes)
+            float32 best_q (4 bytes)
+            float32 root_d (4 bytes)
+            float32 best_d (4 bytes)
+            float32 root_m (4 bytes)
+            float32 best_m (4 bytes)
+            float32 plies_left (4 bytes)
+        """
+
+        # jhorthos query - this is the same as V5 code - still valid?
+        else:
+            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
+             stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d,
+             best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
+            # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
+            if plies_left == 0:
+                plies_left = dep_ply_count
+            plies_left = struct.pack('f', plies_left)
+        
         assert input_format == self.expected_input_format
 
         # Unpack bit planes and cast to 32 bit float
@@ -324,10 +396,9 @@ class ChunkParser:
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
-        # jhorthos query ?? best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
         return (planes, probs, winner, best_q, plies_left)
-
+        
 
     def sample_record(self, chunkdata):
         """
@@ -374,11 +445,12 @@ class ChunkParser:
                 record += 12 * b'\x00'
                 # insert 4 bytes of classical input format tag to match v5 format
                 record = record[:4] + CLASSICAL_INPUT + record[4:]
-                
-            # jhorthos query - i don't understand how this gets handled correctly downstream
-            if version == V5_VERSION:
+            # jhorthos query - i think this might have to do a little rearranging
+            # this just adds placeholder bytes so they all end up the same size
+            if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
                 # add 48 byes at end
-                record += 48 * b'\x00' 
+                record += 48 * b'\x00'
+                
             yield record
 
     def task(self, chunk_filename_queue, writer):
@@ -423,7 +495,6 @@ class ChunkParser:
         """
         sbuff = sb.ShuffleBuffer(self.v6_struct.size, self.shuffle_size)
         while len(self.readers):
-            #for r in mp.connection.wait(self.readers):
             for r in self.readers:
                 try:
                     s = r.recv_bytes()
@@ -467,7 +538,7 @@ class ChunkParser:
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v6_gen()  # read from workers
+        gen = self.v6_gen()        # read from workers
         gen = self.tuple_gen(gen)  # convert v6->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
