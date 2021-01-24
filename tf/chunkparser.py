@@ -75,8 +75,8 @@ CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
 # jhorthos query - not sure i understand Struct format strings fully B? b?
-# followed by 15 floats, 1 uint_32, 2 uint_16, and 4x16 reserved
-V6_STRUCT_STRING = '4si7432s832sBBBBBBBbBfffffffffffffffIHH4H'
+# followed by 15 floats, 1 uint_32, 2 uint_16, and 64 (4x16) reserved
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBBfffffffffffffffIHH4H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
