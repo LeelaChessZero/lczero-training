@@ -363,7 +363,7 @@ class ChunkParser:
                             self.flat_planes[0] + \
                             self.flat_planes[0] + \
                             self.flat_planes[stm]
-        elif input_format == 3 or input_format == 4 or input_format == 132:
+        elif input_format == 3 or input_format == 4 or input_format == 132 or input_format == 5 or input_format == 133:
             # Each inner array has to be reversed as these fields are in opposite endian to the planes data.
             them_ooo_bytes = reverse_expand_bits(them_ooo)
             us_ooo_bytes = reverse_expand_bits(us_ooo)
