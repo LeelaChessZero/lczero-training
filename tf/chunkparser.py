@@ -292,7 +292,6 @@ class ChunkParser:
         uint16_t best_idx;                           8346
         uint64_t reserved;                           8348
         """
-
         version = content[0:4]
         if version == V6_VERSION:
             # unpack the V6 content from raw byte array
@@ -302,7 +301,7 @@ class ChunkParser:
             orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
             
         """
-        v5 struct format is (8308 bytes total)
+        v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
             int32 input_format (4 bytes)
             1858 float32 probabilities (7432 bytes)
@@ -323,16 +322,11 @@ class ChunkParser:
             float32 best_m (4 bytes)
             float32 plies_left (4 bytes)
         """
-
-        # jhorthos query - this is the same as V5 code - still valid?
-        else:
-            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
-             stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d,
-             best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
-            # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
-            if plies_left == 0:
-                plies_left = dep_ply_count
-            plies_left = struct.pack('f', plies_left)
+        # v3/4 data sometimes has a useful value in dep_ply_count (now invariance_info), 
+        # so copy that over if the new ply_count is not populated.
+        if plies_left == 0:
+            plies_left = invariance_info
+        plies_left = struct.pack('f', plies_left)
         
         assert input_format == self.expected_input_format
 
@@ -388,15 +382,14 @@ class ChunkParser:
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
 
         # jhorthos query - pls check this
-        if version == V6_VERSION:
-            winner = struct.pack('fff', (1.0 - result_d + result_q)/2, result_d,
+        if ver == V6_VERSION:
+            winner = struct.pack('fff', 0.5 * (1.0 - result_d + result_q), result_d,
                               (1.0 - result_d - result_q)/2)
         else:
             winner = float(winner)
             assert winner == 1.0 or winner == -1.0 or winner == 0.0
             winner = struct.pack('fff', winner == 1.0, winner == 0.0,
                              winner == -1.0)
-                          
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
@@ -431,9 +424,20 @@ class ChunkParser:
                     continue  # Skip this record.
                     
             record = chunkdata[i:i + record_size]
+            # for earlier versions, append fake bytes to record to maintain size
+            if version == V3_VERSION:
+                # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
+                record += 16 * b'\x00'
+            if version == V3_VERSION or version == V4_VERSION:
+                # add 12 bytes of fake root_m, best_m, plies_left to match V5 format
+                record += 12 * b'\x00'
+                # insert 4 bytes of classical input format tag to match v5 format
+                record = record[:4] + CLASSICAL_INPUT + record[4:]
+            if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
+                # add 48 byes of fake result_q, result_d etc
+                record += 48 * b'\x00'
             
-            # value focus code
-            # peek at best_q and orig_q from record
+            # value focus code, peek at best_q and orig_q from record
             best_q = struct.unpack('f', record[8284:8288])
             orig_q = struct.unpack('f', record[8328:8332])
             
@@ -444,20 +448,6 @@ class ChunkParser:
                 if p_thresh < 1.0 and random.random() < p_thresh:
                     continue
                     
-            if version == V3_VERSION:
-                # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
-                record += 16 * b'\x00'
-            if version == V3_VERSION or version == V4_VERSION:
-                # add 12 bytes of fake root_m, best_m, plies_left to match V5 format
-                record += 12 * b'\x00'
-                # insert 4 bytes of classical input format tag to match v5 format
-                record = record[:4] + CLASSICAL_INPUT + record[4:]
-            # jhorthos query - i think this might have to do a little rearranging
-            # this just adds placeholder bytes so they all end up the same size
-            if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
-                # add 48 byes at end
-                record += 48 * b'\x00'
-                
             yield record
 
     def task(self, chunk_filename_queue, writer):
