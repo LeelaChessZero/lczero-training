@@ -74,9 +74,7 @@ V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
-# jhorthos query - not sure i understand Struct format strings fully B? b?
-# followed by 15 floats, 1 uint_32, 2 uint_16, and 64 (4x16) reserved
-V6_STRUCT_STRING = '4si7432s832sBBBBBBBBfffffffffffffffIHH4H'
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHH4H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -434,7 +432,8 @@ class ChunkParser:
                     
             record = chunkdata[i:i + record_size]
             
-            # peak at best_q and orig_q from record
+            # value focus code
+            # peek at best_q and orig_q from record
             best_q = struct.unpack('f', record[8284:8288])
             orig_q = struct.unpack('f', record[8328:8332])
             
@@ -444,7 +443,7 @@ class ChunkParser:
                 p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
                 if p_thresh < 1.0 and random.random() < p_thresh:
                     continue
-                
+                    
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
