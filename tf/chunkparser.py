@@ -147,7 +147,7 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v5 or v6 format where each record
+        chunkdata: type Bytes. Multiple records of v6 format where each record
         consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
@@ -269,7 +269,7 @@ class ChunkParser:
         //  bit 1: mirror transform (input type 3)
         //  bit 0: flip transform (input type 3)
         uint8_t invariance_info;                     8278
-        uint8_t dummy;                               8279
+        uint8_t dep_result;                               8279
         float root_q;                                8280
         float best_q;                                8284
         float root_d;                                8288
@@ -292,14 +292,12 @@ class ChunkParser:
         uint16_t best_idx;                           8346
         uint64_t reserved;                           8348
         """
-        version = content[0:4]
-        if version == V6_VERSION:
-            # unpack the V6 content from raw byte array
-            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
-            rule50_count, invariance_info, dummy, root_q, best_q, root_d, best_d, root_m,
-            best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
-            orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
-            
+        # unpack the V6 content from raw byte array
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
+        rule50_count, invariance_info, dep_result, root_q, best_q, root_d, best_d, root_m,
+        best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
+        orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
+
         """
         v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
@@ -327,7 +325,7 @@ class ChunkParser:
         if plies_left == 0:
             plies_left = invariance_info
         plies_left = struct.pack('f', plies_left)
-        
+
         assert input_format == self.expected_input_format
 
         # Unpack bit planes and cast to 32 bit float
@@ -371,7 +369,7 @@ class ChunkParser:
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
         aux_plus_6_plane = self.flat_planes[0]
-        if (input_format == 132 or input_format == 133) and dep_ply_count >= 128:
+        if (input_format == 132 or input_format == 133) and invariance_info >= 128:
             aux_plus_6_plane = self.flat_planes[1]
         planes = planes.tobytes() + \
                  middle_planes + \
@@ -384,20 +382,20 @@ class ChunkParser:
         # jhorthos query - pls check this
         if ver == V6_VERSION:
             winner = struct.pack('fff', 0.5 * (1.0 - result_d + result_q), result_d,
-                              (1.0 - result_d - result_q)/2)
+                              0.5 * (1.0 - result_d - result_q))
         else:
-            winner = float(winner)
-            assert winner == 1.0 or winner == -1.0 or winner == 0.0
-            winner = struct.pack('fff', winner == 1.0, winner == 0.0,
-                             winner == -1.0)
+            winner = float(dep_result)
+            assert dep_result == 1.0 or dep_result == -1.0 or dep_result == 0.0
+            dep_result = struct.pack('fff', dep_result == 1.0, dep_result == 0.0,
+                             dep_result == -1.0)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
-        
+
         return (planes, probs, winner, best_q, plies_left)
-        
+
 
     def sample_record(self, chunkdata):
         """
@@ -422,7 +420,7 @@ class ChunkParser:
                 # Downsample, using only 1/Nth of the items.
                 if random.randint(0, self.sample - 1) != 0:
                     continue  # Skip this record.
-                    
+
             record = chunkdata[i:i + record_size]
             # for earlier versions, append fake bytes to record to maintain size
             if version == V3_VERSION:
@@ -447,7 +445,7 @@ class ChunkParser:
                 p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
                 if p_thresh < 1.0 and random.random() < p_thresh:
                     continue
-                    
+
             yield record
 
     def task(self, chunk_filename_queue, writer):
