@@ -292,12 +292,13 @@ class ChunkParser:
         uint16_t best_idx;                           8346
         uint64_t reserved;                           8348
         """
-        # unpack the V6 content from raw byte array
+        # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
+        # for the 8 "reserved" bytes
         (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
         rule50_count, invariance_info, dep_result, root_q, best_q, root_d, best_d, root_m,
         best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
-        orig_d, orig_m, visits, played_idx, best_idx, reserved) = self.v6_struct.unpack(content)
-
+        orig_d, orig_m, visits, played_idx, best_idx, reserved1, reserved2, reserved3,
+        reserved4) = self.v6_struct.unpack(content)
         """
         v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
