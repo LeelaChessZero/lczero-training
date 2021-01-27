@@ -434,17 +434,18 @@ class ChunkParser:
             if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
                 # add 48 byes of fake result_q, result_d etc
                 record += 48 * b'\x00'
-            
-            # value focus code, peek at best_q and orig_q from record
-            best_q = struct.unpack('f', record[8284:8288])
-            orig_q = struct.unpack('f', record[8328:8332])
-            
-            # if orig_q is NaN, accept, else accept based on value focus
-            if not np.isnan(orig_q):
-                diff_q = abs(best_q - orig_q)
-                p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
-                if p_thresh < 1.0 and random.random() < p_thresh:
-                    continue
+
+            if version == V6_VERSION:
+                # value focus code, peek at best_q and orig_q from record
+                best_q = struct.unpack('f', record[8284:8288])
+                orig_q = struct.unpack('f', record[8328:8332])
+                
+                # if orig_q is NaN, accept, else accept based on value focus
+                if not np.isnan(orig_q):
+                    diff_q = abs(best_q - orig_q)
+                    p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
+                    if p_thresh < 1.0 and random.random() < p_thresh:
+                        continue
 
             yield record
 
