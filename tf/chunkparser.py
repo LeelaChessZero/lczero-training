@@ -380,14 +380,13 @@ class ChunkParser:
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
 
-        # jhorthos query - pls check this
         if ver == V6_VERSION:
             winner = struct.pack('fff', 0.5 * (1.0 - result_d + result_q), result_d,
                               0.5 * (1.0 - result_d - result_q))
         else:
-            winner = float(dep_result)
+            dep_result = float(dep_result)
             assert dep_result == 1.0 or dep_result == -1.0 or dep_result == 0.0
-            dep_result = struct.pack('fff', dep_result == 1.0, dep_result == 0.0,
+            winner = struct.pack('fff', dep_result == 1.0, dep_result == 0.0,
                              dep_result == -1.0)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
@@ -437,15 +436,15 @@ class ChunkParser:
                 record += 48 * b'\x00'
 
             if version == V6_VERSION:
-                # value focus code, peek at best_q and orig_q from record
-                best_q = struct.unpack('f', record[8284:8288])
-                orig_q = struct.unpack('f', record[8328:8332])
+                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
+                best_q = struct.unpack('f', record[8284:8288])[0]
+                orig_q = struct.unpack('f', record[8328:8332])[0]
                 
                 # if orig_q is NaN, accept, else accept based on value focus
                 if not np.isnan(orig_q):
                     diff_q = abs(best_q - orig_q)
                     p_thresh = self.value_focus_min + self.value_focus_slope * diff_q
-                    if p_thresh < 1.0 and random.random() < p_thresh:
+                    if p_thresh < 1.0 and random.random() > p_thresh:
                         continue
 
             yield record
