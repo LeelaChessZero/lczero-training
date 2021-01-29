@@ -418,6 +418,10 @@ def main(cmd):
     experimental_reads = max(2, mp.cpu_count() - 2) // 2
     extractor = select_extractor(tfprocess.INPUT_MODE)
 
+    if experimental_parser and (not value_focus_min == 1 or not value_focus_slope == 0):
+            raise ValueError('Experimental parser does not support non-default value \
+            focus parameters.')
+
     def read(x):
         return tf.data.FixedLengthRecordDataset(
             x,
