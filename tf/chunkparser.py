@@ -17,6 +17,47 @@
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Chess.  If not, see <http://www.gnu.org/licenses/>.
 
+"""
+General comments on how chunkparser works.
+
+A "training record" or just "record" is a fixed-length packed byte array. Typically
+records are generated during training and are stored together by game, one record for 
+each position in the game, but this arrangement is not required.
+Over dev time additional fields have been added to the training record, most of which 
+just put additional information after the end of the byte array used in the previous 
+version. Currently supported training record versions are V3, V4, V5, and V6.
+
+shufflebuffer.ShuffleBuffer is a simple structure holding an array of training
+records that are efficiently randomized and replaced as needed. All records in
+ShuffleBuffer are adjusted to be the same number of bytes by appending unused 
+bytes *before* being put in the shuffler. 
+byte padding is done in chunkparser.ChunkParser.sample_record()
+sample_record() also skips most training records to avoid sampling over-correlated
+positions since they typically are from sequential positions in a game.
+
+Current implementation of "value focus" also is in sample_record() and works by
+probabilistically skipping records according to how accurate the no-search 
+eval ('orig_q') is compared to eval after search ('best_q'). It does not use
+draw values at this point. Putting value focus here is efficient because
+it runs in parallel workers and peeks at the records without requiring any
+unpacking.
+
+The constructor for chunkparser.ChunkParser() sets a bunch of class constants
+and creates a fixed number of parallel Python multiprocessing.Pipe objects,
+which consist of a "reader" and a "writer". The writer(s) get data directly
+from training data files and write them into the pipe using the writer.send_bytes()
+method. The reader(s) get data out of the pipe using the reader.rev_bytes()
+method and feed them to the ShuffleBuffer using its insert_or_replace() method,
+which also handles the shuffling itself.
+
+Records come back out of the ShuffleBuffer (already a fixed byte number
+regardless of training version) using the multiplexed generators specified in
+the ChunkParser.parse() method. They are first recovered as raw byte records
+in the vX_gen() method (currently v6_gen), then converted to tuples of more
+interpretable data in the convert_vX_to_tuple() method and finally sent on
+to tensorflow in training batches by the batch_gen() method.
+"""
+
 import itertools
 import multiprocessing as mp
 import numpy as np
@@ -28,10 +69,12 @@ import unittest
 import gzip
 from select import select
 
+V6_VERSION = struct.pack('i', 6)
 V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHH4H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -87,6 +130,8 @@ class ChunkParser:
                  sample=1,
                  buffer_size=1,
                  batch_size=256,
+                 value_focus_min=1,
+                 value_focus_slope=0,
                  workers=None):
         """
         Read data and yield batches of raw tensors.
@@ -94,6 +139,7 @@ class ChunkParser:
         'chunks' list of chunk filenames.
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
+        'value_focus_min' and 'value_focus_slope' control value focus
         'workers' is the number of child workers to use.
 
         The data is represented in a number of formats through this dataflow
@@ -101,7 +147,7 @@ class ChunkParser:
 
         chunk: The name of a file containing chunkdata
 
-        chunkdata: type Bytes. Multiple records of v5 format where each record
+        chunkdata: type Bytes. Multiple records of v6 format where each record
         consists of (state, policy, result, q)
 
         raw: A byte string holding raw tensors contenated together. This is
@@ -120,6 +166,9 @@ class ChunkParser:
 
         # set the down-sampling rate
         self.sample = sample
+        # set the min and slope for value focus, defaults accept all positions
+        self.value_focus_min = value_focus_min
+        self.value_focus_slope = value_focus_slope
         # set the mini-batch size
         self.batch_size = batch_size
         # set number of elements in the shuffle buffer.
@@ -170,6 +219,7 @@ class ChunkParser:
         struct.Struct doesn't pickle, so it needs to be separately
         constructed in workers.
         """
+        self.v6_struct = struct.Struct(V6_STRUCT_STRING)
         self.v5_struct = struct.Struct(V5_STRUCT_STRING)
         self.v4_struct = struct.Struct(V4_STRUCT_STRING)
         self.v3_struct = struct.Struct(V3_STRUCT_STRING)
@@ -193,11 +243,64 @@ class ChunkParser:
 
         return (planes, probs, winner, q, plies_left)
 
-    def convert_v5_to_tuple(self, content):
+    def convert_v6_to_tuple(self, content):
         """
-        Unpack a v5 binary record to 5-tuple (state, policy pi, result, q, m)
+        Unpack a v6 binary record to 5-tuple (state, policy pi, result, q, m)
 
-        v5 struct format is (8308 bytes total)
+        v6 struct format is (8356 bytes total):
+                                  size         1st byte index
+        uint32_t version;                               0
+        uint32_t input_format;                          4
+        float probabilities[1858];  7432 bytes          8
+        uint64_t planes[104];        832 bytes       7440
+        uint8_t castling_us_ooo;                     8272
+        uint8_t castling_us_oo;                      8273
+        uint8_t castling_them_ooo;                   8274
+        uint8_t castling_them_oo;                    8275
+        uint8_t side_to_move_or_enpassant;           8276
+        uint8_t rule50_count;                        8277
+        // Bitfield with the following allocation:
+        //  bit 7: side to move (input type 3)
+        //  bit 6: position marked for deletion by the rescorer (never set by lc0)
+        //  bit 5: game adjudicated (v6)
+        //  bit 4: max game length exceeded (v6)
+        //  bit 3: best_q is for proven best move (v6)
+        //  bit 2: transpose transform (input type 3)
+        //  bit 1: mirror transform (input type 3)
+        //  bit 0: flip transform (input type 3)
+        uint8_t invariance_info;                     8278
+        uint8_t dep_result;                               8279
+        float root_q;                                8280
+        float best_q;                                8284
+        float root_d;                                8288
+        float best_d;                                8292
+        float root_m;      // In plies.              8296
+        float best_m;      // In plies.              8300
+        float plies_left;                            8304
+        float result_q;                              8308
+        float result_d;                              8312
+        float played_q;                              8316
+        float played_d;                              8320
+        float played_m;                              8324
+        // The folowing may be NaN if not found in cache.
+        float orig_q;      // For value repair.      8328
+        float orig_d;                                8332
+        float orig_m;                                8336
+        uint32_t visits;                             8340
+        // Indices in the probabilities array.
+        uint16_t played_idx;                         8344
+        uint16_t best_idx;                           8346
+        uint64_t reserved;                           8348
+        """
+        # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
+        # for the 8 "reserved" bytes
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
+        rule50_count, invariance_info, dep_result, root_q, best_q, root_d, best_d, root_m,
+        best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
+        orig_d, orig_m, visits, played_idx, best_idx, reserved1, reserved2, reserved3,
+        reserved4) = self.v6_struct.unpack(content)
+        """
+        v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
             int32 input_format (4 bytes)
             1858 float32 probabilities (7432 bytes)
@@ -218,12 +321,10 @@ class ChunkParser:
             float32 best_m (4 bytes)
             float32 plies_left (4 bytes)
         """
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
-         stm, rule50_count, dep_ply_count, winner, root_q, best_q, root_d,
-         best_d, root_m, best_m, plies_left) = self.v5_struct.unpack(content)
-        # v3/4 data sometimes has a useful value in dep_ply_count, so copy that over if the new ply_count is not populated.
+        # v3/4 data sometimes has a useful value in dep_ply_count (now invariance_info), 
+        # so copy that over if the new ply_count is not populated.
         if plies_left == 0:
-            plies_left = dep_ply_count
+            plies_left = invariance_info
         plies_left = struct.pack('f', plies_left)
 
         assert input_format == self.expected_input_format
@@ -269,7 +370,7 @@ class ChunkParser:
         # Concatenate all byteplanes. Make the last plane all 1's so the NN can
         # detect edges of the board more easily
         aux_plus_6_plane = self.flat_planes[0]
-        if (input_format == 132 or input_format == 133) and dep_ply_count >= 128:
+        if (input_format == 132 or input_format == 133) and invariance_info >= 128:
             aux_plus_6_plane = self.flat_planes[1]
         planes = planes.tobytes() + \
                  middle_planes + \
@@ -278,10 +379,15 @@ class ChunkParser:
                  self.flat_planes[1]
 
         assert len(planes) == ((8 * 13 * 1 + 8 * 1 * 1) * 8 * 8 * 4)
-        winner = float(winner)
-        assert winner == 1.0 or winner == -1.0 or winner == 0.0
-        winner = struct.pack('fff', winner == 1.0, winner == 0.0,
-                             winner == -1.0)
+
+        if ver == V6_VERSION:
+            winner = struct.pack('fff', 0.5 * (1.0 - result_d + result_q), result_d,
+                              0.5 * (1.0 - result_d - result_q))
+        else:
+            dep_result = float(dep_result)
+            assert dep_result == 1.0 or dep_result == -1.0 or dep_result == 0.0
+            winner = struct.pack('fff', dep_result == 1.0, dep_result == 0.0,
+                             dep_result == -1.0)
 
         best_q_w = 0.5 * (1.0 - best_d + best_q)
         best_q_l = 0.5 * (1.0 - best_d - best_q)
@@ -290,12 +396,17 @@ class ChunkParser:
 
         return (planes, probs, winner, best_q, plies_left)
 
+
     def sample_record(self, chunkdata):
         """
-        Randomly sample through the v3/4/5 chunk data and select records in v5 format
+        Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
+        Downsampling to avoid highly correlated positions skips most records, and 
+        value focus may also skip some records.
         """
         version = chunkdata[0:4]
-        if version == V5_VERSION:
+        if version == V6_VERSION:
+            record_size = self.v6_struct.size
+        elif version == V5_VERSION:
             record_size = self.v5_struct.size
         elif version == V4_VERSION:
             record_size = self.v4_struct.size
@@ -309,7 +420,9 @@ class ChunkParser:
                 # Downsample, using only 1/Nth of the items.
                 if random.randint(0, self.sample - 1) != 0:
                     continue  # Skip this record.
+
             record = chunkdata[i:i + record_size]
+            # for earlier versions, append fake bytes to record to maintain size
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
                 record += 16 * b'\x00'
@@ -318,12 +431,28 @@ class ChunkParser:
                 record += 12 * b'\x00'
                 # insert 4 bytes of classical input format tag to match v5 format
                 record = record[:4] + CLASSICAL_INPUT + record[4:]
+            if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
+                # add 48 byes of fake result_q, result_d etc
+                record += 48 * b'\x00'
+
+            if version == V6_VERSION:
+                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
+                best_q = struct.unpack('f', record[8284:8288])[0]
+                orig_q = struct.unpack('f', record[8328:8332])[0]
+                
+                # if orig_q is NaN, accept, else accept based on value focus
+                if not np.isnan(orig_q):
+                    diff_q = abs(best_q - orig_q)
+                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
+                    if thresh_p < 1.0 and random.random() > thresh_p:
+                        continue
+
             yield record
 
     def task(self, chunk_filename_queue, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
-        sending v5 data through pipe back to main process.
+        sending v6 data through pipe back to main process.
         """
         self.init_structs()
         while True:
@@ -332,7 +461,9 @@ class ChunkParser:
                 with gzip.open(filename, 'rb') as chunk_file:
                     version = chunk_file.read(4)
                     chunk_file.seek(0)
-                    if version == V5_VERSION:
+                    if version == V6_VERSION:
+                        record_size = self.v6_struct.size
+                    elif version == V5_VERSION:
                         record_size = self.v5_struct.size
                     elif version == V4_VERSION:
                         record_size = self.v4_struct.size
@@ -353,14 +484,13 @@ class ChunkParser:
                 print("failed to parse {}".format(filename))
                 continue
 
-    def v5_gen(self):
+    def v6_gen(self):
         """
-        Read v5 records from child workers, shuffle, and yield
+        Read v6 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v5_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v6_struct.size, self.shuffle_size)
         while len(self.readers):
-            #for r in mp.connection.wait(self.readers):
             for r in self.readers:
                 try:
                     s = r.recv_bytes()
@@ -380,11 +510,11 @@ class ChunkParser:
 
     def tuple_gen(self, gen):
         """
-        Take a generator producing v5 records and convert them to tuples.
+        Take a generator producing v6 records and convert them to tuples.
         applying a random symmetry on the way.
         """
         for r in gen:
-            yield self.convert_v5_to_tuple(r)
+            yield self.convert_v6_to_tuple(r)
 
     def batch_gen(self, gen):
         """
@@ -404,8 +534,8 @@ class ChunkParser:
         """
         Read data from child workers and yield batches of unpacked records
         """
-        gen = self.v5_gen()  # read from workers
-        gen = self.tuple_gen(gen)  # convert v5->tuple
+        gen = self.v6_gen()        # read from workers
+        gen = self.tuple_gen(gen)  # convert v6->tuple
         gen = self.batch_gen(gen)  # assemble into batches
         for b in gen:
             yield b
