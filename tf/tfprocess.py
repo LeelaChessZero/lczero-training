@@ -757,6 +757,8 @@ class TFProcess:
         sum_policy_accuracy /= test_batches
         sum_policy_accuracy *= 100
         sum_policy /= test_batches
+        sum_policy_entropy /= test_batches
+        sum_policy_ul /= test_batches
         sum_value /= test_batches
         if self.wdl:
             sum_value_accuracy /= test_batches
