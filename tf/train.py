@@ -465,6 +465,8 @@ def main(cmd):
                                   shuffle_size=shuffle_size,
                                   sample=SKIP,
                                   batch_size=ChunkParser.BATCH_SIZE,
+                                  value_focus_min=value_focus_min,
+                                  value_focus_slope=value_focus_slope,
                                   workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse,
