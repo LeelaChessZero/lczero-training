@@ -160,28 +160,29 @@ def main(cmd):
         train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat()\
                          .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                          .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+                         .batch(split_batch_size).map(extract_inputs_outputs)
     else:
         train_parser = ChunkParser(FileDataSrc(train_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE, workers=7)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         train_dataset = train_dataset.map(ChunkParser.parse_function)
-        train_dataset = train_dataset.prefetch(4)
 
     shuffle_size = int(shuffle_size*(1.0-train_ratio))
     if experimental_parser:
         test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat()\
                          .interleave(lambda x: tf.data.FixedLengthRecordDataset(x, 8292, compression_type='GZIP', num_parallel_reads=1).filter(sample), num_parallel_calls=tf.data.experimental.AUTOTUNE)\
                          .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extract_inputs_outputs).prefetch(4)
+                         .batch(split_batch_size).map(extract_inputs_outputs)
     else:
         test_parser = ChunkParser(FileDataSrc(test_chunks),
-                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE)
+                shuffle_size=shuffle_size, sample=SKIP, batch_size=ChunkParser.BATCH_SIZE, workers=7)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse, output_types=(tf.string, tf.string, tf.string, tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
-        test_dataset = test_dataset.prefetch(4)
+        if tfprocess.strategy is None: #Mirrored strategy appends prefech itself with value depending on number of replica
+	        train_dataset = train_dataset.prefetch(4)
+	        test_dataset = test_dataset.prefetch(4)
 
     tfprocess.init_v2(train_dataset, test_dataset)
 

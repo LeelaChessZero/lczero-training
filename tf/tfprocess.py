@@ -118,6 +118,7 @@ class TFProcess:
             tf.distribute.experimental_set_strategy(self.strategy)
         else:
             gpus = tf.config.experimental.list_physical_devices('GPU')
+            print(gpus)
             tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
             tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
             self.strategy = None
@@ -126,7 +127,7 @@ class TFProcess:
 
         self.global_step = tf.Variable(0, name='global_step', trainable=False, dtype=tf.int64)
 
-    def init_v2(self, train_dataset, test_dataset):
+    def init_v2(self, train_dataset, test_dataset):    
         if self.strategy is not None:
             self.train_dataset = self.strategy.experimental_distribute_dataset(train_dataset)
         else:
@@ -137,8 +138,13 @@ class TFProcess:
         else:
             self.test_dataset = train_dataset
         self.test_iter = iter(self.test_dataset)
-        self.init_net_v2()
-
+        this = self
+        if self.strategy is not None:
+            with self.strategy.scope():
+                    this.init_net_v2()
+        else:
+            self.init_net_v2()    
+        
     def init_net_v2(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8*8))
@@ -150,7 +156,6 @@ class TFProcess:
         if self.swa_enabled:
             # Count of networks accumulated into SWA
             self.swa_weights = [tf.Variable(w, trainable=False) for w in self.model.weights]
-        
         self.active_lr = 0.01
         self.optimizer = tf.keras.optimizers.SGD(learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
         self.orig_optimizer = self.optimizer
@@ -379,7 +384,7 @@ class TFProcess:
 
     @tf.function()
     def strategy_process_inner_loop(self, x, y, z, q):
-        policy_loss, value_loss, mse_loss, reg_term, new_grads = self.strategy.experimental_run_v2(self.process_inner_loop, args=(x, y, z, q))
+        policy_loss, value_loss, mse_loss, reg_term, new_grads = self.strategy.run(self.process_inner_loop, args=(x, y, z, q))
         policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_loss, axis=None)
         value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value_loss, axis=None)
         mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, mse_loss, axis=None)
@@ -396,7 +401,7 @@ class TFProcess:
 
     @tf.function()
     def strategy_apply_grads(self, grads, batch_splits):
-        grads, grad_norm = self.strategy.experimental_run_v2(self.apply_grads, args=(grads, batch_splits))
+        grads, grad_norm = self.strategy.run(self.apply_grads, args=(grads, batch_splits))
         grads = [self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None) for x in grads]
         grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, grad_norm, axis=None)
         return grads, grad_norm
@@ -407,7 +412,7 @@ class TFProcess:
 
     @tf.function()
     def strategy_merge_grads(self, grads, new_grads):
-        return self.strategy.experimental_run_v2(self.merge_grads, args=(grads, new_grads))
+        return self.strategy.run(self.merge_grads, args=(grads, new_grads))
 
     def process_v2(self, batch_size, test_batches, batch_splits=1):
         if not self.time_start:
@@ -576,7 +581,7 @@ class TFProcess:
 
     @tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q):
-        policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.strategy.experimental_run_v2(self.calculate_test_summaries_inner_loop, args=(x, y, z, q))
+        policy_loss, value_loss, mse_loss, policy_accuracy, value_accuracy = self.strategy.run(self.calculate_test_summaries_inner_loop, args=(x, y, z, q))
         policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_loss, axis=None)
         value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value_loss, axis=None)
         mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, mse_loss, axis=None)
