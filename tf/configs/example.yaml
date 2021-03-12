@@ -1,0 +1,48 @@
+%YAML 1.2
+---
+name: '128x14-t73_0'                  
+gpu: all                                 
+
+dataset:
+  num_chunks: 100000
+  allow_less_chunks: true
+  train_ratio: 0.90                
+  # For separated test and train data.
+  input_train: '/home/masterkni6/lczero-training/mydata/old/' 
+  input_test: '/home/masterkni6/lczero-training/mydata/old/' 
+
+training:
+    warmup_steps: 0
+    swa: true
+    swa_output: true
+    swa_max_n: 10
+    swa_steps: 100
+    mask_legal_moves: true
+    renorm: true
+    renorm_max_r: 1.0
+    renorm_max_d: 0.0
+    q_ratio: 0.20
+    max_grad_norm: 3.2
+    batch_size: 1024  
+    num_batch_splits: 1
+    test_steps: 500 
+    num_test_positions: 4000
+    train_avg_report_steps: 200 
+    total_steps: 2000
+    # checkpoint_steps: 10000  
+    shuffle_size: 50000   
+    lr_values:   
+        - 0.04
+        - 0.04
+    lr_boundaries:
+        - 120
+    policy_loss_weight: 1.0 
+    value_loss_weight: 0.5  
+    moves_left_loss_weight: 1.0 
+    path: '/home/masterkni6/lczero-training/mynetworks' 
+
+model:
+  filters: 128
+  residual_blocks: 14
+  se_ratio: 4
+  input_type: 'classic'
