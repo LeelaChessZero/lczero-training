@@ -336,8 +336,11 @@ class TFProcess:
                 scale = 20.0
                 target = target / scale
                 output = tf.cast(output, tf.float32) / scale
-                huber = tf.keras.losses.Huber(10.0 / scale, reduction=tf.keras.losses.Reduction.NONE)
-                return tf.reduce_mean(huber(target, output)) #* (1. / self.total_batch_size)
+                if self.strategy is not None:
+                    huber = tf.keras.losses.Huber(10.0 / scale, reduction=tf.keras.losses.Reduction.NONE)
+                else: 
+                    huber = tf.keras.losses.Huber(10.0 / scale)
+                return tf.reduce_mean(huber(target, output))
         else:
             moves_left_loss = None
 
