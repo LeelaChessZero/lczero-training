@@ -19,6 +19,7 @@
 import random
 import unittest
 
+
 class ShuffleBuffer:
     def __init__(self, elem_size, elem_count):
         """
@@ -50,7 +51,7 @@ class ShuffleBuffer:
         # so returning the last item is sufficient.
         self.used -= 1
         i = self.used
-        return self.buffer[i * self.elem_size : (i+1) * self.elem_size]
+        return self.buffer[i * self.elem_size:(i + 1) * self.elem_size]
 
     def insert_or_replace(self, item):
         """
@@ -65,43 +66,45 @@ class ShuffleBuffer:
         # random shuffle (Fisher-Yates)
         if self.used > 0:
             # swap 'item' with random item in buffer.
-            i = random.randint(0, self.used-1)
-            old_item = self.buffer[i * self.elem_size : (i+1) * self.elem_size]
-            self.buffer[i * self.elem_size : (i+1) * self.elem_size] = item
+            i = random.randint(0, self.used - 1)
+            old_item = self.buffer[i * self.elem_size:(i + 1) * self.elem_size]
+            self.buffer[i * self.elem_size:(i + 1) * self.elem_size] = item
             item = old_item
         # If the buffer isn't yet full, append 'item' to the end of the buffer.
         if self.used < self.elem_count:
             # Not yet full, so place the returned item at the end of the buffer.
             i = self.used
-            self.buffer[i * self.elem_size : (i+1) * self.elem_size] = item
+            self.buffer[i * self.elem_size:(i + 1) * self.elem_size] = item
             self.used += 1
             return None
         return item
-        
- 
+
+
 class ShuffleBufferTest(unittest.TestCase):
     def test_extract(self):
         sb = ShuffleBuffer(3, 1)
         r = sb.extract()
-        assert r == None, r # empty buffer => None
+        assert r == None, r  # empty buffer => None
         r = sb.insert_or_replace(b'111')
-        assert r == None, r # buffer not yet full => None
+        assert r == None, r  # buffer not yet full => None
         r = sb.extract()
-        assert r == b'111', r # one item in buffer => item
+        assert r == b'111', r  # one item in buffer => item
         r = sb.extract()
-        assert r == None, r # buffer empty => None
+        assert r == None, r  # buffer empty => None
+
     def test_wrong_size(self):
         sb = ShuffleBuffer(3, 1)
         try:
-            sb.insert_or_replace(b'1') # wrong length, so should throw.
-            assert False # Should not be reached.
+            sb.insert_or_replace(b'1')  # wrong length, so should throw.
+            assert False  # Should not be reached.
         except:
             pass
+
     def test_insert_or_replace(self):
-        n=10 # number of test items.
-        items=[bytes([x,x,x]) for x in range(n)]
+        n = 10  # number of test items.
+        items = [bytes([x, x, x]) for x in range(n)]
         sb = ShuffleBuffer(elem_size=3, elem_count=2)
-        out=[]
+        out = []
         for i in items:
             r = sb.insert_or_replace(i)
             if not r is None:

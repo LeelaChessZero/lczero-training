@@ -5,16 +5,19 @@ from policy_index import policy_index
 
 columns = 'abcdefgh'
 rows = '12345678'
-promotions = 'rbq' # N is encoded as normal move
+promotions = 'rbq'  # N is encoded as normal move
 
-col_index = {columns[i] : i for i in range(len(columns))}
-row_index = {rows[i] : i for i in range(len(rows))}
+col_index = {columns[i]: i for i in range(len(columns))}
+row_index = {rows[i]: i for i in range(len(rows))}
+
 
 def index_to_position(x):
     return columns[x[0]] + rows[x[1]]
 
+
 def position_to_index(p):
     return col_index[p[0]], row_index[p[1]]
+
 
 def valid_index(i):
     if i[0] > 7 or i[0] < 0:
@@ -23,25 +26,44 @@ def valid_index(i):
         return False
     return True
 
+
 def queen_move(start, direction, steps):
     i = position_to_index(start)
-    dir_vectors = {'N': (0, 1), 'NE': (1, 1), 'E': (1, 0), 'SE': (1, -1),
-            'S':(0, -1), 'SW':(-1, -1), 'W': (-1, 0), 'NW': (-1, 1)}
+    dir_vectors = {
+        'N': (0, 1),
+        'NE': (1, 1),
+        'E': (1, 0),
+        'SE': (1, -1),
+        'S': (0, -1),
+        'SW': (-1, -1),
+        'W': (-1, 0),
+        'NW': (-1, 1)
+    }
     v = dir_vectors[direction]
     i = i[0] + v[0] * steps, i[1] + v[1] * steps
     if not valid_index(i):
         return None
     return index_to_position(i)
 
+
 def knight_move(start, direction, steps):
     i = position_to_index(start)
-    dir_vectors = {'N': (1, 2), 'NE': (2, 1), 'E': (2, -1), 'SE': (1, -2),
-            'S':(-1, -2), 'SW':(-2, -1), 'W': (-2, 1), 'NW': (-1, 2)}
+    dir_vectors = {
+        'N': (1, 2),
+        'NE': (2, 1),
+        'E': (2, -1),
+        'SE': (1, -2),
+        'S': (-1, -2),
+        'SW': (-2, -1),
+        'W': (-2, 1),
+        'NW': (-1, 2)
+    }
     v = dir_vectors[direction]
     i = i[0] + v[0] * steps, i[1] + v[1] * steps
     if not valid_index(i):
         return None
     return index_to_position(i)
+
 
 def make_map(kind='matrix'):
     # 56 planes of queen moves
@@ -55,7 +77,7 @@ def make_map(kind='matrix'):
                     if end == None:
                         moves.append('illegal')
                     else:
-                        moves.append(start+end)
+                        moves.append(start + end)
 
     # 8 planes of knight moves
     for direction in ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
@@ -66,7 +88,7 @@ def make_map(kind='matrix'):
                 if end == None:
                     moves.append('illegal')
                 else:
-                    moves.append(start+end)
+                    moves.append(start + end)
 
     # 9 promotions
     for direction in ['NW', 'N', 'NE']:
@@ -82,13 +104,13 @@ def make_map(kind='matrix'):
                     if end == None:
                         moves.append('illegal')
                     else:
-                        moves.append(start+end+promotion)
+                        moves.append(start + end + promotion)
 
     for m in policy_index:
         if m not in moves:
             raise ValueError('Missing move: {}'.format(m))
 
-    az_to_lc0 = np.zeros((80*8*8, len(policy_index)), dtype=np.float32)
+    az_to_lc0 = np.zeros((80 * 8 * 8, len(policy_index)), dtype=np.float32)
     indices = []
     legal_moves = 0
     for e, m in enumerate(moves):
@@ -105,7 +127,7 @@ def make_map(kind='matrix'):
 
     assert legal_moves == len(policy_index)
     assert np.sum(az_to_lc0) == legal_moves
-    for e in range(80*8*8):
+    for e in range(80 * 8 * 8):
         for i in range(len(policy_index)):
             pass
     if kind == 'matrix':
@@ -113,10 +135,12 @@ def make_map(kind='matrix'):
     elif kind == 'index':
         return indices
 
+
 if __name__ == "__main__":
     # Generate policy map include file for lc0
     if len(sys.argv) != 2:
-        raise ValueError("Output filename is needed as a command line argument")
+        raise ValueError(
+            "Output filename is needed as a command line argument")
 
     az_to_lc0 = np.ravel(make_map('index'))
     header = \
@@ -144,13 +168,13 @@ namespace lczero {
 """
     line_length = 12
     with open(sys.argv[1], 'w') as f:
-        f.write(header+'\n')
+        f.write(header + '\n')
         f.write('const short kConvPolicyMap[] = {\\\n')
         for e, i in enumerate(az_to_lc0):
             if e % line_length == 0 and e > 0:
                 f.write('\n')
             f.write(str(i).rjust(5))
-            if e != len(az_to_lc0)-1:
+            if e != len(az_to_lc0) - 1:
                 f.write(',')
         f.write('};\n\n')
         f.write('}  // namespace lczero')
