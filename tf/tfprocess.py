@@ -161,6 +161,9 @@ class TFProcess:
             'renorm_momentum', 0.99)
 
         if self.cfg['gpu'] == 'all':
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
         else:
