@@ -191,9 +191,9 @@ class TFProcess:
         if self.strategy is not None and validation_dataset is not None:
             self.validation_dataset = self.strategy.experimental_distribute_dataset(validation_dataset)
         else:
-            self.validation_dataset = validation_dataset
-        this = self
+            self.validation_dataset = validation_dataset       
         if self.strategy is not None:
+        this = self
             with self.strategy.scope():
                     this.init_net_v2()
         else:
