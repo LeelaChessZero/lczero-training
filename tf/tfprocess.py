@@ -165,7 +165,7 @@ class TFProcess:
             tf.distribute.experimental_set_strategy(self.strategy)
         elif self.cfg['gpu'].__contains__(','):
             gpus = tf.config.experimental.list_physical_devices('GPU')
-            for i in self.cfg['gpu'].split(",")
+            for i in self.cfg['gpu'].split(","):
                 tf.config.experimental.set_visible_devices(gpus[int(i)],
                                                            'GPU')
         else:
