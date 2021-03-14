@@ -483,7 +483,8 @@ def main(cmd):
     if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)
         test_dataset = test_dataset.prefetch(4)
-        validation_dataset = validation_dataset.prefetch(4)
+        if validation_dataset is not None:
+            validation_dataset = validation_dataset.prefetch(4)
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 
     tfprocess.restore_v2()
