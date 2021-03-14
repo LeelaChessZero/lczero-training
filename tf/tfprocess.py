@@ -166,8 +166,10 @@ class TFProcess:
         else:
             gpus = tf.config.experimental.list_physical_devices('GPU')
             print(gpus)
-            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']], 'GPU')
-            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
+            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
+                                                       'GPU')
+            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
+                                                     True)
             self.strategy = None
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
@@ -177,28 +179,31 @@ class TFProcess:
                                        trainable=False,
                                        dtype=tf.int64)
 
-    def init_v2(self, train_dataset, test_dataset, validation_dataset=None):    
+    def init_v2(self, train_dataset, test_dataset, validation_dataset=None):
         if self.strategy is not None:
-            self.train_dataset = self.strategy.experimental_distribute_dataset(train_dataset)
+            self.train_dataset = self.strategy.experimental_distribute_dataset(
+                train_dataset)
         else:
             self.train_dataset = train_dataset
         self.train_iter = iter(self.train_dataset)
         if self.strategy is not None:
-            self.test_dataset = self.strategy.experimental_distribute_dataset(test_dataset)
+            self.test_dataset = self.strategy.experimental_distribute_dataset(
+                test_dataset)
         else:
             self.test_dataset = train_dataset
         self.test_iter = iter(self.test_dataset)
         if self.strategy is not None and validation_dataset is not None:
-            self.validation_dataset = self.strategy.experimental_distribute_dataset(validation_dataset)
+            self.validation_dataset = self.strategy.experimental_distribute_dataset(
+                validation_dataset)
         else:
-            self.validation_dataset = validation_dataset       
+            self.validation_dataset = validation_dataset
         if self.strategy is not None:
-        this = self
+            this = self
             with self.strategy.scope():
-                    this.init_net_v2()
+                this.init_net_v2()
         else:
-            self.init_net_v2()    
-        
+            self.init_net_v2()
+
     def init_net_v2(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8 * 8))
@@ -337,8 +342,9 @@ class TFProcess:
                 target = target / scale
                 output = tf.cast(output, tf.float32) / scale
                 if self.strategy is not None:
-                    huber = tf.keras.losses.Huber(10.0 / scale, reduction=tf.keras.losses.Reduction.NONE)
-                else: 
+                    huber = tf.keras.losses.Huber(
+                        10.0 / scale, reduction=tf.keras.losses.Reduction.NONE)
+                else:
                     huber = tf.keras.losses.Huber(10.0 / scale)
                 return tf.reduce_mean(huber(target, output))
         else:
@@ -548,27 +554,46 @@ class TFProcess:
 
     @tf.function()
     def strategy_process_inner_loop(self, x, y, z, q, m):
-        policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads = self.strategy.run(self.process_inner_loop, args=(x, y, z, q, m))
-        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_loss, axis=None)
-        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value_loss, axis=None)
-        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, mse_loss, axis=None)
-        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, moves_left_loss, axis=None)
-        reg_term = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, reg_term, axis=None)
+        policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads = self.strategy.run(
+            self.process_inner_loop, args=(x, y, z, q, m))
+        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                           policy_loss,
+                                           axis=None)
+        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                          value_loss,
+                                          axis=None)
+        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                        mse_loss,
+                                        axis=None)
+        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                               moves_left_loss,
+                                               axis=None)
+        reg_term = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                        reg_term,
+                                        axis=None)
         return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads
 
     def apply_grads(self, grads, batch_splits):
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
-        max_grad_norm = self.cfg['training'].get('max_grad_norm', 10000.0) * batch_splits
+        max_grad_norm = self.cfg['training'].get('max_grad_norm',
+                                                 10000.0) * batch_splits
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
+        self.optimizer.apply_gradients(zip(grads,
+                                           self.model.trainable_weights))
         return grads, grad_norm
 
     @tf.function()
     def strategy_apply_grads(self, grads, batch_splits):
-        grads, grad_norm = self.strategy.run(self.apply_grads, args=(grads, batch_splits))
-        grads = [self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None) for x in grads]
-        grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, grad_norm, axis=None)
+        grads, grad_norm = self.strategy.run(self.apply_grads,
+                                             args=(grads, batch_splits))
+        grads = [
+            self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None)
+            for x in grads
+        ]
+        grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                         grad_norm,
+                                         axis=None)
         return grads, grad_norm
 
     @tf.function()
@@ -791,18 +816,35 @@ class TFProcess:
 
     @tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
-        policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy.run(self.calculate_test_summaries_inner_loop, args=(x, y, z, q, m))
-        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_loss, axis=None)
-        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value_loss, axis=None)
-        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, mse_loss, axis=None)
-        policy_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_accuracy, axis=None)
-        value_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, value_accuracy, axis=None)
-        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, moves_left_loss, axis=None)
-        moves_left_mean_error = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, moves_left_mean_error, axis=None)
-        policy_entropy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_entropy, axis=None)
-        policy_ul = self.strategy.reduce(tf.distribute.ReduceOp.MEAN, policy_ul, axis=None)
+        policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy.run(
+            self.calculate_test_summaries_inner_loop, args=(x, y, z, q, m))
+        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                           policy_loss,
+                                           axis=None)
+        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                          value_loss,
+                                          axis=None)
+        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                        mse_loss,
+                                        axis=None)
+        policy_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                               policy_accuracy,
+                                               axis=None)
+        value_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                              value_accuracy,
+                                              axis=None)
+        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                               moves_left_loss,
+                                               axis=None)
+        moves_left_mean_error = self.strategy.reduce(
+            tf.distribute.ReduceOp.MEAN, moves_left_mean_error, axis=None)
+        policy_entropy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                              policy_entropy,
+                                              axis=None)
+        policy_ul = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                         policy_ul,
+                                         axis=None)
         return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
-
 
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = 0

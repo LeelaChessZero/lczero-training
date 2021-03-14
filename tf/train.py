@@ -54,7 +54,9 @@ def get_latest_chunks(path, num_chunks, allow_less, sort_key_fn):
     chunks = get_all_chunks(path)
     if len(chunks) < num_chunks:
         if allow_less:
-            print("sorting {} chunks...".format(len(chunks)), end='', flush=True)
+            print("sorting {} chunks...".format(len(chunks)),
+                  end='',
+                  flush=True)
             chunks.sort(key=sort_key_fn, reverse=True)
             print("[done]")
             print("{} - {}".format(os.path.basename(chunks[-1]),
@@ -80,7 +82,8 @@ def identity_function(name):
 
 
 def game_number_for_name(name):
-    num_str = os.path.basename(name).upper().strip("ABCDEFGHIJKLMNOPQRSTUVWXYZ_-.")
+    num_str = os.path.basename(name).upper().strip(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ_-.")
     return int(num_str)
 
 
@@ -418,8 +421,10 @@ def main(cmd):
     experimental_reads = max(2, mp.cpu_count() - 2) // 2
     extractor = select_extractor(tfprocess.INPUT_MODE)
 
-    if experimental_parser and (value_focus_min != 1 or value_focus_slope != 0):
-        raise ValueError('Experimental parser does not support non-default value \
+    if experimental_parser and (value_focus_min != 1
+                                or value_focus_slope != 0):
+        raise ValueError(
+            'Experimental parser does not support non-default value \
                           focus parameters.')
 
     def read(x):
@@ -470,7 +475,7 @@ def main(cmd):
             output_types=(tf.string, tf.string, tf.string, tf.string,
                           tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
-    if tfprocess.strategy is None: #Mirrored strategy appends prefetch itself with a value depending on number of replicas
+    if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)
         test_dataset = test_dataset.prefetch(4)
 
