@@ -475,16 +475,15 @@ def main(cmd):
             output_types=(tf.string, tf.string, tf.string, tf.string,
                           tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
-    if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
-        train_dataset = train_dataset.prefetch(4)
-        test_dataset = test_dataset.prefetch(4)
-
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
         validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
-                               .batch(split_batch_size, drop_remainder=True).map(extractor).prefetch(4)
-
+                               .batch(split_batch_size, drop_remainder=True).map(extractor)
+    if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
+        train_dataset = train_dataset.prefetch(4)
+        test_dataset = test_dataset.prefetch(4)
+        validation_dataset = validation_dataset.prefetch(4)
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 
     tfprocess.restore_v2()
