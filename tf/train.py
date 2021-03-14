@@ -470,9 +470,9 @@ def main(cmd):
             output_types=(tf.string, tf.string, tf.string, tf.string,
                           tf.string))
         test_dataset = test_dataset.map(ChunkParser.parse_function)
-        if tfprocess.strategy is None: #Mirrored strategy appends prefetch itself with a value depending on number of replicas
-	        train_dataset = train_dataset.prefetch(4)
-	        test_dataset = test_dataset.prefetch(4)
+    if tfprocess.strategy is None: #Mirrored strategy appends prefetch itself with a value depending on number of replicas
+        train_dataset = train_dataset.prefetch(4)
+        test_dataset = test_dataset.prefetch(4)
 
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
