@@ -161,6 +161,9 @@ class TFProcess:
             'renorm_momentum', 0.99)
 
         if self.cfg['gpu'] == 'all':
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
         else:
@@ -180,19 +183,31 @@ class TFProcess:
                                        dtype=tf.int64)
 
     def init_v2(self, train_dataset, test_dataset, validation_dataset=None):
+        def apply_shard_policy(dataset):
+            options = tf.data.Options()
+            # Disable auto shard. We only support single worker, but if
+            # we did support multi worker its fine for each worker to
+            # consume its own view of the randomized shuffle without
+            # discarding any data.
+            options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+            return dataset.with_options(options)
+
         if self.strategy is not None:
+            train_dataset = apply_shard_policy(train_dataset)
             self.train_dataset = self.strategy.experimental_distribute_dataset(
                 train_dataset)
         else:
             self.train_dataset = train_dataset
         self.train_iter = iter(self.train_dataset)
         if self.strategy is not None:
+            test_dataset = apply_shard_policy(test_dataset)
             self.test_dataset = self.strategy.experimental_distribute_dataset(
                 test_dataset)
         else:
             self.test_dataset = train_dataset
         self.test_iter = iter(self.test_dataset)
         if self.strategy is not None and validation_dataset is not None:
+            validation_dataset = apply_shard_policy(validation_dataset)
             self.validation_dataset = self.strategy.experimental_distribute_dataset(
                 validation_dataset)
         else:
@@ -581,20 +596,16 @@ class TFProcess:
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads,
                                            self.model.trainable_weights))
-        return grads, grad_norm
+        return grad_norm
 
     @tf.function()
     def strategy_apply_grads(self, grads, batch_splits):
-        grads, grad_norm = self.strategy.run(self.apply_grads,
-                                             args=(grads, batch_splits))
-        grads = [
-            self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None)
-            for x in grads
-        ]
+        grad_norm = self.strategy.run(self.apply_grads,
+                                      args=(grads, batch_splits))
         grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
                                          grad_norm,
                                          axis=None)
-        return grads, grad_norm
+        return grad_norm
 
     @tf.function()
     def merge_grads(self, grads, new_grads):
@@ -682,9 +693,13 @@ class TFProcess:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr = self.lr / effective_batch_splits
         if self.strategy is not None:
-            grads, grad_norm = self.strategy_apply_grads(grads, batch_splits)
+            grad_norm = self.strategy_apply_grads(grads, batch_splits)
         else:
-            grads, grad_norm = self.apply_grads(grads, batch_splits)
+            grad_norm = self.apply_grads(grads, batch_splits)
+
+        # Note: grads variable at this point has not been unscaled or
+        # had clipping applied. Since no code after this point depends
+        # upon that it seems fine for now.
 
         # Update steps.
         self.global_step.assign_add(1)
