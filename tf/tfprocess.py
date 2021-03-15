@@ -183,31 +183,19 @@ class TFProcess:
                                        dtype=tf.int64)
 
     def init_v2(self, train_dataset, test_dataset, validation_dataset=None):
-        def apply_shard_policy(dataset):
-            options = tf.data.Options()
-            # Disable auto shard. We only support single worker, but if
-            # we did support multi worker its fine for each worker to
-            # consume its own view of the randomized shuffle without
-            # discarding any data.
-            options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
-            return dataset.with_options(options)
-
         if self.strategy is not None:
-            train_dataset = apply_shard_policy(train_dataset)
             self.train_dataset = self.strategy.experimental_distribute_dataset(
                 train_dataset)
         else:
             self.train_dataset = train_dataset
         self.train_iter = iter(self.train_dataset)
         if self.strategy is not None:
-            test_dataset = apply_shard_policy(test_dataset)
             self.test_dataset = self.strategy.experimental_distribute_dataset(
                 test_dataset)
         else:
             self.test_dataset = train_dataset
         self.test_iter = iter(self.test_dataset)
         if self.strategy is not None and validation_dataset is not None:
-            validation_dataset = apply_shard_policy(validation_dataset)
             self.validation_dataset = self.strategy.experimental_distribute_dataset(
                 validation_dataset)
         else:
