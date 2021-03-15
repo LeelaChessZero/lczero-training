@@ -485,6 +485,13 @@ def main(cmd):
         test_dataset = test_dataset.prefetch(4)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.prefetch(4)
+    else:
+        options = tf.data.Options()
+        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+        train_dataset = train_dataset.with_options(options)
+        test_dataset = test_dataset.with_options(options)
+        if validation_dataset is not None:
+            validation_dataset = validation_dataset.with_options(options)
     tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
 
     tfprocess.restore_v2()
