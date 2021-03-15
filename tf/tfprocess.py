@@ -576,20 +576,21 @@ class TFProcess:
                                         axis=None)
         return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads
 
-    def apply_grads(self, grads, batch_splits):
+    def apply_grads(self, grads, effective_batch_splits):
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
-        max_grad_norm = self.cfg['training'].get('max_grad_norm',
-                                                 10000.0) * batch_splits
+        max_grad_norm = self.cfg['training'].get(
+            'max_grad_norm', 10000.0) * effective_batch_splits
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads,
                                            self.model.trainable_weights))
         return grads, grad_norm
 
     @tf.function()
-    def strategy_apply_grads(self, grads, batch_splits):
+    def strategy_apply_grads(self, grads, effective_batch_splits):
         grads, grad_norm = self.strategy.run(self.apply_grads,
-                                             args=(grads, batch_splits))
+                                             args=(grads,
+                                                   effective_batch_splits))
         grads = [
             self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None)
             for x in grads
@@ -685,9 +686,10 @@ class TFProcess:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr = self.lr / effective_batch_splits
         if self.strategy is not None:
-            grads, grad_norm = self.strategy_apply_grads(grads, batch_splits)
+            grads, grad_norm = self.strategy_apply_grads(
+                grads, effective_batch_splits)
         else:
-            grads, grad_norm = self.apply_grads(grads, batch_splits)
+            grads, grad_norm = self.apply_grads(grads, effective_batch_splits)
 
         # Update steps.
         self.global_step.assign_add(1)
@@ -731,7 +733,7 @@ class TFProcess:
                 tf.summary.scalar("Reg term", avg_reg_term, step=steps)
                 tf.summary.scalar("LR", self.lr, step=steps)
                 tf.summary.scalar("Gradient norm",
-                                  grad_norm / batch_splits,
+                                  grad_norm / effective_batch_splits,
                                   step=steps)
                 tf.summary.scalar("MSE Loss", avg_mse_loss, step=steps)
                 self.compute_update_ratio_v2(before_weights, after_weights,
