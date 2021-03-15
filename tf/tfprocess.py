@@ -512,9 +512,24 @@ class TFProcess:
             self.checkpoint.restore(self.manager.latest_checkpoint)
 
     def process_loop_v2(self, batch_size, test_batches, batch_splits=1):
+        if self.swa_enabled:
+            # split half of test_batches between testing regular weights and SWA weights
+            test_batches //= 2
+        # Make sure that ghost batch norm can be applied
+        if self.virtual_batch_size and batch_size % self.virtual_batch_size != 0:
+            # Adjust required batch size for batch splitting.
+            required_factor = self.virtual_batch_size * self.cfg[
+                'training'].get('num_batch_splits', 1)
+            raise ValueError(
+                'batch_size must be a multiple of {}'.format(required_factor))
+
         # Get the initial steps value in case this is a resume from a step count
         # which is not a multiple of total_steps.
         steps = self.global_step.read_value()
+        self.last_steps = steps
+        self.time_start = time.time()
+        self.profiling_start_step = None
+
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
             self.process_v2(batch_size,
@@ -603,44 +618,7 @@ class TFProcess:
     def strategy_merge_grads(self, grads, new_grads):
         return self.strategy.run(self.merge_grads, args=(grads, new_grads))
 
-    def process_v2(self, batch_size, test_batches, batch_splits=1):
-        if not self.time_start:
-            self.time_start = time.time()
-
-        # Get the initial steps value before we do a training step.
-        steps = self.global_step.read_value()
-        if not self.last_steps:
-            self.last_steps = steps
-
-        if self.swa_enabled:
-            # split half of test_batches between testing regular weights and SWA weights
-            test_batches //= 2
-
-        # Run test before first step to see delta since end of last run.
-        if steps % self.cfg['training']['total_steps'] == 0:
-            # Steps is given as one higher than current in order to avoid it
-            # being equal to the value the end of a run is stored against.
-            self.calculate_test_summaries_v2(test_batches, steps + 1)
-            if self.swa_enabled:
-                self.calculate_swa_summaries_v2(test_batches, steps + 1)
-
-        # Make sure that ghost batch norm can be applied
-        if self.virtual_batch_size and batch_size % self.virtual_batch_size != 0:
-            # Adjust required batch size for batch splitting.
-            required_factor = self.virtual_batch_size * self.cfg[
-                'training'].get('num_batch_splits', 1)
-            raise ValueError(
-                'batch_size must be a multiple of {}'.format(required_factor))
-
-        # Determine learning rate
-        lr_values = self.cfg['training']['lr_values']
-        lr_boundaries = self.cfg['training']['lr_boundaries']
-        steps_total = steps % self.cfg['training']['total_steps']
-        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
-        if self.warmup_steps > 0 and steps < self.warmup_steps:
-            self.lr = self.lr * tf.cast(steps + 1,
-                                        tf.float32) / self.warmup_steps
-
+    def train_step(self, steps, batch_size, batch_splits):
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps +
                 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (
@@ -681,7 +659,8 @@ class TFProcess:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr = self.lr / effective_batch_splits
         if self.strategy is not None:
-            grad_norm = self.strategy_apply_grads(grads, effective_batch_splits)
+            grad_norm = self.strategy_apply_grads(grads,
+                                                  effective_batch_splits)
         else:
             grad_norm = self.apply_grads(grads, effective_batch_splits)
 
@@ -744,6 +723,41 @@ class TFProcess:
             self.avg_value_loss = []
             self.avg_mse_loss = []
             self.avg_reg_term = []
+        return steps
+
+    def process_v2(self, batch_size, test_batches, batch_splits):
+        # Get the initial steps value before we do a training step.
+        steps = self.global_step.read_value()
+
+        # By default disabled since 0 != 10.
+        if steps % self.cfg['training'].get('profile_step_freq',
+                                            1) == self.cfg['training'].get(
+                                                'profile_step_offset', 10):
+            self.profiling_start_step = steps
+            tf.profiler.experimental.start(
+                os.path.join(os.getcwd(),
+                             "leelalogs/{}-profile".format(self.cfg['name'])))
+
+        # Run test before first step to see delta since end of last run.
+        if steps % self.cfg['training']['total_steps'] == 0:
+            with tf.profiler.experimental.Trace("Test", step_num=steps + 1):
+                # Steps is given as one higher than current in order to avoid it
+                # being equal to the value the end of a run is stored against.
+                self.calculate_test_summaries_v2(test_batches, steps + 1)
+                if self.swa_enabled:
+                    self.calculate_swa_summaries_v2(test_batches, steps + 1)
+
+        # Determine learning rate
+        lr_values = self.cfg['training']['lr_values']
+        lr_boundaries = self.cfg['training']['lr_boundaries']
+        steps_total = steps % self.cfg['training']['total_steps']
+        self.lr = lr_values[bisect.bisect_right(lr_boundaries, steps_total)]
+        if self.warmup_steps > 0 and steps < self.warmup_steps:
+            self.lr = self.lr * tf.cast(steps + 1,
+                                        tf.float32) / self.warmup_steps
+
+        with tf.profiler.experimental.Trace("Train", step_num=steps):
+            steps = self.train_step(steps, batch_size, batch_splits)
 
         if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
             self.update_swa_v2()
@@ -752,17 +766,19 @@ class TFProcess:
         # one at the final step so the delta to the first step can be calculted.
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg[
                 'training']['total_steps'] == 0:
-            self.calculate_test_summaries_v2(test_batches, steps)
-            if self.swa_enabled:
-                self.calculate_swa_summaries_v2(test_batches, steps)
+            with tf.profiler.experimental.Trace("Test", step_num=steps):
+                self.calculate_test_summaries_v2(test_batches, steps)
+                if self.swa_enabled:
+                    self.calculate_swa_summaries_v2(test_batches, steps)
 
         if self.validation_dataset is not None and (
                 steps % self.cfg['training']['validation_steps'] == 0
                 or steps % self.cfg['training']['total_steps'] == 0):
-            if self.swa_enabled:
-                self.calculate_swa_validations_v2(steps)
-            else:
-                self.calculate_test_validations_v2(steps)
+            with tf.profiler.experimental.Trace("Validate", step_num=steps):
+                if self.swa_enabled:
+                    self.calculate_swa_validations_v2(steps)
+                else:
+                    self.calculate_test_validations_v2(steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
@@ -779,6 +795,13 @@ class TFProcess:
             self.save_leelaz_weights_v2(leela_path)
             if self.swa_enabled:
                 self.save_swa_weights_v2(swa_path)
+
+        if self.profiling_start_step is not None and (
+                steps >= self.profiling_start_step +
+                self.cfg['training'].get('profile_step_count', 0)
+                or steps % self.cfg['training']['total_steps'] == 0):
+            tf.profiler.experimental.stop()
+            self.profiling_start_step = None
 
     def calculate_swa_summaries_v2(self, test_batches, steps):
         backup = self.read_weights()
