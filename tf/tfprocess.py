@@ -584,20 +584,16 @@ class TFProcess:
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads,
                                            self.model.trainable_weights))
-        return grads, grad_norm
+        return grad_norm
 
     @tf.function()
     def strategy_apply_grads(self, grads, batch_splits):
-        grads, grad_norm = self.strategy.run(self.apply_grads,
-                                             args=(grads, batch_splits))
-        grads = [
-            self.strategy.reduce(tf.distribute.ReduceOp.MEAN, x, axis=None)
-            for x in grads
-        ]
+        grad_norm = self.strategy.run(self.apply_grads,
+                                      args=(grads, batch_splits))
         grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
                                          grad_norm,
                                          axis=None)
-        return grads, grad_norm
+        return grad_norm
 
     @tf.function()
     def merge_grads(self, grads, new_grads):
@@ -685,9 +681,13 @@ class TFProcess:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr = self.lr / effective_batch_splits
         if self.strategy is not None:
-            grads, grad_norm = self.strategy_apply_grads(grads, batch_splits)
+            grad_norm = self.strategy_apply_grads(grads, batch_splits)
         else:
-            grads, grad_norm = self.apply_grads(grads, batch_splits)
+            grad_norm = self.apply_grads(grads, batch_splits)
+
+        # Note: grads variable at this point has not been unscaled or
+        # had clipping applied. Since no code after this point depends
+        # upon that it seems fine for now.
 
         # Update steps.
         self.global_step.assign_add(1)
