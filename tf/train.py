@@ -410,7 +410,22 @@ def main(cmd):
 
     value_focus_min = cfg['training'].get('value_focus_min', 1)
     value_focus_slope = cfg['training'].get('value_focus_slope', 0)
+    # defaults to not use value focus in test data
+    vfit = cfg['training'].get('value_focus_in_test', False)
+    if not vfit:
+        vf_test_min = 1  # min=1 inactivates value focus
+    else:
+        vf_test_min = value_focus_min
 
+    policy_focus_min = cfg['training'].get('policy_focus_min', 1)
+    policy_focus_slope = cfg['training'].get('policy_focus_slope', 0)
+    # defaults to not use policy focus in test data
+    pfit = cfg['training'].get('policy_focus_in_test', False)
+    if not pfit:
+        pf_test_min = 1  # min=1 inactivates policy focus
+    else:
+        pf_test_min = policy_focus_min
+            
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
@@ -443,6 +458,8 @@ def main(cmd):
                                    batch_size=ChunkParser.BATCH_SIZE,
                                    value_focus_min=value_focus_min,
                                    value_focus_slope=value_focus_slope,
+                                   policy_focus_min=policy_focus_min,
+                                   policy_focus_slope=policy_focus_slope,
                                    workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse,
@@ -459,14 +476,15 @@ def main(cmd):
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extractor).prefetch(4)
     else:
-        # no value focus for test_parser
         test_parser = ChunkParser(test_chunks,
                                   tfprocess.INPUT_MODE,
                                   shuffle_size=shuffle_size,
                                   sample=SKIP,
                                   batch_size=ChunkParser.BATCH_SIZE,
-                                  value_focus_min=value_focus_min,
+                                  value_focus_min=vf_test_min,
                                   value_focus_slope=value_focus_slope,
+                                  policy_focus_min=policy_focus_min,
+                                  policy_focus_slope=policy_focus_slope,
                                   workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse,

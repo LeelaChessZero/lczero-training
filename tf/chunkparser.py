@@ -74,7 +74,7 @@ V5_VERSION = struct.pack('i', 5)
 CLASSICAL_INPUT = struct.pack('i', 1)
 V4_VERSION = struct.pack('i', 4)
 V3_VERSION = struct.pack('i', 3)
-V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHH4H'
+V6_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffffffffffffIHHf2H'
 V5_STRUCT_STRING = '4si7432s832sBBBBBBBbfffffff'
 V4_STRUCT_STRING = '4s7432s832sBBBBBBBbffff'
 V3_STRUCT_STRING = '4s7432s832sBBBBBBBb'
@@ -132,6 +132,8 @@ class ChunkParser:
                  batch_size=256,
                  value_focus_min=1,
                  value_focus_slope=0,
+                 policy_focus_min=1,
+                 policy_focus_slope=0,
                  workers=None):
         """
         Read data and yield batches of raw tensors.
@@ -166,9 +168,14 @@ class ChunkParser:
 
         # set the down-sampling rate
         self.sample = sample
+
         # set the min and slope for value focus, defaults accept all positions
         self.value_focus_min = value_focus_min
         self.value_focus_slope = value_focus_slope
+        # set the min and slope for policy focus, defaults accept all positions
+        self.policy_focus_min = policy_focus_min
+        self.policy_focus_slope = policy_focus_slope
+
         # set the mini-batch size
         self.batch_size = batch_size
         # set number of elements in the shuffle buffer.
@@ -269,7 +276,7 @@ class ChunkParser:
         //  bit 1: mirror transform (input type 3)
         //  bit 0: flip transform (input type 3)
         uint8_t invariance_info;                     8278
-        uint8_t dep_result;                               8279
+        uint8_t dep_result;                          8279
         float root_q;                                8280
         float best_q;                                8284
         float root_d;                                8288
@@ -290,15 +297,18 @@ class ChunkParser:
         // Indices in the probabilities array.
         uint16_t played_idx;                         8344
         uint16_t best_idx;                           8346
-        uint64_t reserved;                           8348
+        // Kullback-Leibler divergence between policy and visits
+        float policy_kld;                            8348
+        uint16_t reserved;                           8352
+        uint16_t reserved;                           8354
         """
         # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
         # for the 8 "reserved" bytes
         (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo, stm,
         rule50_count, invariance_info, dep_result, root_q, best_q, root_d, best_d, root_m,
         best_m, plies_left, result_q, result_d, played_q, played_d, played_m, orig_q,
-        orig_d, orig_m, visits, played_idx, best_idx, reserved1, reserved2, reserved3,
-        reserved4) = self.v6_struct.unpack(content)
+        orig_d, orig_m, visits, played_idx, best_idx, policy_kld, reserved1, 
+        reserved2) = self.v6_struct.unpack(content)
         """
         v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
@@ -436,16 +446,23 @@ class ChunkParser:
                 record += 48 * b'\x00'
 
             if version == V6_VERSION:
-                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
-                best_q = struct.unpack('f', record[8284:8288])[0]
-                orig_q = struct.unpack('f', record[8328:8332])[0]
-                
-                # if orig_q is NaN, accept, else accept based on value focus
-                if not np.isnan(orig_q):
-                    diff_q = abs(best_q - orig_q)
-                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
-                    if thresh_p < 1.0 and random.random() > thresh_p:
-                        continue
+                if self.value_focus_min < 1.0:
+                    # value focus code, peek at orig_q from record (unpacks as tuple with one item)
+                    orig_q = struct.unpack('f', record[8328:8332])[0]
+                    # if orig_q is NaN (not found), accept, else accept based on value focus
+                    if not np.isnan(orig_q):
+                        best_q = struct.unpack('f', record[8284:8288])[0]
+                        diff_q = abs(best_q - orig_q)
+                        thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
+                        if thresh_p < 1.0 and random.random() > thresh_p:
+                            continue
+                if self.policy_focus_min < 1.0:
+                    pol_kld = struct.unpack('f', record[8348:8352])[0]
+                    # 0 was stored prior to implementing KLD output in training games
+                    if not np.isnan(pol_kld) and pol_kld > 0:
+                        thresh_p = self.policy_focus_min + self.policy_focus_slope * pol_kld
+                        if thresh_p < 1.0 and random.random() > thresh_p:
+                            continue
 
             yield record
 
