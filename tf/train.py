@@ -483,7 +483,7 @@ def main(cmd):
                                   batch_size=ChunkParser.BATCH_SIZE,
                                   value_focus_min=vf_test_min,
                                   value_focus_slope=value_focus_slope,
-                                  policy_focus_min=policy_focus_min,
+                                  policy_focus_min=pf_test_min,
                                   policy_focus_slope=policy_focus_slope,
                                   workers=test_workers)
         test_dataset = tf.data.Dataset.from_generator(
