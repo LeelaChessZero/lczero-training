@@ -11,8 +11,10 @@ Install the requirements under `tf/requirements.txt`. And call `./init.sh` to co
 In order to start a training session you first need to download training data from https://storage.lczero.org/files/training_data/. Several chunks/games are packed into a tar file, and each tar file contains an hour worth of chunks. Preparing data requires the following steps:
 
 ```
-wget https://storage.lczero.org/files/training_data/training-run1--20200711-2017.tar #download single tar archive of training data
-wget -i /content/urls.txt -P /content/storagedata/ #download all training tar archives from urls.txt file and store them in particular folder
+wget https://storage.lczero.org/files/training_data/training-run1--20200711-2017.tar 
+#download single tar archive with training data
+wget -i /content/urls.txt -P /content/storagedata/ 
+#download all training tar archives from urls.txt file and store them in particular folder
 tar -xzf training-run1--20200711-2017.tar # untar single tar archive into current directory
 find /content/storagedata/ -name '*.tar' -exec tar -xf {} -C /content/traindata \;
 # untar all .tar training files from folder into particular folder
@@ -21,13 +23,15 @@ For preparing urls.txt this procedure can be used:
 https://storage.lczero.org/files/training_data/ open google chrome console here (cmd+alt+i for Mac OS), use console code  and copy data urls into raw.txt.
 Then raw.txt can be cleared with python script.
 
-Console code: 
+Google chrome console code: 
+```
 var urls = document.getElementsByTagName('a');		
 		for (url in urls) {
 		    console.log ( urls[url].href );
 		}
-    
+```
 Python code for cleaning raw.txt and creating urls.txt:
+```
 infile = "raw.txt"
 outfile = "urls.txt"
 
@@ -40,7 +44,7 @@ for line in fin:
     fout.write(line)
 fin.close()
 fout.close()
-
+```
 ## Training pipeline
 
 Now that the data is in the right format one can configure a training pipeline. This configuration is achieved through a yaml file, see `training/tf/configs/example.yaml`:
