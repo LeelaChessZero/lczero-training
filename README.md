@@ -17,7 +17,7 @@ wget -i /content/urls.txt -P /content/storagedata/
 #download all training tar archives from urls.txt file and store them in particular folder
 tar -xzf training-run1--20200711-2017.tar # untar single tar archive into current directory
 find /content/storagedata/ -name '*.tar' -exec tar -xf {} -C /content/traindata \;
-# untar all .tar training files from folder into particular folder
+# untar all .tar training files from storagedata folder into particular folder
 ```
 For preparing urls.txt this procedure can be used:
 https://storage.lczero.org/files/training_data/ open google chrome console here (cmd+alt+i for Mac OS), use console code  and copy data urls into raw.txt.
