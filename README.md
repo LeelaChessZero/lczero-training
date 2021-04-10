@@ -20,7 +20,7 @@ find /content/storagedata/ -name '*.tar' -exec tar -xf {} -C /content/traindata 
 # untar all .tar training files from storagedata folder into particular folder
 ```
 For preparing urls.txt this procedure can be used:
-https://storage.lczero.org/files/training_data/ open google chrome console here (cmd+alt+i for Mac OS), use console code  and copy data urls into raw.txt.
+https://storage.lczero.org/files/training_data/ open google chrome console there (cmd+alt+i for Mac OS), use console code  and copy data urls into raw.txt.
 Then raw.txt can be cleared with python script.
 
 Google chrome console code: 
