@@ -11,9 +11,35 @@ Install the requirements under `tf/requirements.txt`. And call `./init.sh` to co
 In order to start a training session you first need to download training data from https://storage.lczero.org/files/training_data/. Several chunks/games are packed into a tar file, and each tar file contains an hour worth of chunks. Preparing data requires the following steps:
 
 ```
-wget https://storage.lczero.org/files/training_data/training-run1--20200711-2017.tar
-tar -xzf training-run1--20200711-2017.tar
+wget https://storage.lczero.org/files/training_data/training-run1--20200711-2017.tar #download single tar archive of training data
+wget -i /content/urls.txt -P /content/storagedata/ #download all training tar archives from urls.txt file and store them in particular folder
+tar -xzf training-run1--20200711-2017.tar # untar single tar archive into current directory
+find /content/storagedata/ -name '*.tar' -exec tar -xf {} -C /content/traindata \;
+# untar all .tar training files from folder into particular folder
 ```
+For preparing urls.txt this procedure can be used:
+https://storage.lczero.org/files/training_data/ open google chrome console here (cmd+alt+i for Mac OS), use console code  and copy data urls into raw.txt.
+Then raw.txt can be cleared with python script.
+
+Console code: 
+var urls = document.getElementsByTagName('a');		
+		for (url in urls) {
+		    console.log ( urls[url].href );
+		}
+    
+Python code for cleaning raw.txt and creating urls.txt:
+infile = "raw.txt"
+outfile = "urls.txt"
+
+delete_list = ["3VM113:4", "VM113:4 ", "VM113:4"] # this waste words can vary, edit deletelist according to output from console
+fin = open(infile)
+fout = open(outfile, "w+") # will generate file if needed
+for line in fin:
+    for word in delete_list:
+        line = line.replace(word, "")
+    fout.write(line)
+fin.close()
+fout.close()
 
 ## Training pipeline
 
