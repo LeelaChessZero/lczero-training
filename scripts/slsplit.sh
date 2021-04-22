@@ -1,6 +1,6 @@
 #! /bin/bash
 # This simple script with just 3 parameters will move 10 percent of chunks from untarred train data chunks folders
-# to the test chunks folders with the same name. Script moves approximately 1 gb of data per minute on hdd and old cpu.
+# to the test chunks folders with the same name. Script prepares approximately 1 gb of data per minute on hdd and old cpu.
 INPUTF="/content/drive/MyDrive/1pipelinescript/LCDATA"
 OUTPUTF="/content/drive/MyDrive/1pipelinescript/TESTLCDATA"
 TESTRATIO=10 #every 10th file will move to outputF, randomly. For 0,9 train ratio parameter equals 10, 20 for 0,95 train ratio etc/
