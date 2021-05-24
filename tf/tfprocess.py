@@ -160,10 +160,10 @@ class TFProcess:
         self.renorm_momentum = self.cfg['training'].get(
             'renorm_momentum', 0.99)
    
-        if self.cfg['gpu'] == 'all':
+        if str(self.cfg['gpu']) == 'all':
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
-        elif "," in self.cfg['gpu']:
+        elif "," in str(self.cfg['gpu']):
             active_gpus = []
             gpus = tf.config.experimental.list_physical_devices('GPU')
             for i in self.cfg['gpu'].split(","):
