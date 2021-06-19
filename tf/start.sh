@@ -7,7 +7,9 @@ REPO="origin"
 ROOT="/work/lc0"
 NETDIR="$ROOT/networks/upload"
 GAMEFILE="$HOME/.lc0.dat"
+LATESTFILE="$HOME/.lc0.latest.dat"
 RAMDISK="/ramdisk"
+MIN_GAP=10
 
 function usage()
 {
@@ -70,11 +72,21 @@ train() {
   mv -v $2.pb.gz $NETDIR
 }
 
+delay_count=$((MIN_GAP+1))
 
 while true
 do
-  if [ -f "$ROOT/data/$file" ]
+  latest_num=0
+  if [ -f "$LATESTFILE" ]
   then
+    latest_num=$(cat $LATESTFILE)
+  fi
+  if [[ $delay_count -gt $MIN_GAP && ( $latest_num -gt $game_num || -f "$ROOT/data-rescored/$file" ) ]]
+  then
+    if [ $latest_num -gt $game_num ]
+    then
+      game_num=$latest_num
+    fi
     echo ""
 
     # prepare ramdisk
@@ -95,8 +107,10 @@ do
     game_num=$((game_num + GAMES))
     file="training.${game_num}.gz"
     echo "Waiting for '$file'"
+    delay_count=1
   else
     echo -n "."
     sleep 60
+    delay_count=$((delay_count+1))
   fi
 done
