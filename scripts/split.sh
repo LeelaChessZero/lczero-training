@@ -12,6 +12,7 @@ function usage()
   echo "  -o --output  The output directory"
   echo "  -n --window  window size of test + train"
   echo "  -t --train   The training percentage in {1,...,100}"
+  echo "  -l --latest  The file to store the largest training file number."
   echo ""
   echo "Example: ./split.sh -i=/tmp -o=/out -n=2000 -t=95"
   echo ""
@@ -38,6 +39,9 @@ do
       ;;
     -t | --train)
       TRAINPCT=$VALUE
+      ;;
+    -l | --latest)
+      LATESTFILE=$VALUE
       ;;
     *)
       echo "ERROR: unknown parameter \"$PARAM\""
@@ -71,6 +75,12 @@ max_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $max" | bc | cut -d'.' -f1)
 overhead_train=$(echo "scale=1;($TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 overhead_test=$(echo "scale=1;(1 - $TRAINPCT / 100) * $overhead" | bc | cut -d'.' -f1)
 
+latest=0
+if [ -f $LATESTFILE ]
+then
+  latest=$(cat $LATESTFILE)
+fi
+
 echo ""
 echo "start splitter, found $n games, $n_test test, $n_train train"
 echo "  max chunks: $max"
@@ -100,6 +110,15 @@ process() {
 
     id=$(echo $file | cut -d'.' -f 2)
     let hash_index="$id % 100 + 1"
+
+    if [ $id -gt $latest ]
+    then
+      latest=$id
+      if [ -f $LATESTFILE ]
+      then
+        echo $latest > $LATESTFILE
+      fi
+    fi
 
     if [ $hash_index -gt $TRAINPCT ]
     then
