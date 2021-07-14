@@ -416,7 +416,9 @@ class ChunkParser:
             return
 
         for i in range(0, len(chunkdata), record_size):
-            if version == V6_VERSION:
+            record = chunkdata[i:i + record_size]            
+            ## only unpack every position if value_focus is activated.
+            if self.value_focus_min < 1 and version == V6_VERSION:
                 # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
                 best_q = struct.unpack('f', record[8284:8288])[0]
                 orig_q = struct.unpack('f', record[8328:8332])[0]
@@ -426,7 +428,7 @@ class ChunkParser:
                     diff_q = abs(best_q - orig_q)
                     thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
                     if thresh_p < 1.0 and random.random() > thresh_p:
-                        continue
+                        continue  # Skip this record
 
             if self.sample > 1:
                 # Downsample, using only 1/Nth of the items, taking into account the effects of value focus.
@@ -442,7 +444,6 @@ class ChunkParser:
                     if random.randint(0, self.sample - 1) != 0:
                         continue  # Skip this record.
 
-            record = chunkdata[i:i + record_size]
             # for earlier versions, append fake bytes to record to maintain size
             if version == V3_VERSION:
                 # add 16 bytes of fake root_q, best_q, root_d, best_d to match V4 format
@@ -455,7 +456,6 @@ class ChunkParser:
             if version == V3_VERSION or version == V4_VERSION or version == V5_VERSION:
                 # add 48 byes of fake result_q, result_d etc
                 record += 48 * b'\x00'
-
 
             yield record
 
