@@ -437,7 +437,7 @@ class ChunkParser:
                         keep_this_position_probability = 1 / (self.sample * self.value_focus_min)
                         if random.random() > keep_this_position_probability:
                             continue  # Skip this record
-                    else
+                else:
                     ## value_focus not activated
                     if random.randint(0, self.sample - 1) != 0:
                         continue  # Skip this record.
