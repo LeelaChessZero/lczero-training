@@ -416,10 +416,31 @@ class ChunkParser:
             return
 
         for i in range(0, len(chunkdata), record_size):
+            if version == V6_VERSION:
+                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
+                best_q = struct.unpack('f', record[8284:8288])[0]
+                orig_q = struct.unpack('f', record[8328:8332])[0]
+
+                # if orig_q is NaN, accept, else accept based on value focus
+                if not np.isnan(orig_q):
+                    diff_q = abs(best_q - orig_q)
+                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
+                    if thresh_p < 1.0 and random.random() > thresh_p:
+                        continue
+
             if self.sample > 1:
-                # Downsample, using only 1/Nth of the items.
-                if random.randint(0, self.sample - 1) != 0:
-                    continue  # Skip this record.
+                # Downsample, using only 1/Nth of the items, taking into account the effects of value focus.
+                if self.value_focus_min < 1 and version == V6_VERSION:
+                    ## value_focus may already have achieved the downsampling implied by the value of self.sample.
+                    if self.value_focus_min > 1 / self.sample:
+                        ## value_focus active, but it has not downsampled enough.
+                        keep_this_position_probability = 1 / (self.sample * self.value_focus_min)
+                        if random.random() > keep_this_position_probability:
+                            continue  # Skip this record
+                    else
+                    ## value_focus not activated
+                    if random.randint(0, self.sample - 1) != 0:
+                        continue  # Skip this record.
 
             record = chunkdata[i:i + record_size]
             # for earlier versions, append fake bytes to record to maintain size
@@ -435,17 +456,6 @@ class ChunkParser:
                 # add 48 byes of fake result_q, result_d etc
                 record += 48 * b'\x00'
 
-            if version == V6_VERSION:
-                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
-                best_q = struct.unpack('f', record[8284:8288])[0]
-                orig_q = struct.unpack('f', record[8328:8332])[0]
-                
-                # if orig_q is NaN, accept, else accept based on value focus
-                if not np.isnan(orig_q):
-                    diff_q = abs(best_q - orig_q)
-                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
-                    if thresh_p < 1.0 and random.random() > thresh_p:
-                        continue
 
             yield record
 
