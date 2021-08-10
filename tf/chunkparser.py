@@ -169,6 +169,7 @@ class ChunkParser:
         self.sample = sample
         # set the min and slope for value focus, defaults accept all positions
         self.value_focus_min = value_focus_min
+        self.value_focus_max = value_focus_max
         self.value_focus_slope = value_focus_slope
         # set the mini-batch size
         self.batch_size = batch_size
