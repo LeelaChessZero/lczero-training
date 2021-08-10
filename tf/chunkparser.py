@@ -131,6 +131,7 @@ class ChunkParser:
                  buffer_size=1,
                  batch_size=256,
                  value_focus_min=1,
+                 value_focus_max=1,
                  value_focus_slope=0,
                  workers=None):
         """
