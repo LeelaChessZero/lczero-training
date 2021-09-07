@@ -193,7 +193,7 @@ class TFProcess:
             self.test_dataset = self.strategy.experimental_distribute_dataset(
                 test_dataset)
         else:
-            self.test_dataset = train_dataset
+            self.test_dataset = test_dataset
         self.test_iter = iter(self.test_dataset)
         if self.strategy is not None and validation_dataset is not None:
             self.validation_dataset = self.strategy.experimental_distribute_dataset(
