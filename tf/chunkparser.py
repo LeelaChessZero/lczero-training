@@ -141,7 +141,7 @@ class ChunkParser:
         """
         Terminates all the workers
         """
-        for i in range(len(self.readers)):
+        for i in range(len(self.processes)):
             self.processes[i].terminate()
             self.processes[i].join()
             self.inner.readers[i].close()
