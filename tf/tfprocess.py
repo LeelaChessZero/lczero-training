@@ -592,13 +592,18 @@ class TFProcess:
         return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads
 
     def apply_grads(self, grads, effective_batch_splits):
+        grads = [
+            g[0] for g in self.orig_optimizer.gradient_aggregator(
+                zip(grads, self.model.trainable_weights))
+        ]
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
         max_grad_norm = self.cfg['training'].get(
             'max_grad_norm', 10000.0) * effective_batch_splits
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads,
-                                           self.model.trainable_weights))
+                                           self.model.trainable_weights),
+                                       experimental_aggregate_gradients=False)
         return grad_norm
 
     @tf.function()
