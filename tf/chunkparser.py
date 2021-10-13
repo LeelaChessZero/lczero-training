@@ -130,6 +130,7 @@ class ChunkParser:
                  buffer_size=1,
                  batch_size=256,
                  value_focus_min=1,
+                 value_focus_max=1,
                  value_focus_slope=0,
                  workers=None):
         self.inner = ChunkParserInner(self, chunks, expected_input_format,
@@ -212,6 +213,7 @@ class ChunkParserInner:
         self.sample = sample
         # set the min and slope for value focus, defaults accept all positions
         self.value_focus_min = value_focus_min
+        self.value_focus_max = value_focus_max
         self.value_focus_slope = value_focus_slope
         # set the mini-batch size
         self.batch_size = batch_size
@@ -457,7 +459,7 @@ class ChunkParserInner:
                 # if orig_q is NaN, accept, else accept based on value focus
                 if not np.isnan(orig_q):
                     diff_q = abs(best_q - orig_q)
-                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
+                    thresh_p = min(self.value_focus_max, self.value_focus_min + self.value_focus_slope * diff_q)
                     if thresh_p < 1.0 and random.random() > thresh_p:
                         continue
 

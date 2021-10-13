@@ -412,6 +412,7 @@ def main(cmd):
     ChunkParser.BATCH_SIZE = split_batch_size
 
     value_focus_min = cfg['training'].get('value_focus_min', 1)
+    value_focus_max = cfg['training'].get('value_focus_max', 1)
     value_focus_slope = cfg['training'].get('value_focus_slope', 0)
 
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
@@ -422,7 +423,7 @@ def main(cmd):
     extractor = select_extractor(tfprocess.INPUT_MODE)
 
     if experimental_parser and (value_focus_min != 1
-                                or value_focus_slope != 0):
+              or value_focus_max != 1 or value_focus_slope != 0):
         raise ValueError(
             'Experimental parser does not support non-default value \
                           focus parameters.')
@@ -447,6 +448,7 @@ def main(cmd):
                                    sample=SKIP,
                                    batch_size=ChunkParser.BATCH_SIZE,
                                    value_focus_min=value_focus_min,
+                                   value_focus_max=value_focus_max,
                                    value_focus_slope=value_focus_slope,
                                    workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
