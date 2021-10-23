@@ -49,6 +49,7 @@ class Net:
         self.set_policyformat(policy)
         self.set_valueformat(value)
         self.set_movesleftformat(moves_left)
+        self.set_uncformat(pb.NetworkFormat.POLICY_UNC_CONVOLUTION)
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
@@ -67,6 +68,9 @@ class Net:
 
     def set_movesleftformat(self, moves_left):
         self.pb.format.network_format.moves_left = moves_left
+
+    def set_uncformat(self, unc):
+        self.pb.format.network_format.unc = unc
 
     def set_input(self, input_format):
         self.pb.format.network_format.input = input_format
@@ -309,6 +313,10 @@ class Net:
                 pb_name = moves_left_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'moves_left.' + convblock_to_bp(weights_name)
+        elif base_layer == 'uncertainty1':
+            pb_name = 'unc1.' + convblock_to_bp(weights_name)
+        elif base_layer == 'uncertainty':
+            pb_name = 'unc.' + convblock_to_bp(weights_name)
         elif base_layer.startswith('residual'):
             block = int(base_layer.split('_')[1]) - 1  # 1 indexed
             if layers[1] == '1':
