@@ -411,8 +411,10 @@ def main(cmd):
     # Load data with split batch size, which will be combined to the total batch size in tfprocess.
     ChunkParser.BATCH_SIZE = split_batch_size
 
-    value_focus_min = cfg['training'].get('value_focus_min', 1)
-    value_focus_slope = cfg['training'].get('value_focus_slope', 0)
+    diff_focus_min = cfg['training'].get('diff_focus_min', 1)
+    diff_focus_slope = cfg['training'].get('diff_focus_slope', 0)
+    diff_focus_q_weight = cfg['training'].get('diff_focus_q_weight', 6.0)
+    diff_focus_pol_scale = cfg['training'].get('diff_focus_pol_scale', 3.5)
 
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
@@ -446,8 +448,10 @@ def main(cmd):
                                    shuffle_size=shuffle_size,
                                    sample=SKIP,
                                    batch_size=ChunkParser.BATCH_SIZE,
-                                   value_focus_min=value_focus_min,
-                                   value_focus_slope=value_focus_slope,
+                                   diff_focus_min=diff_focus_min,
+                                   diff_focus_slope=diff_focus_slope,
+                                   diff_focus_q_weight=diff_focus_q_weight,
+                                   diff_focus_pol_scale=diff_focus_pol_scale,
                                    workers=train_workers)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse,
@@ -463,7 +467,7 @@ def main(cmd):
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extractor)
     else:
-        # no value focus for test_parser
+        # no diff focus for test_parser
         test_parser = ChunkParser(test_chunks,
                                   tfprocess.INPUT_MODE,
                                   shuffle_size=shuffle_size,
