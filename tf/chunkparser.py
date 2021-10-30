@@ -64,7 +64,6 @@ import numpy as np
 import random
 import shufflebuffer as sb
 import struct
-import tensorflow as tf
 import unittest
 import gzip
 from select import select
@@ -152,25 +151,6 @@ class ChunkParser:
             self.inner.writers[i].close()
         self.chunk_process.terminate()
         self.chunk_process.join()
-
-    @staticmethod
-    def parse_function(planes, probs, winner, q, plies_left):
-        """
-        Convert unpacked record batches to tensors for tensorflow training
-        """
-        planes = tf.io.decode_raw(planes, tf.float32)
-        probs = tf.io.decode_raw(probs, tf.float32)
-        winner = tf.io.decode_raw(winner, tf.float32)
-        q = tf.io.decode_raw(q, tf.float32)
-        plies_left = tf.io.decode_raw(plies_left, tf.float32)
-
-        planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8 * 8))
-        probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
-        winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
-        q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 3))
-        plies_left = tf.reshape(plies_left, (ChunkParser.BATCH_SIZE, ))
-
-        return (planes, probs, winner, q, plies_left)
 
     def parse(self):
         return self.inner.parse()
@@ -658,54 +638,6 @@ class ChunkParserTest(unittest.TestCase):
             self.assertTrue(np.abs(scalar_win - truth[3]) < 1e-6)
             scalar_q = data[4][0] - data[4][-1]
             self.assertTrue(np.abs(scalar_q - truth[4]) < 1e-6)
-
-        parser.shutdown()
-
-    def test_tensorflow_parsing(self):
-        """
-        Test game position decoding pipeline including tensorflow.
-        """
-        truth = self.generate_fake_pos()
-        batch_size = 4
-        ChunkParser.BATCH_SIZE = batch_size
-        records = []
-        for i in range(batch_size):
-            record = b''
-            for j in range(2):
-                record += self.v4_record(*truth)
-            records.append(record)
-
-        parser = ChunkParser(ChunkDataSrc(records),
-                             shuffle_size=1,
-                             workers=1,
-                             batch_size=batch_size)
-        batchgen = parser.parse()
-        data = next(batchgen)
-
-        planes = np.frombuffer(data[0],
-                               dtype=np.float32,
-                               count=112 * 8 * 8 * batch_size)
-        planes = planes.reshape(batch_size, 112, 8 * 8)
-        probs = np.frombuffer(data[1],
-                              dtype=np.float32,
-                              count=1858 * batch_size)
-        probs = probs.reshape(batch_size, 1858)
-        winner = np.frombuffer(data[2], dtype=np.float32, count=3 * batch_size)
-        winner = winner.reshape(batch_size, 3)
-        best_q = np.frombuffer(data[3], dtype=np.float32, count=3 * batch_size)
-        best_q = best_q.reshape(batch_size, 3)
-
-        # Pass it through tensorflow
-        with tf.compat.v1.Session() as sess:
-            graph = ChunkParser.parse_function(data[0], data[1], data[2],
-                                               data[3])
-            tf_planes, tf_probs, tf_winner, tf_q = sess.run(graph)
-
-            for i in range(batch_size):
-                self.assertTrue((probs[i] == tf_probs[i]).all())
-                self.assertTrue((planes[i] == tf_planes[i]).all())
-                self.assertTrue((winner[i] == tf_winner[i]).all())
-                self.assertTrue((best_q[i] == tf_q[i]).all())
 
         parser.shutdown()
 

@@ -24,8 +24,6 @@ import glob
 import gzip
 import random
 import multiprocessing as mp
-import tensorflow as tf
-from tfprocess import TFProcess
 from chunkparser import ChunkParser
 
 SKIP = 32
@@ -366,6 +364,29 @@ def semi_sample(x):
     return tf.slice(tf.random.shuffle(x), [0], [SKIP_MULTIPLE])
 
 
+def get_input_mode(cfg):
+    import proto.net_pb2 as pb
+    input_mode = cfg['model'].get('input_type', 'classic')
+
+    if input_mode == "classic":
+        return pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+    elif input_mode == "frc_castling":
+        return pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
+    elif input_mode == "canonical":
+        return pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
+    elif input_mode == "canonical_100":
+        return pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
+    elif input_mode == "canonical_armageddon":
+        return pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
+    elif input_mode == "canonical_v2":
+        return pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2
+    elif input_mode == "canonical_v2_armageddon":
+        return pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON
+    else:
+        raise ValueError(
+            "Unknown input mode format: {}".format(input_mode))
+
+
 def main(cmd):
     cfg = yaml.safe_load(cmd.cfg.read())
     print(yaml.dump(cfg, default_flow_style=False))
@@ -419,9 +440,8 @@ def main(cmd):
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
-    tfprocess = TFProcess(cfg)
     experimental_reads = max(2, mp.cpu_count() - 2) // 2
-    extractor = select_extractor(tfprocess.INPUT_MODE)
+    extractor = select_extractor(get_input_mode(cfg))
 
     if experimental_parser and (value_focus_min != 1
                                 or value_focus_slope != 0):
@@ -436,15 +456,25 @@ def main(cmd):
             compression_type='GZIP',
             num_parallel_reads=experimental_reads)
 
+    test_shuffle_size = int(shuffle_size * (1.0 - train_ratio))
+
     if experimental_parser:
+        import tensorflow as tf
+        from tfprocess import TFProcess
+        tfprocess = TFProcess(cfg)
         train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat().batch(256)\
                          .interleave(read, num_parallel_calls=2)\
                          .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
                          .shuffle(shuffle_size)\
                          .batch(split_batch_size).map(extractor)
+        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat().batch(256)\
+                         .interleave(read, num_parallel_calls=2)\
+                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
+                         .shuffle(test_shuffle_size)\
+                         .batch(split_batch_size).map(extractor)
     else:
         train_parser = ChunkParser(train_chunks,
-                                   tfprocess.INPUT_MODE,
+                                   get_input_mode(cfg),
                                    shuffle_size=shuffle_size,
                                    sample=SKIP,
                                    batch_size=ChunkParser.BATCH_SIZE,
@@ -453,32 +483,28 @@ def main(cmd):
                                    diff_focus_q_weight=diff_focus_q_weight,
                                    diff_focus_pol_scale=diff_focus_pol_scale,
                                    workers=train_workers)
+        # no diff focus for test_parser
+        test_parser = ChunkParser(test_chunks,
+                                  get_input_mode(cfg),
+                                  shuffle_size=test_shuffle_size,
+                                  sample=SKIP,
+                                  batch_size=ChunkParser.BATCH_SIZE,
+                                  workers=test_workers)
+        import tensorflow as tf
+        from chunkparsefunc import parse_function
+        from tfprocess import TFProcess
+        tfprocess = TFProcess(cfg)
         train_dataset = tf.data.Dataset.from_generator(
             train_parser.parse,
             output_types=(tf.string, tf.string, tf.string, tf.string,
                           tf.string))
-        train_dataset = train_dataset.map(ChunkParser.parse_function)
-
-    shuffle_size = int(shuffle_size * (1.0 - train_ratio))
-    if experimental_parser:
-        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat().batch(256)\
-                         .interleave(read, num_parallel_calls=2)\
-                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
-                         .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extractor)
-    else:
-        # no diff focus for test_parser
-        test_parser = ChunkParser(test_chunks,
-                                  tfprocess.INPUT_MODE,
-                                  shuffle_size=shuffle_size,
-                                  sample=SKIP,
-                                  batch_size=ChunkParser.BATCH_SIZE,
-                                  workers=test_workers)
+        train_dataset = train_dataset.map(parse_function)
         test_dataset = tf.data.Dataset.from_generator(
             test_parser.parse,
             output_types=(tf.string, tf.string, tf.string, tf.string,
                           tf.string))
-        test_dataset = test_dataset.map(ChunkParser.parse_function)
+        test_dataset = test_dataset.map(parse_function)
+
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
