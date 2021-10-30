@@ -362,9 +362,10 @@ class TFProcess:
             moves_loss_w = self.cfg['training']['moves_left_loss_weight']
         else:
             moves_loss_w = tf.constant(0.0, dtype=tf.float32)
+        reg_term_w = self.cfg['training'].get('reg_term_weight', 1.0)
 
-        def _lossMix(policy, value, moves_left):
-            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left
+        def _lossMix(policy, value, moves_left, reg_term):
+            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left + reg_term_w * reg_term
 
         self.lossMix = _lossMix
 
@@ -559,8 +560,8 @@ class TFProcess:
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             else:
                 moves_left_loss = tf.constant(0.)
-            total_loss = self.lossMix(policy_loss, value_loss,
-                                      moves_left_loss) + reg_term
+            total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
+                                      reg_term)
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
         if self.wdl:
@@ -680,9 +681,6 @@ class TFProcess:
         if steps % self.cfg['training'][
                 'train_avg_report_steps'] == 0 or steps % self.cfg['training'][
                     'total_steps'] == 0:
-            pol_loss_w = self.cfg['training']['policy_loss_weight']
-            val_loss_w = self.cfg['training']['value_loss_weight']
-            moves_loss_w = self.cfg['training']['moves_left_loss_weight']
             time_end = time.time()
             speed = 0
             if self.time_start:
@@ -700,9 +698,8 @@ class TFProcess:
                 .format(
                     steps, self.lr, avg_policy_loss, avg_value_loss,
                     avg_mse_loss, avg_moves_left_loss, avg_reg_term,
-                    pol_loss_w * avg_policy_loss +
-                    val_loss_w * avg_value_loss + avg_reg_term +
-                    moves_loss_w * avg_moves_left_loss, speed))
+                    self.lossMix(avg_policy_loss, avg_value_loss,
+                                 avg_moves_left_loss, avg_reg_term), speed))
 
             after_weights = self.read_weights()
             with self.train_writer.as_default():
