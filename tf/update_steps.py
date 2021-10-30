@@ -18,9 +18,9 @@ def main(cmd):
         os.makedirs(root_dir)
 
     tfprocess = TFProcess(cfg)
-    tfprocess.init_net_v2()
+    tfprocess.init_net()
 
-    tfprocess.restore_v2()
+    tfprocess.restore()
 
     START_FROM = cmd.start
 
