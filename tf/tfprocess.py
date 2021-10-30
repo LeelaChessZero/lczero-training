@@ -58,6 +58,39 @@ class ApplyPolicyMap(tf.keras.layers.Layer):
                          tf.cast(self.fc1, h_conv_pol_flat.dtype))
 
 
+class Metric:
+    def __init__(self, short_name, long_name, **kwargs):
+        self.short_name = short_name
+        self.long_name = long_name
+        self.value = 0.0
+        self.count = 0
+
+    def assign(self, value):
+        self.value = value
+        self.count = 1
+
+    def accumulate(self, value):
+        if self.count > 0:
+            self.value = self.value + value
+            self.count = self.count + 1
+        else:
+            self.assign(value)
+
+    def merge(self, other):
+        assert self.short_name == other.short_name
+        self.value = self.value + other.value
+        self.count = self.count + other.count
+
+    def get(self):
+        if self.count == 0:
+            return self.value
+        return self.value / self.count
+
+    def reset(self):
+        self.value = 0.0
+        self.count = 0
+
+
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -381,13 +414,35 @@ class TFProcess:
 
         self.accuracy_fn = accuracy
 
-        self.avg_policy_loss = []
-        self.avg_value_loss = []
-        self.avg_moves_left_loss = []
-        self.avg_mse_loss = []
-        self.avg_reg_term = []
+        # Order must match the order in process_inner_loop
+        self.train_metrics = [
+            Metric('P', 'Policy Loss'),
+            Metric('V', 'Value Loss'),
+            Metric('ML', 'Moves Left Loss'),
+            Metric('Reg', 'Reg term'),
+            Metric('Total', 'Total Loss'),
+            Metric(
+                'V MSE', 'MSE Loss'
+            ),  # Long name here doesn't mention value for backwards compatibility reasons.
+        ]
         self.time_start = None
         self.last_steps = None
+
+        # Order must match the order in calculate_test_summaries_inner_loop
+        self.test_metrics = [
+            Metric('P', 'Policy Loss'),
+            Metric('V', 'Value Loss'),
+            Metric('ML', 'Moves Left Loss'),
+            Metric(
+                'V MSE', 'MSE Loss'
+            ),  # Long name here doesn't mention value for backwards compatibility reasons.
+            Metric('P Acc', 'Policy Accuracy'),
+            Metric('V Acc', 'Value Accuracy'),
+            Metric('ML Mean', 'Moves Left Mean Error'),
+            Metric('P Entropy', 'Policy Entropy'),
+            Metric('P UL', 'Policy UL'),
+        ]
+
         # Set adaptive learning rate during training
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
@@ -571,29 +626,27 @@ class TFProcess:
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
         else:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
-        return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, tape.gradient(
-            total_loss, self.model.trainable_weights)
+        metrics = [
+            policy_loss,
+            value_loss,
+            moves_left_loss,
+            reg_term,
+            total_loss,
+            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
+            # get comparable values.
+            mse_loss / 4.0,
+        ]
+        return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
     @tf.function()
     def strategy_process_inner_loop(self, x, y, z, q, m):
-        policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads = self.strategy.run(
-            self.process_inner_loop, args=(x, y, z, q, m))
-        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                           policy_loss,
-                                           axis=None)
-        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                          value_loss,
-                                          axis=None)
-        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                        mse_loss,
-                                        axis=None)
-        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                               moves_left_loss,
-                                               axis=None)
-        reg_term = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                        reg_term,
-                                        axis=None)
-        return policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads
+        metrics, new_grads = self.strategy.run(self.process_inner_loop,
+                                               args=(x, y, z, q, m))
+        metrics = [
+            self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
+            for m in metrics
+        ]
+        return metrics, new_grads
 
     def apply_grads(self, grads, effective_batch_splits):
         grads = [
@@ -639,11 +692,10 @@ class TFProcess:
         for _ in range(batch_splits):
             x, y, z, q, m = next(self.train_iter)
             if self.strategy is not None:
-                policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads = self.strategy_process_inner_loop(
+                metrics, new_grads = self.strategy_process_inner_loop(
                     x, y, z, q, m)
             else:
-                policy_loss, value_loss, mse_loss, moves_left_loss, reg_term, new_grads = self.process_inner_loop(
-                    x, y, z, q, m)
+                metrics, new_grads = self.process_inner_loop(x, y, z, q, m)
             if not grads:
                 grads = new_grads
             else:
@@ -652,16 +704,8 @@ class TFProcess:
                 else:
                     grads = self.merge_grads(grads, new_grads)
             # Keep running averages
-            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
-            # get comparable values.
-            mse_loss /= 4.0
-            self.avg_policy_loss.append(policy_loss)
-            if self.wdl:
-                self.avg_value_loss.append(value_loss)
-            if self.moves_left:
-                self.avg_moves_left_loss.append(moves_left_loss)
-            self.avg_mse_loss.append(mse_loss)
-            self.avg_reg_term.append(reg_term)
+            for acc, val in zip(self.train_metrics, metrics):
+                acc.accumulate(val)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         effective_batch_splits = batch_splits
         if self.strategy is not None:
@@ -691,43 +735,30 @@ class TFProcess:
                 steps_elapsed = steps - self.last_steps
                 speed = batch_size * (tf.cast(steps_elapsed, tf.float32) /
                                       elapsed)
-            avg_policy_loss = np.mean(self.avg_policy_loss or [0])
-            avg_moves_left_loss = np.mean(self.avg_moves_left_loss or [0])
-            avg_value_loss = np.mean(self.avg_value_loss or [0])
-            avg_mse_loss = np.mean(self.avg_mse_loss or [0])
-            avg_reg_term = np.mean(self.avg_reg_term or [0])
-            print(
-                "step {}, lr={:g} policy={:g} value={:g} mse={:g} moves={:g} reg={:g} total={:g} ({:g} pos/s)"
-                .format(
-                    steps, self.lr, avg_policy_loss, avg_value_loss,
-                    avg_mse_loss, avg_moves_left_loss, avg_reg_term,
-                    self.lossMix(avg_policy_loss, avg_value_loss,
-                                 avg_moves_left_loss, avg_reg_term), speed))
+            print("step {}, lr={:g}".format(steps, self.lr), end='')
+            for metric in self.train_metrics:
+                print(" {}={:g}".format(metric.short_name, metric.get()),
+                      end='')
+            print(" ({:g} pos/s)".format(speed))
 
             after_weights = self.read_weights()
             with self.train_writer.as_default():
-                tf.summary.scalar("Policy Loss", avg_policy_loss, step=steps)
-                tf.summary.scalar("Value Loss", avg_value_loss, step=steps)
-                if self.moves_left:
-                    tf.summary.scalar("Moves Left Loss",
-                                      avg_moves_left_loss,
+                for metric in self.train_metrics:
+                    tf.summary.scalar(metric.long_name,
+                                      metric.get(),
                                       step=steps)
-                tf.summary.scalar("Reg term", avg_reg_term, step=steps)
                 tf.summary.scalar("LR", self.lr, step=steps)
                 tf.summary.scalar("Gradient norm",
                                   grad_norm / effective_batch_splits,
                                   step=steps)
-                tf.summary.scalar("MSE Loss", avg_mse_loss, step=steps)
                 self.compute_update_ratio_v2(before_weights, after_weights,
                                              steps)
             self.train_writer.flush()
+
             self.time_start = time_end
             self.last_steps = steps
-            self.avg_policy_loss = []
-            self.avg_moves_left_loss = []
-            self.avg_value_loss = []
-            self.avg_mse_loss = []
-            self.avg_reg_term = []
+            for metric in self.train_metrics:
+                metric.reset()
         return steps
 
     def process_v2(self, batch_size, test_batches, batch_splits):
@@ -843,120 +874,58 @@ class TFProcess:
         else:
             moves_left_loss = tf.constant(0.)
             moves_left_mean_error = tf.constant(0.)
-        return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
+        metrics = [
+            policy_loss,
+            value_loss,
+            moves_left_loss,
+            mse_loss / 4,
+            policy_accuracy * 100,
+            value_accuracy * 100,
+            moves_left_mean_error,
+            policy_entropy,
+            policy_ul,
+        ]
+        return metrics
 
     @tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
-        policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy.run(
-            self.calculate_test_summaries_inner_loop, args=(x, y, z, q, m))
-        policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                           policy_loss,
-                                           axis=None)
-        value_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                          value_loss,
-                                          axis=None)
-        mse_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                        mse_loss,
-                                        axis=None)
-        policy_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                               policy_accuracy,
-                                               axis=None)
-        value_accuracy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                              value_accuracy,
-                                              axis=None)
-        moves_left_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                               moves_left_loss,
-                                               axis=None)
-        moves_left_mean_error = self.strategy.reduce(
-            tf.distribute.ReduceOp.MEAN, moves_left_mean_error, axis=None)
-        policy_entropy = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                              policy_entropy,
-                                              axis=None)
-        policy_ul = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
-                                         policy_ul,
-                                         axis=None)
-        return policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
+        metrics = self.strategy.run(self.calculate_test_summaries_inner_loop,
+                                    args=(x, y, z, q, m))
+        metrics = [
+            self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
+            for m in metrics
+        ]
+        return metrics
 
     def calculate_test_summaries_v2(self, test_batches, steps):
-        sum_policy_accuracy = 0
-        sum_value_accuracy = 0
-        sum_moves_left = 0
-        sum_moves_left_mean_error = 0
-        sum_mse = 0
-        sum_policy = 0
-        sum_value = 0
-        sum_policy_entropy = 0
-        sum_policy_ul = 0
+        for metric in self.test_metrics:
+            metric.reset()
         for _ in range(0, test_batches):
             x, y, z, q, m = next(self.test_iter)
             if self.strategy is not None:
-                policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy_calculate_test_summaries_inner_loop(
+                metrics = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             else:
-                policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+                metrics = self.calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
-            sum_policy_accuracy += policy_accuracy
-            sum_policy_entropy += policy_entropy
-            sum_policy_ul += policy_ul
-            sum_mse += mse_loss
-            sum_policy += policy_loss
-            if self.wdl:
-                sum_value_accuracy += value_accuracy
-                sum_value += value_loss
-            if self.moves_left:
-                sum_moves_left += moves_left_loss
-                sum_moves_left_mean_error += moves_left_mean_error
-        sum_policy_accuracy /= test_batches
-        sum_policy_accuracy *= 100
-        sum_policy /= test_batches
-        sum_policy_entropy /= test_batches
-        sum_policy_ul /= test_batches
-        sum_value /= test_batches
-        if self.wdl:
-            sum_value_accuracy /= test_batches
-            sum_value_accuracy *= 100
-        # Additionally rescale to [0, 1] so divide by 4
-        sum_mse /= (4.0 * test_batches)
-        if self.moves_left:
-            sum_moves_left /= test_batches
-            sum_moves_left_mean_error /= test_batches
+            for acc, val in zip(self.test_metrics, metrics):
+                acc.accumulate(val)
         self.net.pb.training_params.learning_rate = self.lr
-        self.net.pb.training_params.mse_loss = sum_mse
-        self.net.pb.training_params.policy_loss = sum_policy
+        self.net.pb.training_params.mse_loss = self.test_metrics[3].get()
+        self.net.pb.training_params.policy_loss = self.test_metrics[0].get()
         # TODO store value and value accuracy in pb
-        self.net.pb.training_params.accuracy = sum_policy_accuracy
+        self.net.pb.training_params.accuracy = self.test_metrics[4].get()
         with self.test_writer.as_default():
-            tf.summary.scalar("Policy Loss", sum_policy, step=steps)
-            tf.summary.scalar("Value Loss", sum_value, step=steps)
-            tf.summary.scalar("MSE Loss", sum_mse, step=steps)
-            tf.summary.scalar("Policy Accuracy",
-                              sum_policy_accuracy,
-                              step=steps)
-            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
-            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
-            if self.wdl:
-                tf.summary.scalar("Value Accuracy",
-                                  sum_value_accuracy,
-                                  step=steps)
-            if self.moves_left:
-                tf.summary.scalar("Moves Left Loss",
-                                  sum_moves_left,
-                                  step=steps)
-                tf.summary.scalar("Moves Left Mean Error",
-                                  sum_moves_left_mean_error,
-                                  step=steps)
+            for metric in self.test_metrics:
+                tf.summary.scalar(metric.long_name, metric.get(), step=steps)
             for w in self.model.weights:
                 tf.summary.histogram(w.name, w, step=steps)
         self.test_writer.flush()
 
-        print("step {}, policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end = '')
-
-        if self.moves_left:
-            print(" moves={:g} moves mean={:g}".format(
-                sum_moves_left, sum_moves_left_mean_error))
-        else:
-            print()
+        print("step {},".format(steps), end='')
+        for metric in self.test_metrics:
+            print(" {}={:g}".format(metric.short_name, metric.get()), end='')
+        print()
 
     def calculate_swa_validations_v2(self, steps):
         backup = self.read_weights()
@@ -970,79 +939,26 @@ class TFProcess:
             w.assign(old)
 
     def calculate_test_validations_v2(self, steps):
-        sum_policy_accuracy = 0
-        sum_value_accuracy = 0
-        sum_moves_left = 0
-        sum_moves_left_mean_error = 0
-        sum_mse = 0
-        sum_policy = 0
-        sum_value = 0
-        sum_policy_entropy = 0
-        sum_policy_ul = 0
-        counter = 0
+        for metric in self.test_metrics:
+            metric.reset()
         for (x, y, z, q, m) in self.validation_dataset:
             if self.strategy is not None:
-                policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy_calculate_test_summaries_inner_loop(
+                metrics = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             else:
-                policy_loss, value_loss, moves_left_loss, mse_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+                metrics = self.calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
-            sum_policy_accuracy += policy_accuracy
-            sum_policy_entropy += policy_entropy
-            sum_policy_ul += policy_ul
-            sum_mse += mse_loss
-            sum_policy += policy_loss
-            if self.moves_left:
-                sum_moves_left += moves_left_loss
-                sum_moves_left_mean_error += moves_left_mean_error
-            counter += 1
-            if self.wdl:
-                sum_value_accuracy += value_accuracy
-                sum_value += value_loss
-        sum_policy_accuracy /= counter
-        sum_policy_accuracy *= 100
-        sum_policy /= counter
-        sum_policy_entropy /= counter
-        sum_policy_ul /= counter
-        sum_value /= counter
-        if self.wdl:
-            sum_value_accuracy /= counter
-            sum_value_accuracy *= 100
-        if self.moves_left:
-            sum_moves_left /= counter
-            sum_moves_left_mean_error /= counter
-        # Additionally rescale to [0, 1] so divide by 4
-        sum_mse /= (4.0 * counter)
+            for acc, val in zip(self.test_metrics, metrics):
+                acc.accumulate(val)
         with self.validation_writer.as_default():
-            tf.summary.scalar("Policy Loss", sum_policy, step=steps)
-            tf.summary.scalar("Value Loss", sum_value, step=steps)
-            tf.summary.scalar("MSE Loss", sum_mse, step=steps)
-            tf.summary.scalar("Policy Accuracy",
-                              sum_policy_accuracy,
-                              step=steps)
-            tf.summary.scalar("Policy Entropy", sum_policy_entropy, step=steps)
-            tf.summary.scalar("Policy UL", sum_policy_ul, step=steps)
-            if self.wdl:
-                tf.summary.scalar("Value Accuracy",
-                                  sum_value_accuracy,
-                                  step=steps)
-            if self.moves_left:
-                tf.summary.scalar("Moves Left Loss",
-                                  sum_moves_left,
-                                  step=steps)
-                tf.summary.scalar("Moves Left Mean Error",
-                                  sum_moves_left_mean_error,
-                                  step=steps)
+            for metric in self.test_metrics:
+                tf.summary.scalar(metric.long_name, metric.get(), step=steps)
         self.validation_writer.flush()
 
-        print("step {}, validation: policy={:g} value={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
-            format(steps, sum_policy, sum_value, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end='')
-
-        if self.moves_left:
-            print(" moves={:g} moves mean={:g}".format(
-                sum_moves_left, sum_moves_left_mean_error))
-        else:
-            print()
+        print("step {}, validation:".format(steps), end='')
+        for metric in self.test_metrics:
+            print(" {}={:g}".format(metric.short_name, metric.get()), end='')
+        print()
 
     @tf.function()
     def compute_update_ratio_v2(self, before_weights, after_weights, steps):
