@@ -18,6 +18,7 @@
 import tensorflow as tf
 from chunkparser import ChunkParser
 
+
 def parse_function(planes, probs, winner, q, plies_left):
     """
     Convert unpacked record batches to tensors for tensorflow training
