@@ -119,8 +119,6 @@ def chunk_reader(chunk_filenames, chunk_filename_queue):
 
 
 class ChunkParser:
-    # static batch size
-    BATCH_SIZE = 8
 
     def __init__(self,
                  chunks,

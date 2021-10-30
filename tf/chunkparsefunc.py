@@ -16,7 +16,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Chess.  If not, see <http://www.gnu.org/licenses/>.
 import tensorflow as tf
-from chunkparser import ChunkParser
 
 
 def parse_function(planes, probs, winner, q, plies_left):
@@ -29,10 +28,10 @@ def parse_function(planes, probs, winner, q, plies_left):
     q = tf.io.decode_raw(q, tf.float32)
     plies_left = tf.io.decode_raw(plies_left, tf.float32)
 
-    planes = tf.reshape(planes, (ChunkParser.BATCH_SIZE, 112, 8 * 8))
-    probs = tf.reshape(probs, (ChunkParser.BATCH_SIZE, 1858))
-    winner = tf.reshape(winner, (ChunkParser.BATCH_SIZE, 3))
-    q = tf.reshape(q, (ChunkParser.BATCH_SIZE, 3))
-    plies_left = tf.reshape(plies_left, (ChunkParser.BATCH_SIZE, ))
+    planes = tf.reshape(planes, (-1, 112, 8 * 8))
+    probs = tf.reshape(probs, (-1, 1858))
+    winner = tf.reshape(winner, (-1, 3))
+    q = tf.reshape(q, (-1, 3))
+    plies_left = tf.reshape(plies_left, (-1, ))
 
     return (planes, probs, winner, q, plies_left)

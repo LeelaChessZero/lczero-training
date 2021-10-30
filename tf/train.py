@@ -146,8 +146,6 @@ def main(cmd):
     if total_batch_size % batch_splits != 0:
         raise ValueError('num_batch_splits must divide batch_size evenly')
     split_batch_size = total_batch_size // batch_splits
-    # Load data with split batch size, which will be combined to the total batch size in tfprocess.
-    ChunkParser.BATCH_SIZE = split_batch_size
 
     diff_focus_min = cfg['training'].get('diff_focus_min', 1)
     diff_focus_slope = cfg['training'].get('diff_focus_slope', 0)
@@ -162,7 +160,7 @@ def main(cmd):
                                get_input_mode(cfg),
                                shuffle_size=shuffle_size,
                                sample=SKIP,
-                               batch_size=ChunkParser.BATCH_SIZE,
+                               batch_size=split_batch_size,
                                diff_focus_min=diff_focus_min,
                                diff_focus_slope=diff_focus_slope,
                                diff_focus_q_weight=diff_focus_q_weight,
@@ -174,14 +172,14 @@ def main(cmd):
                               get_input_mode(cfg),
                               shuffle_size=test_shuffle_size,
                               sample=SKIP,
-                              batch_size=ChunkParser.BATCH_SIZE,
+                              batch_size=split_batch_size,
                               workers=test_workers)
     if 'input_validation' in cfg['dataset']:
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
         validation_parser = ChunkParser(valid_chunks,
                                         get_input_mode(cfg),
                                         sample=1,
-                                        batch_size=ChunkParser.BATCH_SIZE,
+                                        batch_size=split_batch_size,
                                         workers=0)
 
     import tensorflow as tf
@@ -228,7 +226,7 @@ def main(cmd):
     # This does not affect results, because test results are simple averages that are independent of batch size.
     num_evals = cfg['training'].get('num_test_positions',
                                     len(test_chunks) * 10)
-    num_evals = max(1, num_evals // ChunkParser.BATCH_SIZE)
+    num_evals = max(1, num_evals // split_batch_size)
     print("Using {} evaluation batches".format(num_evals))
     tfprocess.total_batch_size = total_batch_size
     tfprocess.process_loop_v2(total_batch_size,
