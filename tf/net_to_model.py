@@ -3,7 +3,6 @@ import argparse
 import os
 import yaml
 import tfprocess
-from net import Net
 
 argparser = argparse.ArgumentParser(description='Convert net to model.')
 argparser.add_argument('net',
@@ -26,8 +25,8 @@ print(yaml.dump(cfg, default_flow_style=False))
 START_FROM = args.start
 
 tfp = tfprocess.TFProcess(cfg)
-tfp.init_net_v2()
-tfp.replace_weights_v2(args.net, args.ignore_errors)
+tfp.init_net()
+tfp.replace_weights(args.net, args.ignore_errors)
 tfp.global_step.assign(START_FROM)
 
 root_dir = os.path.join(cfg['training']['path'], cfg['name'])

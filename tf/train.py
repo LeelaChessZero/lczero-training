@@ -215,9 +215,9 @@ def main(cmd):
         test_dataset = test_dataset.with_options(options)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.with_options(options)
-    tfprocess.init_v2(train_dataset, test_dataset, validation_dataset)
+    tfprocess.init(train_dataset, test_dataset, validation_dataset)
 
-    tfprocess.restore_v2()
+    tfprocess.restore()
 
     # If number of test positions is not given
     # sweeps through all test chunks statistically
@@ -229,15 +229,15 @@ def main(cmd):
     num_evals = max(1, num_evals // split_batch_size)
     print("Using {} evaluation batches".format(num_evals))
     tfprocess.total_batch_size = total_batch_size
-    tfprocess.process_loop_v2(total_batch_size,
-                              num_evals,
-                              batch_splits=batch_splits)
+    tfprocess.process_loop(total_batch_size,
+                           num_evals,
+                           batch_splits=batch_splits)
 
     if cmd.output is not None:
         if cfg['training'].get('swa_output', False):
-            tfprocess.save_swa_weights_v2(cmd.output)
+            tfprocess.save_swa_weights(cmd.output)
         else:
-            tfprocess.save_leelaz_weights_v2(cmd.output)
+            tfprocess.save_leelaz_weights(cmd.output)
 
     train_parser.shutdown()
     test_parser.shutdown()

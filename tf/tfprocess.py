@@ -216,7 +216,7 @@ class TFProcess:
                                        trainable=False,
                                        dtype=tf.int64)
 
-    def init_v2(self, train_dataset, test_dataset, validation_dataset=None):
+    def init(self, train_dataset, test_dataset, validation_dataset=None):
         if self.strategy is not None:
             self.train_dataset = self.strategy.experimental_distribute_dataset(
                 train_dataset)
@@ -237,15 +237,15 @@ class TFProcess:
         if self.strategy is not None:
             this = self
             with self.strategy.scope():
-                this.init_net_v2()
+                this.init_net()
         else:
-            self.init_net_v2()
+            self.init_net()
 
-    def init_net_v2(self):
+    def init_net(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8 * 8))
         x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
-        policy, value, moves_left = self.construct_net_v2(x_planes)
+        policy, value, moves_left = self.construct_net(x_planes)
         if self.moves_left:
             outputs = [policy, value, moves_left]
         else:
@@ -479,7 +479,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights_v2(self, proto_filename, ignore_errors=False):
+    def replace_weights(self, proto_filename, ignore_errors=False):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -562,16 +562,16 @@ class TFProcess:
         # Replace the SWA weights as well, ensuring swa accumulation is reset.
         if self.swa_enabled:
             self.swa_count.assign(tf.constant(0.))
-            self.update_swa_v2()
+            self.update_swa()
         # This should result in identical file to the starting one
-        # self.save_leelaz_weights_v2('restored.pb.gz')
+        # self.save_leelaz_weights('restored.pb.gz')
 
-    def restore_v2(self):
+    def restore(self):
         if self.manager.latest_checkpoint is not None:
             print("Restoring from {0}".format(self.manager.latest_checkpoint))
             self.checkpoint.restore(self.manager.latest_checkpoint)
 
-    def process_loop_v2(self, batch_size, test_batches, batch_splits=1):
+    def process_loop(self, batch_size, test_batches, batch_splits=1):
         if self.swa_enabled:
             # split half of test_batches between testing regular weights and SWA weights
             test_batches //= 2
@@ -592,9 +592,7 @@ class TFProcess:
 
         total_steps = self.cfg['training']['total_steps']
         for _ in range(steps % total_steps, total_steps):
-            self.process_v2(batch_size,
-                            test_batches,
-                            batch_splits=batch_splits)
+            self.process(batch_size, test_batches, batch_splits=batch_splits)
 
     @tf.function()
     def read_weights(self):
@@ -738,7 +736,8 @@ class TFProcess:
                                       elapsed)
             print("step {}, lr={:g}".format(steps, self.lr), end='')
             for metric in self.train_metrics:
-                print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix),
+                print(" {}={:g}{}".format(metric.short_name, metric.get(),
+                                          metric.suffix),
                       end='')
             print(" ({:g} pos/s)".format(speed))
 
@@ -752,8 +751,7 @@ class TFProcess:
                 tf.summary.scalar("Gradient norm",
                                   grad_norm / effective_batch_splits,
                                   step=steps)
-                self.compute_update_ratio_v2(before_weights, after_weights,
-                                             steps)
+                self.compute_update_ratio(before_weights, after_weights, steps)
             self.train_writer.flush()
 
             self.time_start = time_end
@@ -762,7 +760,7 @@ class TFProcess:
                 metric.reset()
         return steps
 
-    def process_v2(self, batch_size, test_batches, batch_splits):
+    def process(self, batch_size, test_batches, batch_splits):
         # Get the initial steps value before we do a training step.
         steps = self.global_step.read_value()
 
@@ -780,9 +778,9 @@ class TFProcess:
             with tf.profiler.experimental.Trace("Test", step_num=steps + 1):
                 # Steps is given as one higher than current in order to avoid it
                 # being equal to the value the end of a run is stored against.
-                self.calculate_test_summaries_v2(test_batches, steps + 1)
+                self.calculate_test_summaries(test_batches, steps + 1)
                 if self.swa_enabled:
-                    self.calculate_swa_summaries_v2(test_batches, steps + 1)
+                    self.calculate_swa_summaries(test_batches, steps + 1)
 
         # Determine learning rate
         lr_values = self.cfg['training']['lr_values']
@@ -797,25 +795,25 @@ class TFProcess:
             steps = self.train_step(steps, batch_size, batch_splits)
 
         if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
-            self.update_swa_v2()
+            self.update_swa()
 
         # Calculate test values every 'test_steps', but also ensure there is
         # one at the final step so the delta to the first step can be calculted.
         if steps % self.cfg['training']['test_steps'] == 0 or steps % self.cfg[
                 'training']['total_steps'] == 0:
             with tf.profiler.experimental.Trace("Test", step_num=steps):
-                self.calculate_test_summaries_v2(test_batches, steps)
+                self.calculate_test_summaries(test_batches, steps)
                 if self.swa_enabled:
-                    self.calculate_swa_summaries_v2(test_batches, steps)
+                    self.calculate_swa_summaries(test_batches, steps)
 
         if self.validation_dataset is not None and (
                 steps % self.cfg['training']['validation_steps'] == 0
                 or steps % self.cfg['training']['total_steps'] == 0):
             with tf.profiler.experimental.Trace("Validate", step_num=steps):
                 if self.swa_enabled:
-                    self.calculate_swa_validations_v2(steps)
+                    self.calculate_swa_validations(steps)
                 else:
-                    self.calculate_test_validations_v2(steps)
+                    self.calculate_test_validations(steps)
 
         # Save session and weights at end, and also optionally every 'checkpoint_steps'.
         if steps % self.cfg['training']['total_steps'] == 0 or (
@@ -829,9 +827,9 @@ class TFProcess:
             leela_path = path + "-" + str(evaled_steps)
             swa_path = path + "-swa-" + str(evaled_steps)
             self.net.pb.training_params.training_steps = evaled_steps
-            self.save_leelaz_weights_v2(leela_path)
+            self.save_leelaz_weights(leela_path)
             if self.swa_enabled:
-                self.save_swa_weights_v2(swa_path)
+                self.save_swa_weights(swa_path)
 
         if self.profiling_start_step is not None and (
                 steps >= self.profiling_start_step +
@@ -840,13 +838,13 @@ class TFProcess:
             tf.profiler.experimental.stop()
             self.profiling_start_step = None
 
-    def calculate_swa_summaries_v2(self, test_batches, steps):
+    def calculate_swa_summaries(self, test_batches, steps):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
         true_test_writer, self.test_writer = self.test_writer, self.swa_writer
         print('swa', end=' ')
-        self.calculate_test_summaries_v2(test_batches, steps)
+        self.calculate_test_summaries(test_batches, steps)
         self.test_writer = true_test_writer
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
@@ -898,7 +896,7 @@ class TFProcess:
         ]
         return metrics
 
-    def calculate_test_summaries_v2(self, test_batches, steps):
+    def calculate_test_summaries(self, test_batches, steps):
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
@@ -925,21 +923,23 @@ class TFProcess:
 
         print("step {},".format(steps), end='')
         for metric in self.test_metrics:
-            print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix), end='')
+            print(" {}={:g}{}".format(metric.short_name, metric.get(),
+                                      metric.suffix),
+                  end='')
         print()
 
-    def calculate_swa_validations_v2(self, steps):
+    def calculate_swa_validations(self, steps):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
         true_validation_writer, self.validation_writer = self.validation_writer, self.swa_validation_writer
         print('swa', end=' ')
-        self.calculate_test_validations_v2(steps)
+        self.calculate_test_validations(steps)
         self.validation_writer = true_validation_writer
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    def calculate_test_validations_v2(self, steps):
+    def calculate_test_validations(self, steps):
         for metric in self.test_metrics:
             metric.reset()
         for (x, y, z, q, m) in self.validation_dataset:
@@ -958,11 +958,13 @@ class TFProcess:
 
         print("step {}, validation:".format(steps), end='')
         for metric in self.test_metrics:
-            print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix), end='')
+            print(" {}={:g}{}".format(metric.short_name, metric.get(),
+                                      metric.suffix),
+                  end='')
         print()
 
     @tf.function()
-    def compute_update_ratio_v2(self, before_weights, after_weights, steps):
+    def compute_update_ratio(self, before_weights, after_weights, steps):
         """Compute the ratio of gradient norm to weight norm.
 
         Adapted from https://github.com/tensorflow/minigo/blob/c923cd5b11f7d417c9541ad61414bf175a84dc31/dual_net.py#L567
@@ -991,29 +993,29 @@ class TFProcess:
                              buckets=1000,
                              step=steps)
 
-    def update_swa_v2(self):
+    def update_swa(self):
         num = self.swa_count.read_value()
         for (w, swa) in zip(self.model.weights, self.swa_weights):
             swa.assign(swa.read_value() * (num / (num + 1.)) + w.read_value() *
                        (1. / (num + 1.)))
         self.swa_count.assign(min(num + 1., self.swa_max_n))
 
-    def save_swa_weights_v2(self, filename):
+    def save_swa_weights(self, filename):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
-        self.save_leelaz_weights_v2(filename)
+        self.save_leelaz_weights(filename)
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    def save_leelaz_weights_v2(self, filename):
+    def save_leelaz_weights(self, filename):
         numpy_weights = []
         for weight in self.model.weights:
             numpy_weights.append([weight.name, weight.numpy()])
         self.net.fill_net_v2(numpy_weights)
         self.net.save_proto(filename)
 
-    def batch_norm_v2(self, input, name, scale=False):
+    def batch_norm(self, input, name, scale=False):
         if self.renorm_enabled:
             clipping = {
                 "rmin": 1.0 / self.renorm_max_r,
@@ -1039,7 +1041,7 @@ class TFProcess:
                 virtual_batch_size=self.virtual_batch_size,
                 name=name)(input)
 
-    def squeeze_excitation_v2(self, inputs, channels, name):
+    def squeeze_excitation(self, inputs, channels, name):
         assert channels % self.SE_ratio == 0
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(
@@ -1055,12 +1057,12 @@ class TFProcess:
                                         name=name + '/se/dense2')(squeezed)
         return ApplySqueezeExcitation()([inputs, excited])
 
-    def conv_block_v2(self,
-                      inputs,
-                      filter_size,
-                      output_channels,
-                      name,
-                      bn_scale=False):
+    def conv_block(self,
+                   inputs,
+                   filter_size,
+                   output_channels,
+                   name,
+                   bn_scale=False):
         conv = tf.keras.layers.Conv2D(output_channels,
                                       filter_size,
                                       use_bias=False,
@@ -1069,10 +1071,10 @@ class TFProcess:
                                       kernel_regularizer=self.l2reg,
                                       data_format='channels_first',
                                       name=name + '/conv2d')(inputs)
-        return tf.keras.layers.Activation('relu')(self.batch_norm_v2(
+        return tf.keras.layers.Activation('relu')(self.batch_norm(
             conv, name=name + '/bn', scale=bn_scale))
 
-    def residual_block_v2(self, inputs, channels, name):
+    def residual_block(self, inputs, channels, name):
         conv1 = tf.keras.layers.Conv2D(channels,
                                        3,
                                        use_bias=False,
@@ -1081,8 +1083,10 @@ class TFProcess:
                                        kernel_regularizer=self.l2reg,
                                        data_format='channels_first',
                                        name=name + '/1/conv2d')(inputs)
-        out1 = tf.keras.layers.Activation('relu')(self.batch_norm_v2(
-            conv1, name + '/1/bn', scale=False))
+        out1 = tf.keras.layers.Activation('relu')(self.batch_norm(conv1,
+                                                                  name +
+                                                                  '/1/bn',
+                                                                  scale=False))
         conv2 = tf.keras.layers.Conv2D(channels,
                                        3,
                                        use_bias=False,
@@ -1091,32 +1095,31 @@ class TFProcess:
                                        kernel_regularizer=self.l2reg,
                                        data_format='channels_first',
                                        name=name + '/2/conv2d')(out1)
-        out2 = self.squeeze_excitation_v2(self.batch_norm_v2(conv2,
-                                                             name + '/2/bn',
-                                                             scale=True),
-                                          channels,
-                                          name=name + '/se')
+        out2 = self.squeeze_excitation(self.batch_norm(conv2,
+                                                       name + '/2/bn',
+                                                       scale=True),
+                                       channels,
+                                       name=name + '/se')
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
             [inputs, out2]))
 
-    def construct_net_v2(self, inputs):
-        flow = self.conv_block_v2(inputs,
-                                  filter_size=3,
-                                  output_channels=self.RESIDUAL_FILTERS,
-                                  name='input',
-                                  bn_scale=True)
+    def construct_net(self, inputs):
+        flow = self.conv_block(inputs,
+                               filter_size=3,
+                               output_channels=self.RESIDUAL_FILTERS,
+                               name='input',
+                               bn_scale=True)
         for i in range(self.RESIDUAL_BLOCKS):
-            flow = self.residual_block_v2(flow,
-                                          self.RESIDUAL_FILTERS,
-                                          name='residual_{}'.format(i + 1))
+            flow = self.residual_block(flow,
+                                       self.RESIDUAL_FILTERS,
+                                       name='residual_{}'.format(i + 1))
 
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
-            conv_pol = self.conv_block_v2(
-                flow,
-                filter_size=3,
-                output_channels=self.RESIDUAL_FILTERS,
-                name='policy1')
+            conv_pol = self.conv_block(flow,
+                                       filter_size=3,
+                                       output_channels=self.RESIDUAL_FILTERS,
+                                       name='policy1')
             conv_pol2 = tf.keras.layers.Conv2D(
                 80,
                 3,
@@ -1129,10 +1132,10 @@ class TFProcess:
                 name='policy')(conv_pol)
             h_fc1 = ApplyPolicyMap()(conv_pol2)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CLASSICAL:
-            conv_pol = self.conv_block_v2(flow,
-                                          filter_size=1,
-                                          output_channels=self.policy_channels,
-                                          name='policy')
+            conv_pol = self.conv_block(flow,
+                                       filter_size=1,
+                                       output_channels=self.policy_channels,
+                                       name='policy')
             h_conv_pol_flat = tf.keras.layers.Flatten()(conv_pol)
             h_fc1 = tf.keras.layers.Dense(1858,
                                           kernel_initializer='glorot_normal',
@@ -1144,10 +1147,10 @@ class TFProcess:
                 self.POLICY_HEAD))
 
         # Value head
-        conv_val = self.conv_block_v2(flow,
-                                      filter_size=1,
-                                      output_channels=32,
-                                      name='value')
+        conv_val = self.conv_block(flow,
+                                   filter_size=1,
+                                   output_channels=32,
+                                   name='value')
         h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
         h_fc2 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
@@ -1169,10 +1172,10 @@ class TFProcess:
 
         # Moves left head
         if self.moves_left:
-            conv_mov = self.conv_block_v2(flow,
-                                          filter_size=1,
-                                          output_channels=8,
-                                          name='moves_left')
+            conv_mov = self.conv_block(flow,
+                                       filter_size=1,
+                                       output_channels=8,
+                                       name='moves_left')
             h_conv_mov_flat = tf.keras.layers.Flatten()(conv_mov)
             h_fc4 = tf.keras.layers.Dense(
                 128,
