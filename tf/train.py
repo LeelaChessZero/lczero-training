@@ -228,6 +228,8 @@ def main(cmd):
 
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
+        from experimental_parsing import select_extractor
+        extractor = select_extractor(get_input_mode(cfg))
         valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
         validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
                                .batch(split_batch_size, drop_remainder=True).map(extractor)
