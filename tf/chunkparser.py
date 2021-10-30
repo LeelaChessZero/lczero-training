@@ -129,13 +129,16 @@ class ChunkParser:
                  sample=1,
                  buffer_size=1,
                  batch_size=256,
-                 value_focus_min=1,
-                 value_focus_slope=0,
+                 diff_focus_min=1,
+                 diff_focus_slope=0,
+                 diff_focus_q_weight=6.0,
+                 diff_focus_pol_scale=3.5,
                  workers=None):
         self.inner = ChunkParserInner(self, chunks, expected_input_format,
                                       shuffle_size, sample, buffer_size,
-                                      batch_size, value_focus_min,
-                                      value_focus_slope, workers)
+                                      batch_size, diff_focus_min,
+                                      diff_focus_slope, diff_focus_q_weight,
+                                      diff_focus_pol_scale, workers)
 
     def shutdown(self):
         """
@@ -174,8 +177,9 @@ class ChunkParser:
 
 class ChunkParserInner:
     def __init__(self, parent, chunks, expected_input_format, shuffle_size,
-                 sample, buffer_size, batch_size, value_focus_min,
-                 value_focus_slope, workers):
+                 sample, buffer_size, batch_size, diff_focus_min,
+                 diff_focus_slope, diff_focus_q_weight, diff_focus_pol_scale,
+                 workers):
         """
         Read data and yield batches of raw tensors.
 
@@ -211,8 +215,10 @@ class ChunkParserInner:
         # set the down-sampling rate
         self.sample = sample
         # set the min and slope for value focus, defaults accept all positions
-        self.value_focus_min = value_focus_min
-        self.value_focus_slope = value_focus_slope
+        self.diff_focus_min = diff_focus_min
+        self.diff_focus_slope = diff_focus_slope
+        self.diff_focus_q_weight = diff_focus_q_weight
+        self.diff_focus_pol_scale = diff_focus_pol_scale
         # set the mini-batch size
         self.batch_size = batch_size
         # set number of elements in the shuffle buffer.
@@ -453,11 +459,16 @@ class ChunkParserInner:
                 # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
                 best_q = struct.unpack('f', record[8284:8288])[0]
                 orig_q = struct.unpack('f', record[8328:8332])[0]
+                pol_kld = struct.unpack('f', record[8348:8352])[0]
 
-                # if orig_q is NaN, accept, else accept based on value focus
-                if not np.isnan(orig_q):
+                # if orig_q is NaN or pol_kld is 0, accept, else accept based on diff focus
+                if not np.isnan(orig_q) and pol_kld > 0:
                     diff_q = abs(best_q - orig_q)
-                    thresh_p = self.value_focus_min + self.value_focus_slope * diff_q
+                    q_weight = self.diff_focus_q_weight
+                    pol_scale = self.diff_focus_pol_scale
+                    total = (q_weight * diff_q + pol_kld) / (q_weight +
+                                                             pol_scale)
+                    thresh_p = self.diff_focus_min + self.diff_focus_slope * total
                     if thresh_p < 1.0 and random.random() > thresh_p:
                         continue
 
