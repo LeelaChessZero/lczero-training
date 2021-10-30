@@ -461,34 +461,37 @@ class ChunkParserInner:
 
             yield record
 
+    def single_file_gen(self, filename):
+        try:
+            with gzip.open(filename, 'rb') as chunk_file:
+                version = chunk_file.read(4)
+                chunk_file.seek(0)
+                if version == V6_VERSION:
+                    record_size = self.v6_struct.size
+                elif version == V5_VERSION:
+                    record_size = self.v5_struct.size
+                elif version == V4_VERSION:
+                    record_size = self.v4_struct.size
+                elif version == V3_VERSION:
+                    record_size = self.v3_struct.size
+                else:
+                    print('Unknown version {} in file {}'.format(
+                        version, filename))
+                    return
+                while True:
+                    chunkdata = chunk_file.read(256 * record_size)
+                    if len(chunkdata) == 0:
+                        break
+                    for item in self.sample_record(chunkdata):
+                        yield item
+
+        except:
+            print("failed to parse {}".format(filename))
+
     def sequential_gen(self):
         for filename in self.chunks:
-            try:
-                with gzip.open(filename, 'rb') as chunk_file:
-                    version = chunk_file.read(4)
-                    chunk_file.seek(0)
-                    if version == V6_VERSION:
-                        record_size = self.v6_struct.size
-                    elif version == V5_VERSION:
-                        record_size = self.v5_struct.size
-                    elif version == V4_VERSION:
-                        record_size = self.v4_struct.size
-                    elif version == V3_VERSION:
-                        record_size = self.v3_struct.size
-                    else:
-                        print('Unknown version {} in file {}'.format(
-                            version, filename))
-                        continue
-                    while True:
-                        chunkdata = chunk_file.read(256 * record_size)
-                        if len(chunkdata) == 0:
-                            break
-                        for item in self.sample_record(chunkdata):
-                            yield item
-
-            except:
-                print("failed to parse {}".format(filename))
-                continue
+            for item in self.single_file_gen(filename):
+                yield item
 
     def sequential(self):
         gen = self.sequential_gen()  # read from all files in order in this process.
@@ -505,32 +508,8 @@ class ChunkParserInner:
         self.init_structs()
         while True:
             filename = chunk_filename_queue.get()
-            try:
-                with gzip.open(filename, 'rb') as chunk_file:
-                    version = chunk_file.read(4)
-                    chunk_file.seek(0)
-                    if version == V6_VERSION:
-                        record_size = self.v6_struct.size
-                    elif version == V5_VERSION:
-                        record_size = self.v5_struct.size
-                    elif version == V4_VERSION:
-                        record_size = self.v4_struct.size
-                    elif version == V3_VERSION:
-                        record_size = self.v3_struct.size
-                    else:
-                        print('Unknown version {} in file {}'.format(
-                            version, filename))
-                        continue
-                    while True:
-                        chunkdata = chunk_file.read(256 * record_size)
-                        if len(chunkdata) == 0:
-                            break
-                        for item in self.sample_record(chunkdata):
-                            writer.send_bytes(item)
-
-            except:
-                print("failed to parse {}".format(filename))
-                continue
+            for item in self.single_file_gen(filename):
+                writer.send_bytes(item)
 
     def v6_gen(self):
         """
