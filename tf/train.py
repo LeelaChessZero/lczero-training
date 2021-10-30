@@ -113,8 +113,6 @@ def main(cmd):
     num_chunks = cfg['dataset']['num_chunks']
     allow_less = cfg['dataset'].get('allow_less_chunks', False)
     train_ratio = cfg['dataset']['train_ratio']
-    experimental_parser = cfg['dataset'].get('experimental_v5_only_dataset',
-                                             False)
     num_train = int(num_chunks * train_ratio)
     num_test = num_chunks - num_train
     sort_type = cfg['dataset'].get('sort_type', 'mtime')
@@ -159,80 +157,54 @@ def main(cmd):
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
-    experimental_reads = max(2, mp.cpu_count() - 2) // 2
 
-    if experimental_parser and (diff_focus_min != 1 or diff_focus_slope != 0):
-        raise ValueError(
-            'Experimental parser does not support non-default value \
-                          focus parameters.')
-
-    def read(x):
-        return tf.data.FixedLengthRecordDataset(
-            x,
-            8308,
-            compression_type='GZIP',
-            num_parallel_reads=experimental_reads)
-
+    train_parser = ChunkParser(train_chunks,
+                               get_input_mode(cfg),
+                               shuffle_size=shuffle_size,
+                               sample=SKIP,
+                               batch_size=ChunkParser.BATCH_SIZE,
+                               diff_focus_min=diff_focus_min,
+                               diff_focus_slope=diff_focus_slope,
+                               diff_focus_q_weight=diff_focus_q_weight,
+                               diff_focus_pol_scale=diff_focus_pol_scale,
+                               workers=train_workers)
     test_shuffle_size = int(shuffle_size * (1.0 - train_ratio))
+    # no diff focus for test_parser
+    test_parser = ChunkParser(test_chunks,
+                              get_input_mode(cfg),
+                              shuffle_size=test_shuffle_size,
+                              sample=SKIP,
+                              batch_size=ChunkParser.BATCH_SIZE,
+                              workers=test_workers)
+    if 'input_validation' in cfg['dataset']:
+        valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
+        validation_parser = ChunkParser(valid_chunks,
+                                        get_input_mode(cfg),
+                                        sample=1,
+                                        batch_size=ChunkParser.BATCH_SIZE,
+                                        workers=0)
 
-    if experimental_parser:
-        import tensorflow as tf
-        from tfprocess import TFProcess
-        tfprocess = TFProcess(cfg)
-        from experimental_parsing import select_extractor
-        from experimental_parsing import semi_sample
-        from experimental_parsing import SKIP_MULTIPLE
-        extractor = select_extractor(get_input_mode(cfg))
-        train_dataset = tf.data.Dataset.from_tensor_slices(train_chunks).shuffle(len(train_chunks)).repeat().batch(256)\
-                         .interleave(read, num_parallel_calls=2)\
-                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
-                         .shuffle(shuffle_size)\
-                         .batch(split_batch_size).map(extractor)
-        test_dataset = tf.data.Dataset.from_tensor_slices(test_chunks).shuffle(len(test_chunks)).repeat().batch(256)\
-                         .interleave(read, num_parallel_calls=2)\
-                         .batch(SKIP_MULTIPLE*SKIP).map(semi_sample).unbatch()\
-                         .shuffle(test_shuffle_size)\
-                         .batch(split_batch_size).map(extractor)
-    else:
-        train_parser = ChunkParser(train_chunks,
-                                   get_input_mode(cfg),
-                                   shuffle_size=shuffle_size,
-                                   sample=SKIP,
-                                   batch_size=ChunkParser.BATCH_SIZE,
-                                   diff_focus_min=diff_focus_min,
-                                   diff_focus_slope=diff_focus_slope,
-                                   diff_focus_q_weight=diff_focus_q_weight,
-                                   diff_focus_pol_scale=diff_focus_pol_scale,
-                                   workers=train_workers)
-        # no diff focus for test_parser
-        test_parser = ChunkParser(test_chunks,
-                                  get_input_mode(cfg),
-                                  shuffle_size=test_shuffle_size,
-                                  sample=SKIP,
-                                  batch_size=ChunkParser.BATCH_SIZE,
-                                  workers=test_workers)
-        import tensorflow as tf
-        from chunkparsefunc import parse_function
-        from tfprocess import TFProcess
-        tfprocess = TFProcess(cfg)
-        train_dataset = tf.data.Dataset.from_generator(
-            train_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        train_dataset = train_dataset.map(parse_function)
-        test_dataset = tf.data.Dataset.from_generator(
-            test_parser.parse,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
-        test_dataset = test_dataset.map(parse_function)
+    import tensorflow as tf
+    from chunkparsefunc import parse_function
+    from tfprocess import TFProcess
+    tfprocess = TFProcess(cfg)
+    train_dataset = tf.data.Dataset.from_generator(
+        train_parser.parse,
+        output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
+    train_dataset = train_dataset.map(parse_function)
+    test_dataset = tf.data.Dataset.from_generator(
+        test_parser.parse,
+        output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
+    test_dataset = test_dataset.map(parse_function)
 
     validation_dataset = None
     if 'input_validation' in cfg['dataset']:
-        from experimental_parsing import select_extractor
-        extractor = select_extractor(get_input_mode(cfg))
-        valid_chunks = get_all_chunks(cfg['dataset']['input_validation'])
-        validation_dataset = tf.data.FixedLengthRecordDataset(valid_chunks, 8308, compression_type='GZIP', num_parallel_reads=experimental_reads)\
-                               .batch(split_batch_size, drop_remainder=True).map(extractor)
+        validation_dataset = tf.data.Dataset.from_generator(
+            validation_parser.sequential,
+            output_types=(tf.string, tf.string, tf.string, tf.string,
+                          tf.string))
+        validation_dataset = validation_dataset.map(parse_function)
+
     if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)
         test_dataset = test_dataset.prefetch(4)

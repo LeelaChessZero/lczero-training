@@ -155,6 +155,9 @@ class ChunkParser:
     def parse(self):
         return self.inner.parse()
 
+    def sequential(self):
+        return self.inner.sequential()
+
 
 class ChunkParserInner:
     def __init__(self, parent, chunks, expected_input_format, shuffle_size,
@@ -208,28 +211,31 @@ class ChunkParserInner:
         if workers is None:
             workers = max(1, mp.cpu_count() - 2)
 
-        print("Using {} worker processes.".format(workers))
+        if workers > 0:
+            print("Using {} worker processes.".format(workers))
 
-        # Start the child workers running
-        self.readers = []
-        self.writers = []
-        parent.processes = []
-        self.chunk_filename_queue = mp.Queue(maxsize=4096)
-        for _ in range(workers):
-            read, write = mp.Pipe(duplex=False)
-            p = mp.Process(target=self.task,
-                           args=(self.chunk_filename_queue, write))
-            p.daemon = True
-            parent.processes.append(p)
-            p.start()
-            self.readers.append(read)
-            self.writers.append(write)
+            # Start the child workers running
+            self.readers = []
+            self.writers = []
+            parent.processes = []
+            self.chunk_filename_queue = mp.Queue(maxsize=4096)
+            for _ in range(workers):
+                read, write = mp.Pipe(duplex=False)
+                p = mp.Process(target=self.task,
+                               args=(self.chunk_filename_queue, write))
+                p.daemon = True
+                parent.processes.append(p)
+                p.start()
+                self.readers.append(read)
+                self.writers.append(write)
 
-        parent.chunk_process = mp.Process(target=chunk_reader,
-                                          args=(chunks,
-                                                self.chunk_filename_queue))
-        parent.chunk_process.daemon = True
-        parent.chunk_process.start()
+            parent.chunk_process = mp.Process(target=chunk_reader,
+                                              args=(chunks,
+                                                    self.chunk_filename_queue))
+            parent.chunk_process.daemon = True
+            parent.chunk_process.start()
+        else:
+            self.chunks = chunks
 
         self.init_structs()
 
@@ -455,6 +461,45 @@ class ChunkParserInner:
 
             yield record
 
+    def single_file_gen(self, filename):
+        try:
+            with gzip.open(filename, 'rb') as chunk_file:
+                version = chunk_file.read(4)
+                chunk_file.seek(0)
+                if version == V6_VERSION:
+                    record_size = self.v6_struct.size
+                elif version == V5_VERSION:
+                    record_size = self.v5_struct.size
+                elif version == V4_VERSION:
+                    record_size = self.v4_struct.size
+                elif version == V3_VERSION:
+                    record_size = self.v3_struct.size
+                else:
+                    print('Unknown version {} in file {}'.format(
+                        version, filename))
+                    return
+                while True:
+                    chunkdata = chunk_file.read(256 * record_size)
+                    if len(chunkdata) == 0:
+                        break
+                    for item in self.sample_record(chunkdata):
+                        yield item
+
+        except:
+            print("failed to parse {}".format(filename))
+
+    def sequential_gen(self):
+        for filename in self.chunks:
+            for item in self.single_file_gen(filename):
+                yield item
+
+    def sequential(self):
+        gen = self.sequential_gen()  # read from all files in order in this process.
+        gen = self.tuple_gen(gen)  # convert v6->tuple
+        gen = self.batch_gen(gen, allow_partial=False)  # assemble into batches
+        for b in gen:
+            yield b
+
     def task(self, chunk_filename_queue, writer):
         """
         Run in fork'ed process, read data from chunkdatasrc, parsing, shuffling and
@@ -463,32 +508,8 @@ class ChunkParserInner:
         self.init_structs()
         while True:
             filename = chunk_filename_queue.get()
-            try:
-                with gzip.open(filename, 'rb') as chunk_file:
-                    version = chunk_file.read(4)
-                    chunk_file.seek(0)
-                    if version == V6_VERSION:
-                        record_size = self.v6_struct.size
-                    elif version == V5_VERSION:
-                        record_size = self.v5_struct.size
-                    elif version == V4_VERSION:
-                        record_size = self.v4_struct.size
-                    elif version == V3_VERSION:
-                        record_size = self.v3_struct.size
-                    else:
-                        print('Unknown version {} in file {}'.format(
-                            version, filename))
-                        continue
-                    while True:
-                        chunkdata = chunk_file.read(256 * record_size)
-                        if len(chunkdata) == 0:
-                            break
-                        for item in self.sample_record(chunkdata):
-                            writer.send_bytes(item)
-
-            except:
-                print("failed to parse {}".format(filename))
-                continue
+            for item in self.single_file_gen(filename):
+                writer.send_bytes(item)
 
     def v6_gen(self):
         """
@@ -522,7 +543,7 @@ class ChunkParserInner:
         for r in gen:
             yield self.convert_v6_to_tuple(r)
 
-    def batch_gen(self, gen):
+    def batch_gen(self, gen, allow_partial=True):
         """
         Pack multiple records into a single batch
         """
@@ -530,7 +551,7 @@ class ChunkParserInner:
         # a list because we need to reuse it.
         while True:
             s = list(itertools.islice(gen, self.batch_size))
-            if not len(s):
+            if not len(s) or (not allow_partial and len(s) != self.batch_size):
                 return
             yield (b''.join([x[0] for x in s]), b''.join([x[1] for x in s]),
                    b''.join([x[2] for x in s]), b''.join([x[3] for x in s]),
