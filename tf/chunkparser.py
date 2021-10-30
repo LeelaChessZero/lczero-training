@@ -493,7 +493,7 @@ class ChunkParserInner:
     def sequential(self):
         gen = self.sequential_gen()  # read from all files in order in this process.
         gen = self.tuple_gen(gen)  # convert v6->tuple
-        gen = self.batch_gen(gen)  # assemble into batches
+        gen = self.batch_gen(gen, allow_partial=False)  # assemble into batches
         for b in gen:
             yield b
 
@@ -564,7 +564,7 @@ class ChunkParserInner:
         for r in gen:
             yield self.convert_v6_to_tuple(r)
 
-    def batch_gen(self, gen):
+    def batch_gen(self, gen, allow_partial=True):
         """
         Pack multiple records into a single batch
         """
@@ -572,7 +572,7 @@ class ChunkParserInner:
         # a list because we need to reuse it.
         while True:
             s = list(itertools.islice(gen, self.batch_size))
-            if not len(s):
+            if not len(s) or (not allow_partial and len(s) != self.batch_size):
                 return
             yield (b''.join([x[0] for x in s]), b''.join([x[1] for x in s]),
                    b''.join([x[2] for x in s]), b''.join([x[3] for x in s]),
