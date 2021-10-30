@@ -234,6 +234,9 @@ class TFProcess:
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
                 self.optimizer, self.loss_scale)
+        if self.cfg['training'].get('lookahead_optimizer'):
+            import tensorflow_addons as tfa
+            self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
         def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
