@@ -34,12 +34,13 @@ byte padding is done in chunkparser.ChunkParser.sample_record()
 sample_record() also skips most training records to avoid sampling over-correlated
 positions since they typically are from sequential positions in a game.
 
-Current implementation of "value focus" also is in sample_record() and works by
+Current implementation of "diff focus" also is in sample_record() and works by
 probabilistically skipping records according to how accurate the no-search 
-eval ('orig_q') is compared to eval after search ('best_q'). It does not use
-draw values at this point. Putting value focus here is efficient because
-it runs in parallel workers and peeks at the records without requiring any
-unpacking.
+eval ('orig_q') is compared to eval after search ('best_q') as well as the
+recorded policy_kld (a measure of difference between no search policy and the
+final policy distribution). It does not use draw values at this point. Putting
+diff focus here is efficient because it runs in parallel workers and peeks at
+the records without requiring any unpacking.
 
 The constructor for chunkparser.ChunkParser() sets a bunch of class constants
 and creates a fixed number of parallel Python multiprocessing.Pipe objects,
@@ -187,7 +188,7 @@ class ChunkParserInner:
         'chunks' list of chunk filenames.
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
-        'value_focus_min' and 'value_focus_slope' control value focus
+        'diff_focus_min', 'diff_focus_slope', 'diff_focus_q_weight' and 'diff_focus_pol_scale' control diff focus
         'workers' is the number of child workers to use.
 
         The data is represented in a number of formats through this dataflow
@@ -214,7 +215,7 @@ class ChunkParserInner:
 
         # set the down-sampling rate
         self.sample = sample
-        # set the min and slope for value focus, defaults accept all positions
+        # set the details for diff focus, defaults accept all positions
         self.diff_focus_min = diff_focus_min
         self.diff_focus_slope = diff_focus_slope
         self.diff_focus_q_weight = diff_focus_q_weight
@@ -421,7 +422,7 @@ class ChunkParserInner:
         """
         Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
         Downsampling to avoid highly correlated positions skips most records, and 
-        value focus may also skip some records.
+        diff focus may also skip some records.
         """
         version = chunkdata[0:4]
         if version == V6_VERSION:
@@ -456,7 +457,7 @@ class ChunkParserInner:
                 record += 48 * b'\x00'
 
             if version == V6_VERSION:
-                # value focus code, peek at best_q and orig_q from record (unpacks as tuple with one item)
+                # diff focus code, peek at best_q, orig_q and pol_kld from record (unpacks as tuple with one item)
                 best_q = struct.unpack('f', record[8284:8288])[0]
                 orig_q = struct.unpack('f', record[8328:8332])[0]
                 pol_kld = struct.unpack('f', record[8348:8352])[0]
