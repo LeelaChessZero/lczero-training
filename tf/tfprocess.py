@@ -372,11 +372,34 @@ class TFProcess:
             unc_output, counts = correct_unc(target, unc_output)
             target, output = correct_policy(target, output)
             softmax_policy = tf.nn.softmax(tf.stop_gradient(output))
-            calculated_target = tf.math.abs(tf.stop_gradient(target) - softmax_policy)
-            loss = tf.math.squared_difference(calculated_target, unc_output) / tf.math.sqrt(tf.stop_gradient(counts))
-            return tf.reduce_mean(tf.reduce_sum(loss, -1))
+            calculated_target = tf.stop_gradient(target) - softmax_policy
+            # Loss scaled up by 29 as the average number of legal moves, so loss is of the similar order to mean total loss per position, not per legal output.
+            # Scale down because ... it generates too much gradient :P
+            loss = 29*tf.math.squared_difference(calculated_target, unc_output) / 4
+            return tf.reduce_sum(loss) / tf.reduce_sum(tf.stop_gradient(counts))
 
         self.unc_loss_fn = unc_loss
+
+        def unc_mae(target, output, unc_output):
+            unc_output, counts = correct_unc(target, unc_output)
+            target, output = correct_policy(target, output)
+            softmax_policy = tf.nn.softmax(tf.stop_gradient(output))
+            calculated_target = tf.stop_gradient(target) - softmax_policy
+            loss = tf.math.abs(calculated_target - unc_output)
+            return tf.reduce_sum(loss) / tf.reduce_sum(tf.stop_gradient(counts))
+
+        self.unc_mae_fn = unc_mae
+
+        def unc_mpi(target, output, unc_output):
+            unc_output, counts = correct_unc(target, unc_output)
+            target, output = correct_policy(target, output)
+            softmax_policy = tf.nn.softmax(tf.stop_gradient(output))
+            calculated_target = tf.stop_gradient(target) - softmax_policy
+            # maximum value should be when unc_output == calculated_target, output should be abs(calculated_target). Should be 0 if unc_output is 0. So function abs(calculted_target) - abs(calculated_target - unc_output).
+            loss = tf.math.abs(calculated_target) - tf.math.abs(calculated_target - unc_output)
+            return tf.reduce_sum(loss) / tf.reduce_sum(tf.stop_gradient(counts))
+
+        self.unc_mpi_fn = unc_mpi
 
         pol_loss_w = self.cfg['training']['policy_loss_weight']
         val_loss_w = self.cfg['training']['value_loss_weight']
@@ -876,11 +899,13 @@ class TFProcess:
             moves_left_loss = tf.constant(0.)
             moves_left_mean_error = tf.constant(0.)
         unc_loss = self.unc_loss_fn(y, policy, outputs[3])
-        return policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
+        unc_mae = self.unc_mae_fn(y, policy, outputs[3])
+        unc_mpi = self.unc_mpi_fn(y, policy, outputs[3])
+        return policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi
 
     @tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
-        policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy.run(
+        policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi = self.strategy.run(
             self.calculate_test_summaries_inner_loop, args=(x, y, z, q, m))
         policy_loss = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
                                            policy_loss,
@@ -911,7 +936,13 @@ class TFProcess:
         policy_ul = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
                                          policy_ul,
                                          axis=None)
-        return policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul
+        unc_mae = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                         unc_mae,
+                                         axis=None)
+        unc_mpi = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
+                                         unc_mpi,
+                                         axis=None)
+        return policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi
 
     def calculate_test_summaries_v2(self, test_batches, steps):
         sum_policy_accuracy = 0
@@ -924,13 +955,15 @@ class TFProcess:
         sum_value = 0
         sum_policy_entropy = 0
         sum_policy_ul = 0
+        sum_unc_mae = 0
+        sum_unc_mpi = 0
         for _ in range(0, test_batches):
             x, y, z, q, m = next(self.test_iter)
             if self.strategy is not None:
-                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy_calculate_test_summaries_inner_loop(
+                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             else:
-                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi = self.calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
             sum_policy_entropy += policy_entropy
@@ -944,6 +977,8 @@ class TFProcess:
                 sum_moves_left += moves_left_loss
                 sum_moves_left_mean_error += moves_left_mean_error
             sum_unc += unc_loss
+            sum_unc_mae += unc_mae
+            sum_unc_mpi += unc_mpi
         sum_policy_accuracy /= test_batches
         sum_policy_accuracy *= 100
         sum_policy /= test_batches
@@ -959,6 +994,8 @@ class TFProcess:
             sum_moves_left /= test_batches
             sum_moves_left_mean_error /= test_batches
         sum_unc /= test_batches
+        sum_unc_mae /= test_batches
+        sum_unc_mpi /= test_batches
         self.net.pb.training_params.learning_rate = self.lr
         self.net.pb.training_params.mse_loss = sum_mse
         self.net.pb.training_params.policy_loss = sum_policy
@@ -969,6 +1006,8 @@ class TFProcess:
             tf.summary.scalar("Value Loss", sum_value, step=steps)
             tf.summary.scalar("MSE Loss", sum_mse, step=steps)
             tf.summary.scalar("Uncertainty Loss", sum_unc, step=steps)
+            tf.summary.scalar("Uncertainty Mean Error", sum_unc_mae, step=steps)
+            tf.summary.scalar("Uncertainty Mean Policy Improvement", sum_unc_mpi, step=steps)
             tf.summary.scalar("Policy Accuracy",
                               sum_policy_accuracy,
                               step=steps)
@@ -989,8 +1028,8 @@ class TFProcess:
                 tf.summary.histogram(w.name, w, step=steps)
         self.test_writer.flush()
 
-        print("step {}, policy={:g} value={:g} unc={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g}".\
-            format(steps, sum_policy, sum_value, sum_unc, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul), end = '')
+        print("step {}, policy={:g} value={:g} unc={:g} policy accuracy={:g}% value accuracy={:g}% mse={:g} policy entropy={:g} policy ul={:g} unc_mae={:g} unc_mpi={:g}".\
+            format(steps, sum_policy, sum_value, sum_unc, sum_policy_accuracy, sum_value_accuracy, sum_mse, sum_policy_entropy, sum_policy_ul, sum_unc_mae, sum_unc_mpi), end = '')
 
         if self.moves_left:
             print(" moves={:g} moves mean={:g}".format(
@@ -1020,13 +1059,15 @@ class TFProcess:
         sum_unc = 0
         sum_policy_entropy = 0
         sum_policy_ul = 0
+        sum_unc_mae = 0
+        sum_unc_mpi = 0
         counter = 0
         for (x, y, z, q, m) in self.validation_dataset:
             if self.strategy is not None:
-                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.strategy_calculate_test_summaries_inner_loop(
+                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             else:
-                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul = self.calculate_test_summaries_inner_loop(
+                policy_loss, value_loss, moves_left_loss, mse_loss, unc_loss, policy_accuracy, value_accuracy, moves_left_mean_error, policy_entropy, policy_ul, unc_mae, unc_mpi = self.calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
             sum_policy_accuracy += policy_accuracy
             sum_policy_entropy += policy_entropy
@@ -1037,6 +1078,8 @@ class TFProcess:
                 sum_moves_left += moves_left_loss
                 sum_moves_left_mean_error += moves_left_mean_error
             sum_unc += unc_loss
+            sum_unc_mae += unc_mae
+            sum_unc_mpi += unc_mpi
             counter += 1
             if self.wdl:
                 sum_value_accuracy += value_accuracy
@@ -1054,6 +1097,8 @@ class TFProcess:
             sum_moves_left /= counter
             sum_moves_left_mean_error /= counter
         sum_unc /= counter
+        sum_unc_mae /= counter
+        sum_unc_mpi /= counter
         # Additionally rescale to [0, 1] so divide by 4
         sum_mse /= (4.0 * counter)
         with self.validation_writer.as_default():
@@ -1061,6 +1106,8 @@ class TFProcess:
             tf.summary.scalar("Value Loss", sum_value, step=steps)
             tf.summary.scalar("MSE Loss", sum_mse, step=steps)
             tf.summary.scalar("Uncertainty Loss", sum_unc, step=steps)
+            tf.summary.scalar("Uncertainty Mean Error", sum_unc_mae, step=steps)
+            tf.summary.scalar("Uncertainty Mean Policy Improvement", sum_unc_mpi, step=steps)
             tf.summary.scalar("Policy Accuracy",
                               sum_policy_accuracy,
                               step=steps)
@@ -1332,6 +1379,6 @@ class TFProcess:
             bias_regularizer=self.l2reg,
             data_format='channels_first',
             name='uncertainty')(conv_unc)
-        h_fc7 = tf.keras.activations.sigmoid(ApplyPolicyMap()(conv_unc2))
+        h_fc7 = tf.keras.activations.tanh(ApplyPolicyMap()(conv_unc2))
 
         return h_fc1, h_fc3, h_fc5, h_fc7
