@@ -59,9 +59,10 @@ class ApplyPolicyMap(tf.keras.layers.Layer):
 
 
 class Metric:
-    def __init__(self, short_name, long_name, **kwargs):
+    def __init__(self, short_name, long_name, suffix='', **kwargs):
         self.short_name = short_name
         self.long_name = long_name
+        self.suffix = suffix
         self.value = 0.0
         self.count = 0
 
@@ -436,8 +437,8 @@ class TFProcess:
             Metric(
                 'V MSE', 'MSE Loss'
             ),  # Long name here doesn't mention value for backwards compatibility reasons.
-            Metric('P Acc', 'Policy Accuracy'),
-            Metric('V Acc', 'Value Accuracy'),
+            Metric('P Acc', 'Policy Accuracy', suffix='%'),
+            Metric('V Acc', 'Value Accuracy', suffix='%'),
             Metric('ML Mean', 'Moves Left Mean Error'),
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
@@ -737,7 +738,7 @@ class TFProcess:
                                       elapsed)
             print("step {}, lr={:g}".format(steps, self.lr), end='')
             for metric in self.train_metrics:
-                print(" {}={:g}".format(metric.short_name, metric.get()),
+                print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix),
                       end='')
             print(" ({:g} pos/s)".format(speed))
 
@@ -924,7 +925,7 @@ class TFProcess:
 
         print("step {},".format(steps), end='')
         for metric in self.test_metrics:
-            print(" {}={:g}".format(metric.short_name, metric.get()), end='')
+            print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix), end='')
         print()
 
     def calculate_swa_validations_v2(self, steps):
@@ -957,7 +958,7 @@ class TFProcess:
 
         print("step {}, validation:".format(steps), end='')
         for metric in self.test_metrics:
-            print(" {}={:g}".format(metric.short_name, metric.get()), end='')
+            print(" {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix), end='')
         print()
 
     @tf.function()
