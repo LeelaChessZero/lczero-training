@@ -493,7 +493,7 @@ class TFProcess:
         for weight in self.model.weights:
             names.append(weight.name)
 
-        new_weights = self.net.get_weights_v2(names)
+        new_weights = self.net.get_weights(names)
         for weight in self.model.weights:
             if 'renorm' in weight.name:
                 # Renorm variables are not populated.
@@ -1007,7 +1007,7 @@ class TFProcess:
         numpy_weights = []
         for weight in self.model.weights:
             numpy_weights.append([weight.name, weight.numpy()])
-        self.net.fill_net_v2(numpy_weights)
+        self.net.fill_net(numpy_weights)
         self.net.save_proto(filename)
 
     def batch_norm(self, input, name, scale=False):
