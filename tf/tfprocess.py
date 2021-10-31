@@ -25,6 +25,7 @@ import bisect
 import lc0_az_policy_map
 import proto.net_pb2 as pb
 from functools import reduce
+from multi_head_relative_attention import MultiHeadRelativeAttention
 import operator
 
 from net import Net
@@ -1108,7 +1109,9 @@ class TFProcess:
             flow = self.residual_block(flow,
                                        self.RESIDUAL_FILTERS,
                                        name='residual_{}'.format(i + 1))
-
+        flow = tf.keras.layers.Permute((2, 3, 1))(flow)
+        flow = MultiHeadRelativeAttention(4, 32, name='mhra')(flow, flow)
+        flow = tf.keras.layers.Permute((3, 1, 2))(flow)
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
             conv_pol = self.conv_block(flow,
