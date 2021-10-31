@@ -28,7 +28,7 @@ def parse_function(planes, probs, winner, q, plies_left):
     q = tf.io.decode_raw(q, tf.float32)
     plies_left = tf.io.decode_raw(plies_left, tf.float32)
 
-    planes = tf.reshape(planes, (-1, 112, 8 * 8))
+    planes = tf.reshape(planes, (-1, 112, 8, 8))
     probs = tf.reshape(probs, (-1, 1858))
     winner = tf.reshape(winner, (-1, 3))
     q = tf.reshape(q, (-1, 3))

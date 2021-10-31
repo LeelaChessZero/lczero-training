@@ -243,9 +243,8 @@ class TFProcess:
 
     def init_net(self):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
-        input_var = tf.keras.Input(shape=(112, 8 * 8))
-        x_planes = tf.keras.layers.Reshape([112, 8, 8])(input_var)
-        policy, value, moves_left = self.construct_net(x_planes)
+        input_var = tf.keras.Input(shape=(112, 8, 8))
+        policy, value, moves_left = self.construct_net(input_var)
         if self.moves_left:
             outputs = [policy, value, moves_left]
         else:
