@@ -32,6 +32,6 @@ def parse_function(planes, probs, winner, q, plies_left):
     probs = tf.reshape(probs, (-1, 1858))
     winner = tf.reshape(winner, (-1, 3))
     q = tf.reshape(q, (-1, 3))
-    plies_left = tf.reshape(plies_left, (-1, ))
+    plies_left = tf.reshape(plies_left, (-1, 1))
 
     return (planes, probs, winner, q, plies_left)
