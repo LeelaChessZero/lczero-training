@@ -103,6 +103,7 @@ class TFProcess:
         # Network structure
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
+        self.RRA_BLOCKS = self.cfg['model']['rra_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
         precision = self.cfg['training'].get('precision', 'single')
@@ -1099,6 +1100,26 @@ class TFProcess:
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
             [inputs, out2]))
 
+    def residual_block_ra(self, flow, channels, name):
+        orig_flow = flow
+        flow = tf.keras.layers.LayerNormalization(name=name +'/mhra/ln')(flow)
+        flow = orig_flow + MultiHeadRelativeAttention(
+            channels//32, 32, name=name + '/mhra')(flow, flow)
+        orig_flow = flow
+        flow = tf.keras.layers.LayerNormalization(name=name +'/ffn/ln')(flow)
+        flow = tf.keras.layers.Dense(channels * 4,
+                                     kernel_initializer='glorot_normal',
+                                     kernel_regularizer=self.l2reg,
+                                     activation='gelu',
+                                     name=name + '/ffn/fc1')(flow)
+        flow = tf.keras.layers.Dense(channels,
+                                     kernel_initializer='glorot_normal',
+                                     kernel_regularizer=self.l2reg,
+                                     activation='gelu',
+                                     name=name + '/ffn/fc2')(flow)
+        flow = orig_flow + flow
+        return flow
+
     def construct_net(self, inputs):
         flow = self.conv_block(inputs,
                                filter_size=3,
@@ -1110,7 +1131,10 @@ class TFProcess:
                                        self.RESIDUAL_FILTERS,
                                        name='residual_{}'.format(i + 1))
         flow = tf.keras.layers.Permute((2, 3, 1))(flow)
-        flow = flow + MultiHeadRelativeAttention(4, 48, name='mhra')(flow, flow)
+        for i in range(self.RRA_BLOCKS):
+            flow = self.residual_block_ra(flow,
+                                          self.RESIDUAL_FILTERS,
+                                          name='rra_{}'.format(i + 1))
         flow = tf.keras.layers.Permute((3, 1, 2))(flow)
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
