@@ -1110,7 +1110,7 @@ class TFProcess:
                                        self.RESIDUAL_FILTERS,
                                        name='residual_{}'.format(i + 1))
         flow = tf.keras.layers.Permute((2, 3, 1))(flow)
-        flow = MultiHeadRelativeAttention(4, 32, name='mhra')(flow, flow)
+        flow = flow + MultiHeadRelativeAttention(4, 48, name='mhra')(flow, flow)
         flow = tf.keras.layers.Permute((3, 1, 2))(flow)
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:

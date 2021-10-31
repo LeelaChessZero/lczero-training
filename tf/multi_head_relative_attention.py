@@ -372,6 +372,9 @@ class MultiHeadRelativeAttention(Layer):
       self._width = width
       self._relative_bias_table = self.add_weight("rel_bias_table",
                                                   shape=[(2 * height - 1) * (2 * width - 1), self._num_heads],
+                                                  initializer=self._bias_initializer,
+                                                  regularizer=self._bias_regularizer,
+                                                  constraint=self._bias_constraint,
                                                   trainable=True)
 
       coords = tf.meshgrid(tf.range(height), tf.range(width), indexing="ij")
