@@ -1102,11 +1102,16 @@ class TFProcess:
 
     def residual_block_ra(self, flow, channels, name):
         orig_flow = flow
-        flow = tf.keras.layers.LayerNormalization(name=name +'/mhra/ln')(flow)
+        flow = tf.keras.layers.LayerNormalization(scale=False,
+                                                  name=name + '/mhra/ln')(flow)
         flow = orig_flow + MultiHeadRelativeAttention(
-            channels//32, 32, name=name + '/mhra')(flow, flow)
+            channels // 32,
+            32,
+            kernel_regularizer=self.l2reg,
+            name=name + '/mhra')(flow, flow)
         orig_flow = flow
-        flow = tf.keras.layers.LayerNormalization(name=name +'/ffn/ln')(flow)
+        flow = tf.keras.layers.LayerNormalization(scale=False,
+                                                  name=name + '/ffn/ln')(flow)
         flow = tf.keras.layers.Dense(channels * 4,
                                      kernel_initializer='glorot_normal',
                                      kernel_regularizer=self.l2reg,
