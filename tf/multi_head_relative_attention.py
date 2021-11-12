@@ -339,27 +339,9 @@ class MultiHeadRelativeAttention(Layer):
       self._query_dense = einsum_dense.EinsumDense(
           einsum_equation,
           output_shape=_get_output_shape(output_rank - 1,
-                                         [self._num_heads, self._key_dim]),
+                                         [self._num_heads, self._key_dim*3]),
           bias_axes=bias_axes if self._use_bias else None,
           name="query",
-          **common_kwargs)
-      einsum_equation, bias_axes, output_rank = _build_proj_equation(
-          self._key_shape.rank - 1, bound_dims=1, output_dims=2)
-      self._key_dense = einsum_dense.EinsumDense(
-          einsum_equation,
-          output_shape=_get_output_shape(output_rank - 1,
-                                         [self._num_heads, self._key_dim]),
-          bias_axes=bias_axes if self._use_bias else None,
-          name="key",
-          **common_kwargs)
-      einsum_equation, bias_axes, output_rank = _build_proj_equation(
-          self._value_shape.rank - 1, bound_dims=1, output_dims=2)
-      self._value_dense = einsum_dense.EinsumDense(
-          einsum_equation,
-          output_shape=_get_output_shape(output_rank - 1,
-                                         [self._num_heads, self._value_dim]),
-          bias_axes=bias_axes if self._use_bias else None,
-          name="value",
           **common_kwargs)
 
       # Builds the attention computations for multi-head dot product attention.
@@ -501,30 +483,21 @@ class MultiHeadRelativeAttention(Layer):
     return attention_output, attention_scores
 
   def call(self,
-           query,
-           value,
-           key=None,
+           x,
            attention_mask=None,
            return_attention_scores=False,
            training=None):
     if not self._built_from_signature:
-      self._build_from_signature(query=query, value=value, key=key)
-    if key is None:
-      key = value
+      self._build_from_signature(query=x, value=x, key=x)
 
     #   N = `num_attention_heads`
     #   H = `size_per_head`
     # `query` = [B, T, N ,H]
-    query = self._query_dense(query)
-
-    # `key` = [B, S, N, H]
-    key = self._key_dense(key)
-
-    # `value` = [B, S, N, H]
-    value = self._value_dense(value)
+    query, key, value = tf.split(self._query_dense(x), 3, axis=-1)
 
     attention_output, attention_scores = self._compute_attention(
         query, key, value, attention_mask, training)
+    #attention_output = tf.reshape(attention_output, tf.shape(x))
     attention_output = self._output_dense(attention_output)
 
     if return_attention_scores:
