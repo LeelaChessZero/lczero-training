@@ -319,6 +319,20 @@ class Net:
             pb_name = 'input.' + convblock_to_bp(weights_name)
         elif base_layer == 'policy1':
             pb_name = 'policy1.' + convblock_to_bp(weights_name)
+        elif base_layer == 'policyra':
+            if layers[1] == 'mhra':
+                if layers[2] == 'ln':
+                    pb_name = 'mhra.ln' + ln_to_bp(weights_name)
+                else:
+                    pb_name = 'mhra.' + mhra_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn':
+                if layers[2] == 'ln':
+                    pb_name = 'ffn.ln' + ln_to_bp(weights_name)
+                elif layers[2] == 'fc1':
+                    pb_name = 'ffn.fc1' + ffn_to_bp(weights_name)
+                else:
+                    pb_name = 'ffn.fc2' + ffn_to_bp(weights_name)
+            pb_name = 'policyra.' + pb_name
         elif base_layer == 'policy':
             if 'dense' in layers[1]:
                 pb_name = policy_to_bp(weights_name)
@@ -354,8 +368,12 @@ class Net:
                     pb_name = 'ffn.ln' + ln_to_bp(weights_name)
                 elif layers[2] == 'fc1':
                     pb_name = 'ffn.fc1' + ffn_to_bp(weights_name)
-                else:
+                elif layers[2] == 'fc2':
                     pb_name = 'ffn.fc2' + ffn_to_bp(weights_name)
+                elif layers[2] == 'keys':
+                    pb_name = 'ffn.keys' + ffn_to_bp(weights_name)
+                elif layers[2] == 'queries':
+                    pb_name = 'ffn.queries' + ffn_to_bp(weights_name)
 
         return (pb_name, block, block2)
 

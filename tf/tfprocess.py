@@ -17,9 +17,11 @@
 #    along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
+import math
 import os
 import random
 import tensorflow as tf
+import tensorflow_addons as tfa
 import time
 import bisect
 import lc0_az_policy_map
@@ -133,6 +135,8 @@ class TFProcess:
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
+        elif policy_head == "ra":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_RA
         elif policy_head == "convolution":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CONVOLUTION
         else:
@@ -259,14 +263,13 @@ class TFProcess:
             ]
 
         self.active_lr = 0.01
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
+        self.optimizer = tfa.optimizers.AdamW(weight_decay=lambda: self.active_lr / 5.0,
+            learning_rate=lambda: self.active_lr)
         self.orig_optimizer = self.optimizer
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
                 self.optimizer, self.loss_scale)
         if self.cfg['training'].get('lookahead_optimizer'):
-            import tensorflow_addons as tfa
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
         def correct_policy(target, output):
@@ -399,7 +402,7 @@ class TFProcess:
         reg_term_w = self.cfg['training'].get('reg_term_weight', 1.0)
 
         def _lossMix(policy, value, moves_left, reg_term):
-            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left + reg_term_w * reg_term
+            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left #+ reg_term_w * reg_term
 
         self.lossMix = _lossMix
 
@@ -645,10 +648,10 @@ class TFProcess:
         return metrics, new_grads
 
     def apply_grads(self, grads, effective_batch_splits):
-        grads = [
-            g[0] for g in self.orig_optimizer.gradient_aggregator(
-                zip(grads, self.model.trainable_weights))
-        ]
+        #grads = [
+        #    g[0] for g in self.orig_optimizer.gradient_aggregator(
+        #        zip(grads, self.model.trainable_weights))
+        #]
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
         max_grad_norm = self.cfg['training'].get(
@@ -656,7 +659,8 @@ class TFProcess:
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         self.optimizer.apply_gradients(zip(grads,
                                            self.model.trainable_weights),
-                                       experimental_aggregate_gradients=False)
+                                       )
+                                       #experimental_aggregate_gradients=False)
         return grad_norm
 
     @tf.function()
@@ -1100,7 +1104,9 @@ class TFProcess:
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
             [inputs, out2]))
 
-    def residual_block_ra(self, flow, channels, name):
+    def residual_block_ra(self, flow, channels, name, out_channels=None, last_activation='gelu'):
+        if out_channels is None:
+            out_channels = channels
         orig_flow = flow
         flow = tf.keras.layers.LayerNormalization(scale=False,
                                                   name=name + '/mhra/ln')(flow)
@@ -1108,24 +1114,27 @@ class TFProcess:
             channels // 32,
             32,
             kernel_regularizer=self.l2reg,
-            name=name + '/mhra')(flow, flow)
+            dropout=0.1,
+            name=name + '/mhra')(flow)
         orig_flow = flow
         flow = tf.keras.layers.LayerNormalization(scale=False,
                                                   name=name + '/ffn/ln')(flow)
-        flow = tf.keras.layers.Dense(channels * 4,
-                                     kernel_initializer='glorot_normal',
-                                     kernel_regularizer=self.l2reg,
-                                     activation='gelu',
-                                     name=name + '/ffn/fc1')(flow)
         flow = tf.keras.layers.Dense(channels,
                                      kernel_initializer='glorot_normal',
                                      kernel_regularizer=self.l2reg,
                                      activation='gelu',
+                                     name=name + '/ffn/fc1')(flow)
+        flow = tf.keras.layers.Dense(out_channels,
+                                     kernel_initializer='glorot_normal',
+                                     kernel_regularizer=self.l2reg,
+                                     activation=last_activation,
                                      name=name + '/ffn/fc2')(flow)
-        flow = orig_flow + flow
+        if out_channels == channels:
+            flow = orig_flow + flow
         return flow
 
     def construct_net(self, inputs):
+        inputs = tf.concat([inputs, tf.reshape(tf.eye(64, batch_shape=[tf.shape(inputs)[0]]), [-1, 64, 8, 8])], axis=-3)
         flow = self.conv_block(inputs,
                                filter_size=3,
                                output_channels=self.RESIDUAL_FILTERS,
@@ -1140,9 +1149,35 @@ class TFProcess:
             flow = self.residual_block_ra(flow,
                                           self.RESIDUAL_FILTERS,
                                           name='rra_{}'.format(i + 1))
+        perm_flow = flow
         flow = tf.keras.layers.Permute((3, 1, 2))(flow)
         # Policy head
-        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
+        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_RA:
+            conv_pol = self.conv_block(flow,
+                                       filter_size=1,
+                                       output_channels=self.RESIDUAL_FILTERS,
+                                       name='policy')
+            conv_pol = tf.keras.layers.Permute((2, 3, 1))(conv_pol)
+            keys = tf.keras.layers.Dense(self.RESIDUAL_FILTERS,
+                                                                                   kernel_initializer='glorot_normal',
+                                          kernel_regularizer=self.l2reg, name='policy/keys/dense')(conv_pol)
+            keys = tf.reshape(keys, [-1, 64, self.RESIDUAL_FILTERS])
+            queries = tf.keras.layers.Dense(self.RESIDUAL_FILTERS,
+                                                                                   kernel_initializer='glorot_normal',
+                                          kernel_regularizer=self.l2reg, name='policy/queries/dense')(conv_pol)
+            queries = tf.reshape(queries, [-1, 64, self.RESIDUAL_FILTERS])
+            queries = tf.multiply(queries, 1.0 / math.sqrt(float(self.RESIDUAL_FILTERS)))
+            qk = tf.linalg.matmul(keys, queries, transpose_b=True)
+            qk = tf.reshape(qk, [-1, 8, 8, 64])
+            mix = tf.concat([qk, conv_pol], axis=-1)
+
+            h_conv_pol_flat = tf.keras.layers.Flatten()(mix)
+            h_fc1 = tf.keras.layers.Dense(1858,
+                                          kernel_initializer='glorot_normal',
+                                          kernel_regularizer=self.l2reg,
+                                          bias_regularizer=self.l2reg,
+                                          name='policy/dense')(h_conv_pol_flat)
+        elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
             conv_pol = self.conv_block(flow,
                                        filter_size=3,
                                        output_channels=self.RESIDUAL_FILTERS,
