@@ -1112,7 +1112,12 @@ class TFProcess:
 
     def construct_net(self, inputs):
         if self.INPUT_STATIC_MODE == pb.NetworkFormat.INPUT_STATIC_SQUARES:
-            inputs = tf.concat([inputs, tf.reshape(tf.eye(64, batch_shape=[tf.shape(inputs)[0]]), [-1, 64, 8, 8])], axis=-3)
+            inputs = tf.concat([
+                inputs,
+                tf.reshape(tf.eye(64, batch_shape=[tf.shape(inputs)[0]]),
+                           [-1, 64, 8, 8])
+            ],
+                               axis=-3)
 
         flow = self.conv_block(inputs,
                                filter_size=3,
