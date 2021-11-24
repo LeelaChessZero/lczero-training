@@ -81,7 +81,7 @@ class Net:
 
     def set_input_static(self, input_static_format):
         self.pb.format.network_format.input_static = input_static_format
-        if input_format != pb.NetworkFormat.INPUT_STATIC_NONE:
+        if input_static_format != pb.NetworkFormat.INPUT_STATIC_NONE:
             self.pb.min_version.minor = LC0_MINOR_WITH_STATIC_SQUARES
 
     def get_weight_amounts(self):
