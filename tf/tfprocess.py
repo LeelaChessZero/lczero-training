@@ -187,11 +187,11 @@ class TFProcess:
 
         if input_static_mode == "none":
             self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_NONE
-        elif input_mode == "squares":
+        elif input_static_mode == "squares":
             self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_SQUARES
         else:
             raise ValueError(
-                "Unknown input static mode format: {}".format(input_mode))
+                "Unknown input static mode format: {}".format(input_static_mode))
 
         self.net.set_input_static(self.INPUT_STATIC_MODE)
 
