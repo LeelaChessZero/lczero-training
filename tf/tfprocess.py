@@ -123,11 +123,13 @@ class TFProcess:
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
+        input_static_mode = self.cfg['model'].get('input_static_type', 'none')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
         self.INPUT_MODE = None
+        self.INPUT_STATIC_MODE = None
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
@@ -182,6 +184,16 @@ class TFProcess:
                 "Unknown input mode format: {}".format(input_mode))
 
         self.net.set_input(self.INPUT_MODE)
+
+        if input_static_mode == "none":
+            self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_NONE
+        elif input_mode == "squares":
+            self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_SQUARES
+        else:
+            raise ValueError(
+                "Unknown input static mode format: {}".format(input_mode))
+
+        self.net.set_input_static(self.INPUT_STATIC_MODE)
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -1099,6 +1111,9 @@ class TFProcess:
             [inputs, out2]))
 
     def construct_net(self, inputs):
+        if self.INPUT_STATIC_MODE == pb.NetworkFormat.INPUT_STATIC_SQUARES:
+            inputs = tf.concat([inputs, tf.reshape(tf.eye(64, batch_shape=[tf.shape(inputs)[0]]), [-1, 64, 8, 8])], axis=-3)
+
         flow = self.conv_block(inputs,
                                filter_size=3,
                                output_channels=self.RESIDUAL_FILTERS,
