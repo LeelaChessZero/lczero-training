@@ -495,7 +495,7 @@ class TFProcess:
             if new_weight.shape[i] < weight.shape[i]:
                 print('Expanding index {} from {} to {}'.format(i, new_weight.shape[i], weight.shape[i]))
                 extra = weight.shape[i] - new_weight.shape[i]
-                out_slice = [(slice(extra),) if j==i else (slice(new_weight.shape[j]), ) for j in range(len(new_weight.shape))]
+                out_slice = sum([(slice(extra),) if j==i else (slice(new_weight.shape[j]), ) for j in range(len(new_weight.shape))], ())
                 new_weight = tf.concat([new_weight, weight[out_slice]], axis=i)
 
     def replace_weights(self, proto_filename, ignore_errors=False, adapt_length=False):
