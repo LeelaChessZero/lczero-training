@@ -544,7 +544,7 @@ class TFProcess:
                     print(error_string)
                     print('Will attempt to reshape')
                     length_wrong = True
-                if ignore_errors:
+                elif ignore_errors:
                     print(error_string)
                     continue
                 else:
@@ -589,7 +589,7 @@ class TFProcess:
                 new_weight = tf.constant(new_weight, shape=shape)
                 new_weight = tf.transpose(a=new_weight, perm=[2, 3, 1, 0])
                 if length_wrong:
-                    new_weight = expand_trim(new_weight, weight)
+                    new_weight = self.expand_trim(new_weight, weight)
                 weight.assign(new_weight)
             elif weight.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
@@ -609,7 +609,7 @@ class TFProcess:
                 new_weight = tf.constant(new_weight, shape=shape)
                 new_weight = tf.transpose(a=new_weight, perm=[1, 0])
                 if length_wrong:
-                    new_weight = expand_trim(new_weight, weight)
+                    new_weight = self.expand_trim(new_weight, weight)
                 weight.assign(new_weight)
             else:
                 # Biases, batchnorm etc
@@ -621,7 +621,7 @@ class TFProcess:
                         print('Failed to reshape')
                         continue
                 if length_wrong:
-                    new_weight = expand_trim(new_weight, weight)
+                    new_weight = self.expand_trim(new_weight, weight)
                 weight.assign(new_weight)
         # Replace the SWA weights as well, ensuring swa accumulation is reset.
         if self.swa_enabled:
