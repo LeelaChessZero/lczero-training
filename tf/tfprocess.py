@@ -497,6 +497,7 @@ class TFProcess:
                 extra = weight.shape[i] - new_weight.shape[i]
                 out_slice = sum([(slice(extra),) if j==i else (slice(new_weight.shape[j]), ) for j in range(len(new_weight.shape))], ())
                 new_weight = tf.concat([new_weight, weight[out_slice]], axis=i)
+        return new_weight
 
     def replace_weights(self, proto_filename, ignore_errors=False, adapt_length=False):
         self.net.parse_proto(proto_filename)
