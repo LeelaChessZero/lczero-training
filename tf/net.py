@@ -284,16 +284,55 @@ class Net:
 
             return d[w].format(n)
 
+        def ln_to_bp(w):
+            w = w.split(':')[0]
+            d = {'gamma': 'gammas', 'beta': 'betas'}
+
+            return d[w]
+
+        def mhra_to_bp(l, w):
+            w = w.split(':')[0]
+            d = {'rel_bias_table': 'rel_bias_table', 'kernel': 'w', 'bias': 'b'}
+
+            prefix = ''
+            d2 = {'query': 'q', 'key': 'k', 'value': 'v', 'attention_output': 'o'}
+            if l in d2:
+                prefix = d2[l]
+
+            return prefix + d[w]
+
+        def ffn_to_bp(w):
+            w = w.split(':')[0]
+            d = {'kernel': 'w', 'bias': 'b'}
+
+            return d[w]
+
+
         layers = name.split('/')
         base_layer = layers[0]
         weights_name = layers[-1]
         pb_name = None
         block = None
+        block2 = None
 
         if base_layer == 'input':
             pb_name = 'input.' + convblock_to_bp(weights_name)
         elif base_layer == 'policy1':
             pb_name = 'policy1.' + convblock_to_bp(weights_name)
+        elif base_layer == 'policyra':
+            if layers[1] == 'mhra':
+                if layers[2] == 'ln':
+                    pb_name = 'mhra.ln' + ln_to_bp(weights_name)
+                else:
+                    pb_name = 'mhra.' + mhra_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn':
+                if layers[2] == 'ln':
+                    pb_name = 'ffn.ln' + ln_to_bp(weights_name)
+                elif layers[2] == 'fc1':
+                    pb_name = 'ffn.fc1' + ffn_to_bp(weights_name)
+                else:
+                    pb_name = 'ffn.fc2' + ffn_to_bp(weights_name)
+            pb_name = 'policyra.' + pb_name
         elif base_layer == 'policy':
             if 'dense' in layers[1]:
                 pb_name = policy_to_bp(weights_name)
@@ -317,8 +356,26 @@ class Net:
                 pb_name = 'conv2.' + convblock_to_bp(weights_name)
             elif layers[1] == 'se':
                 pb_name = 'se.' + se_to_bp(layers[-2], weights_name)
+        elif base_layer.startswith('rra'):
+            block2 = int(base_layer.split('_')[1]) - 1  # 1 indexed
+            if layers[1] == 'mhra':
+                if layers[2] == 'ln':
+                    pb_name = 'mhra.ln' + ln_to_bp(weights_name)
+                else:
+                    pb_name = 'mhra.' + mhra_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn':
+                if layers[2] == 'ln':
+                    pb_name = 'ffn.ln' + ln_to_bp(weights_name)
+                elif layers[2] == 'fc1':
+                    pb_name = 'ffn.fc1' + ffn_to_bp(weights_name)
+                elif layers[2] == 'fc2':
+                    pb_name = 'ffn.fc2' + ffn_to_bp(weights_name)
+                elif layers[2] == 'keys':
+                    pb_name = 'ffn.keys' + ffn_to_bp(weights_name)
+                elif layers[2] == 'queries':
+                    pb_name = 'ffn.queries' + ffn_to_bp(weights_name)
 
-        return (pb_name, block)
+        return (pb_name, block, block2)
 
     def get_weights_v2(self, names):
         # `names` is a list of Tensorflow tensor names to get from the protobuf.
@@ -334,15 +391,17 @@ class Net:
                 # Renorm variables are not populated.
                 continue
 
-            pb_name, block = self.tf_name_to_pb_name(name)
+            pb_name, block, block2 = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
                     "Don't know where to store weight in protobuf: {}".format(
                         name))
 
-            if block == None:
+            if block == None and block2 == None:
                 pb_weights = self.pb.weights
+            elif block == None:
+                pb_weights = self.pb.weights.rra[block2]
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -478,15 +537,20 @@ class Net:
                 # 50 move rule is the 110th input, or 109 starting from 0.
                 weights[:, 109, :, :] /= 99
 
-            pb_name, block = self.tf_name_to_pb_name(name)
+            pb_name, block, block2 = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
                     "Don't know where to store weight in protobuf: {}".format(
                         name))
 
-            if block == None:
+            if block == None and block2 == None:
                 pb_weights = self.pb.weights
+            elif block == None:
+                assert block2 >= 0
+                while block2 >= len(self.pb.weights.rra):
+                    self.pb.weights.rra.add()
+                pb_weights = self.pb.weights.rra[block2]
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):
