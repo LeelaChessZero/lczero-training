@@ -315,6 +315,10 @@ class Net:
                 pb_name = 'conv1.' + convblock_to_bp(weights_name)
             elif layers[1] == '2':
                 pb_name = 'conv2.' + convblock_to_bp(weights_name)
+            elif layers[1] == '3':
+                pb_name = 'conv3.' + convblock_to_bp(weights_name)
+            elif layers[1] == '4':
+                pb_name = 'conv4.' + convblock_to_bp(weights_name)
             elif layers[1] == 'se':
                 pb_name = 'se.' + se_to_bp(layers[-2], weights_name)
 
