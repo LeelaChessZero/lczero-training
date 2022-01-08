@@ -256,7 +256,7 @@ class TFProcess:
                 tf.Variable(w, trainable=False) for w in self.model.weights
             ]
 
-        self.active_lr = 0.01
+        self.active_lr = tf.Variable(0.01, trainable=False)
         self.optimizer = tf.keras.optimizers.SGD(
             learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
         self.orig_optimizer = self.optimizer
@@ -704,7 +704,7 @@ class TFProcess:
         effective_batch_splits = batch_splits
         if self.strategy is not None:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
-        self.active_lr = self.lr / effective_batch_splits
+        self.active_lr.assign(self.lr / effective_batch_splits)
         if self.strategy is not None:
             grad_norm = self.strategy_apply_grads(grads,
                                                   effective_batch_splits)
