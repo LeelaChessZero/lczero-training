@@ -1070,8 +1070,8 @@ class TFProcess:
             conv, name=name + '/bn', scale=bn_scale))
 
     def residual_block(self, inputs, channels, name):
-        conv1 = tf.keras.layers.Conv2D(channels,
-                                       3,
+        conv1 = tf.keras.layers.Conv2D(channels // 2,
+                                       1,
                                        use_bias=False,
                                        padding='same',
                                        kernel_initializer='glorot_normal',
@@ -1082,7 +1082,7 @@ class TFProcess:
                                                                   name +
                                                                   '/1/bn',
                                                                   scale=False))
-        conv2 = tf.keras.layers.Conv2D(channels,
+        conv2 = tf.keras.layers.Conv2D(channels // 2,
                                        3,
                                        use_bias=False,
                                        padding='same',
@@ -1090,13 +1090,37 @@ class TFProcess:
                                        kernel_regularizer=self.l2reg,
                                        data_format='channels_first',
                                        name=name + '/2/conv2d')(out1)
-        out2 = self.squeeze_excitation(self.batch_norm(conv2,
-                                                       name + '/2/bn',
+        out2 = tf.keras.layers.Activation('relu')(self.batch_norm(conv2,
+                                                                  name +
+                                                                  '/2/bn',
+                                                                  scale=False))
+        conv3 = tf.keras.layers.Conv2D(channels // 2,
+                                       3,
+                                       use_bias=False,
+                                       padding='same',
+                                       kernel_initializer='glorot_normal',
+                                       kernel_regularizer=self.l2reg,
+                                       data_format='channels_first',
+                                       name=name + '/3/conv2d')(out2)
+        out3 = tf.keras.layers.Activation('relu')(self.batch_norm(conv3,
+                                                                  name +
+                                                                  '/3/bn',
+                                                                  scale=False))
+        conv4 = tf.keras.layers.Conv2D(channels,
+                                       1,
+                                       use_bias=False,
+                                       padding='same',
+                                       kernel_initializer='glorot_normal',
+                                       kernel_regularizer=self.l2reg,
+                                       data_format='channels_first',
+                                       name=name + '/4/conv2d')(out3)
+        out4 = self.squeeze_excitation(self.batch_norm(conv4,
+                                                       name + '/4/bn',
                                                        scale=True),
                                        channels,
                                        name=name + '/se')
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
-            [inputs, out2]))
+            [inputs, out4]))
 
     def construct_net(self, inputs):
         flow = self.conv_block(inputs,
