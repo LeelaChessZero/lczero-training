@@ -5,7 +5,7 @@ gpu: 0                                 # gpu id to process on
 
 dataset: 
   num_chunks: 100000                   # newest nof chunks to parse
-  train_ratio: 0.90                    # trainingset ratio
+  train_ratio: 0.90                    # trainingset ratio, so 0.9 of the input will be training data and 0.1 will be testing
   # For separated test and train data.
   input_train: '/path/to/chunks/*/draw/' # supports glob
   input_test: '/path/to/chunks/*/draw/'  # supports glob
@@ -29,9 +29,12 @@ training:
         - 130000
     policy_loss_weight: 1.0            # weight of policy loss
     value_loss_weight: 1.0             # weight of value loss
+    moves_left_loss_weight: 0.5        # weight of moves_left loss
     path: '/path/to/store/networks'    # network storage dir
 
 model:
   filters: 64
   residual_blocks: 6
+  se_ratio: 8
+  
 ...
