@@ -57,7 +57,6 @@ class ApplyPolicyMap(tf.keras.layers.Layer):
         return tf.matmul(h_conv_pol_flat,
                          tf.cast(self.fc1, h_conv_pol_flat.dtype))
 
-
 class Metric:
     def __init__(self, short_name, long_name, suffix='', **kwargs):
         self.short_name = short_name
@@ -123,11 +122,13 @@ class TFProcess:
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
+        input_static_mode = self.cfg['model'].get('input_static_type', 'none')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
         self.INPUT_MODE = None
+        self.INPUT_STATIC_MODE = None
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
@@ -182,6 +183,16 @@ class TFProcess:
                 "Unknown input mode format: {}".format(input_mode))
 
         self.net.set_input(self.INPUT_MODE)
+
+        if input_static_mode == "none":
+            self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_NONE
+        elif input_static_mode == "squares":
+            self.INPUT_STATIC_MODE = pb.NetworkFormat.INPUT_STATIC_SQUARES
+        else:
+            raise ValueError(
+                "Unknown input static mode format: {}".format(input_static_mode))
+
+        self.net.set_input_static(self.INPUT_STATIC_MODE)
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -474,7 +485,21 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename, ignore_errors=False):
+    def expand_trim(self, new_weight, weight):
+        # Trim first as the expand logic depends upon new_weight having no dimensions larger than weight.
+        for i in range(len(new_weight.shape)):
+            if new_weight.shape[i] > weight.shape[i]:
+                print('Triming index {} from {} to {}'.format(i, new_weight.shape[i], weight.shape[i]))
+                new_weight = new_weight[(slice(None), ) * i + (slice(weight.shape[i]), ) + (slice(None), ) * (len(new_weight.shape) - i - 1)]
+        for i in range(len(new_weight.shape)):
+            if new_weight.shape[i] < weight.shape[i]:
+                print('Expanding index {} from {} to {}'.format(i, new_weight.shape[i], weight.shape[i]))
+                extra = weight.shape[i] - new_weight.shape[i]
+                out_slice = sum([(slice(extra),) if j==i else (slice(new_weight.shape[j]), ) for j in range(len(new_weight.shape))], ())
+                new_weight = tf.concat([new_weight, weight[out_slice]], axis=i)
+        return new_weight
+
+    def replace_weights(self, proto_filename, ignore_errors=False, adapt_length=False):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -510,11 +535,17 @@ class TFProcess:
                 else:
                     raise KeyError(error_string)
 
+            length_wrong = False
+
             if reduce(operator.mul, weight.shape.as_list(),
                       1) != len(new_weight):
                 error_string = 'Tensor {} has wrong length. Tensorflow shape {}, size in protobuf {}'.format(
                     weight.name, weight.shape.as_list(), len(new_weight))
-                if ignore_errors:
+                if adapt_length and ignore_errors:
+                    print(error_string)
+                    print('Will attempt to reshape')
+                    length_wrong = True
+                elif ignore_errors:
                     print(error_string)
                     continue
                 else:
@@ -530,6 +561,7 @@ class TFProcess:
                         if (i % (num_inputs * 9)) // 9 == rule50_input:
                             new_weight[i] = new_weight[i] * 99
 
+
                 # Convolution weights need a transpose
                 #
                 # TF (kYXInputOutput)
@@ -539,8 +571,27 @@ class TFProcess:
                 # [output, input, filter_size, filter_size]
                 s = weight.shape.as_list()
                 shape = [s[i] for i in [3, 2, 0, 1]]
+                if length_wrong and adapt_length:
+                    if shape[0] == self.RESIDUAL_FILTERS:
+                        shape[0] = filters                        
+                    # Input is a special case
+                    if weight.name == 'input/conv2d/kernel:0':
+                        if shape[1] == 176 and shape[0]*shape[1]*shape[2]*shape[3] > len(new_weight):
+                            shape[1] = 112
+                        elif shape[1] == 112 and shape[0]*shape[1]*shape[2]*shape[3] < len(new_weight):
+                            shape[1] = 176
+                    else:
+                        if shape[1] == self.RESIDUAL_FILTERS:
+                            shape[1] = filters
+                    if shape[0]*shape[1]*shape[2]*shape[3] != len(new_weight):
+                        print('Failed to reshape')
+                        continue
+                            
                 new_weight = tf.constant(new_weight, shape=shape)
-                weight.assign(tf.transpose(a=new_weight, perm=[2, 3, 1, 0]))
+                new_weight = tf.transpose(a=new_weight, perm=[2, 3, 1, 0])
+                if length_wrong:
+                    new_weight = self.expand_trim(new_weight, weight)
+                weight.assign(new_weight)
             elif weight.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
@@ -548,11 +599,30 @@ class TFProcess:
                 #
                 s = weight.shape.as_list()
                 shape = [s[i] for i in [1, 0]]
+                if length_wrong and adapt_length:
+                    if shape[0] == self.RESIDUAL_FILTERS:
+                        shape[0] = filters                        
+                    if shape[1] == self.RESIDUAL_FILTERS:
+                        shape[1] = filters
+                    if shape[0]*shape[1] != len(new_weight):
+                        print('Failed to reshape')
+                        continue
                 new_weight = tf.constant(new_weight, shape=shape)
-                weight.assign(tf.transpose(a=new_weight, perm=[1, 0]))
+                new_weight = tf.transpose(a=new_weight, perm=[1, 0])
+                if length_wrong:
+                    new_weight = self.expand_trim(new_weight, weight)
+                weight.assign(new_weight)
             else:
                 # Biases, batchnorm etc
                 new_weight = tf.constant(new_weight, shape=weight.shape)
+                if length_wrong and adapt_length:
+                    if shape[0] == self.RESIDUAL_FILTERS:
+                        shape[0] = filters
+                    if shape[0] != len(new_weight):
+                        print('Failed to reshape')
+                        continue
+                if length_wrong:
+                    new_weight = self.expand_trim(new_weight, weight)
                 weight.assign(new_weight)
         # Replace the SWA weights as well, ensuring swa accumulation is reset.
         if self.swa_enabled:
@@ -1099,6 +1169,14 @@ class TFProcess:
             [inputs, out2]))
 
     def construct_net(self, inputs):
+        if self.INPUT_STATIC_MODE == pb.NetworkFormat.INPUT_STATIC_SQUARES:
+            inputs = tf.concat([
+                inputs,
+                tf.reshape(tf.eye(64, batch_shape=[tf.shape(inputs)[0]]),
+                           [-1, 64, 8, 8])
+            ],
+                               axis=-3)
+
         flow = self.conv_block(inputs,
                                filter_size=3,
                                output_channels=self.RESIDUAL_FILTERS,

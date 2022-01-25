@@ -19,6 +19,10 @@ argparser.add_argument('-e',
                        '--ignore-errors',
                        action='store_true',
                        help='Ignore missing and wrong sized values.')
+argparser.add_argument('-a',
+                       '--attempt_adapt',
+                       action='store_true',
+                       help='If -e, then try to reshape wrong sized rather than drop.')
 args = argparser.parse_args()
 cfg = yaml.safe_load(args.cfg.read())
 print(yaml.dump(cfg, default_flow_style=False))
@@ -26,7 +30,7 @@ START_FROM = args.start
 
 tfp = tfprocess.TFProcess(cfg)
 tfp.init_net()
-tfp.replace_weights(args.net, args.ignore_errors)
+tfp.replace_weights(args.net, args.ignore_errors, args.attempt_adapt)
 tfp.global_step.assign(START_FROM)
 
 root_dir = os.path.join(cfg['training']['path'], cfg['name'])
