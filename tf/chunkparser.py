@@ -35,7 +35,7 @@ sample_record() also skips most training records to avoid sampling over-correlat
 positions since they typically are from sequential positions in a game.
 
 Current implementation of "diff focus" also is in sample_record() and works by
-probabilistically skipping records according to how accurate the no-search 
+probabilistically skipping records according to how accurate the no-search
 eval ('orig_q') is compared to eval after search ('best_q') as well as the
 recorded policy_kld (a measure of difference between no search policy and the
 final policy distribution). It does not use draw values at this point. Putting
@@ -405,7 +405,7 @@ class ChunkParserInner:
     def sample_record(self, chunkdata):
         """
         Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
-        Downsampling to avoid highly correlated positions skips most records, and 
+        Downsampling to avoid highly correlated positions skips most records, and
         diff focus may also skip some records.
         """
         version = chunkdata[0:4]
