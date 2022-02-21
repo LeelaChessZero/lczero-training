@@ -33,4 +33,3 @@ tfp.net.pb.training_params.training_steps = START_FROM
 tfp.save_leelaz_weights(leela_path)
 if tfp.swa_enabled:
     tfp.save_swa_weights(swa_path)
-

@@ -56,6 +56,9 @@ class Net:
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
 
+    def set_headcount(self, headcount):
+        self.pb.weights.headcount = headcount
+
     def set_valueformat(self, value):
         self.pb.format.network_format.value = value
 
@@ -253,7 +256,9 @@ class Net:
             return d[w] + str(n)
 
         def value_to_bp(l, w):
-            if l == 'dense1':
+            if l == 'embedding':
+                n = ''
+            elif l == 'dense1':
                 n = 1
             elif l == 'dense2':
                 n = 2
@@ -265,14 +270,64 @@ class Net:
 
             return d[w].format(n)
 
-        def policy_to_bp(w):
+        def conv_policy_to_bp(w):
             w = w.split(':')[0]
             d = {'kernel': 'ip_pol_w', 'bias': 'ip_pol_b'}
 
             return d[w]
 
+        def attn_pol_to_bp(l, w):
+            if l == 'wq':
+                n = 2
+            elif l == 'wk':
+                n = 3
+            elif l == 'ppo':
+                n = 4
+            else:
+                raise ValueError(
+                    'Unable to decode attn_policy weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {'kernel': 'ip{}_pol_w', 'bias': 'ip{}_pol_b'}
+
+            return d[w].format(n)
+
+        def encoder_to_bp(l, w):
+            if l == 'ln1':
+                n = 1
+            elif l == 'ln2':
+                n = 2
+            else:
+                raise ValueError(
+                    'Unable to decode encoder weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {'gamma': 'ln{}_gammas', 'beta': 'ln{}_betas'}
+
+            return d[w].format(n)
+
+        def mha_to_bp(l, w):
+            s = ''
+            if l.startswith('dense'):
+                s = 'dense'
+            elif l.startswith('w'):
+                s = l[1]
+            else:
+                raise ValueError(
+                    'Unable to decode mha weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {'kernel': '{}_w', 'bias': '{}_b'}
+
+            return d[w].format(s)
+
+        def ffn_to_bp(l, w):
+            w = w.split(':')[0]
+            d = {'kernel': '{}_w', 'bias': '{}_b'}
+
+            return d[w].format(l)
+
         def moves_left_to_bp(l, w):
-            if l == 'dense1':
+            if l == 'embedding':
+                n = ''
+            elif l == 'dense1':
                 n = 1
             elif l == 'dense2':
                 n = 2
@@ -289,6 +344,7 @@ class Net:
         weights_name = layers[-1]
         pb_name = None
         block = None
+        encoder_block = None
 
         if base_layer == 'input':
             pb_name = 'input.' + convblock_to_bp(weights_name)
@@ -296,16 +352,31 @@ class Net:
             pb_name = 'policy1.' + convblock_to_bp(weights_name)
         elif base_layer == 'policy':
             if 'dense' in layers[1]:
-                pb_name = policy_to_bp(weights_name)
+                pb_name = conv_policy_to_bp(weights_name)
+            elif layers[1] == 'embedding':
+                if layers[2].split(':')[0] == 'kernel':
+                    pb_name = 'ip_pol_w'
+                else:
+                    pb_name = 'ip_pol_b'
+            elif layers[1] == 'attention':
+                pb_name = attn_pol_to_bp(layers[2], weights_name)
+            elif layers[1].startswith('enc_layer_'):
+                encoder_block = int(layers[1].split('_')[2]) - 1
+                if layers[2] == 'mha':
+                    pb_name = 'mha.' + mha_to_bp(layers[3], weights_name)
+                elif layers[2] == 'ffn':
+                    pb_name = 'ffn.' + ffn_to_bp(layers[3], weights_name)
+                else:
+                    pb_name = encoder_to_bp(layers[2], weights_name)
             else:
                 pb_name = 'policy.' + convblock_to_bp(weights_name)
         elif base_layer == 'value':
-            if 'dense' in layers[1]:
+            if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = value_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'value.' + convblock_to_bp(weights_name)
         elif base_layer == 'moves_left':
-            if 'dense' in layers[1]:
+            if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = moves_left_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'moves_left.' + convblock_to_bp(weights_name)
@@ -317,8 +388,21 @@ class Net:
                 pb_name = 'conv2.' + convblock_to_bp(weights_name)
             elif layers[1] == 'se':
                 pb_name = 'se.' + se_to_bp(layers[-2], weights_name)
+        elif base_layer.startswith('encoder'):
+            encoder_block = int(base_layer.split('_')[1]) - 1
+            if layers[1] == 'mha':
+                pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn':
+                pb_name = 'ffn.' + ffn_to_bp(layers[2], weights_name)
+            else:
+                pb_name = encoder_to_bp(layers[1], weights_name)
+        elif base_layer == 'embedding':
+            if layers[1].split(':')[0] == 'kernel':
+                pb_name = 'ip_emb_w'
+            else:
+                pb_name = 'ip_emb_b'
 
-        return (pb_name, block)
+        return (pb_name, block, encoder_block)
 
     def get_weights_v2(self, names):
         # `names` is a list of Tensorflow tensor names to get from the protobuf.
@@ -333,16 +417,22 @@ class Net:
             if 'renorm' in name:
                 # Renorm variables are not populated.
                 continue
+            if 'headcount' in tf_name:
+                # headcount is set with set_headcount()
+                continue
 
-            pb_name, block = self.tf_name_to_pb_name(name)
+            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
                     "Don't know where to store weight in protobuf: {}".format(
                         name))
 
-            if block == None:
-                pb_weights = self.pb.weights
+            if block is None:
+                if encoder_block is None:
+                    pb_weights = self.pb.weights
+                else:
+                    pb_weights = self.pb.weights.encoder[encoder_block]
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -478,15 +568,21 @@ class Net:
                 # 50 move rule is the 110th input, or 109 starting from 0.
                 weights[:, 109, :, :] /= 99
 
-            pb_name, block = self.tf_name_to_pb_name(name)
+            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
                     "Don't know where to store weight in protobuf: {}".format(
                         name))
 
-            if block == None:
-                pb_weights = self.pb.weights
+            if block is None:
+                if encoder_block is None:
+                    pb_weights = self.pb.weights
+                else:
+                    assert encoder_block >= 0
+                    while encoder_block >= len(self.pb.weights.encoder):
+                        self.pb.weights.encoder.add()
+                    pb_weights = self.pb.weights.encoder[encoder_block]
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):
