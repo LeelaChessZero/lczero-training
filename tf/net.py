@@ -57,7 +57,7 @@ class Net:
         self.pb.format.network_format.policy = policy
 
     def set_headcount(self, headcount):
-        self.pb.weights.headcount = headcount
+        self.pb.weights.pol_headcount = headcount
 
     def set_valueformat(self, value):
         self.pb.format.network_format.value = value
@@ -415,7 +415,7 @@ class Net:
                 if encoder_block is None:
                     pb_weights = self.pb.weights
                 else:
-                    pb_weights = self.pb.weights.encoder[encoder_block]
+                    pb_weights = self.pb.weights.pol_encoder[encoder_block]
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -563,9 +563,9 @@ class Net:
                     pb_weights = self.pb.weights
                 else:
                     assert encoder_block >= 0
-                    while encoder_block >= len(self.pb.weights.encoder):
-                        self.pb.weights.encoder.add()
-                    pb_weights = self.pb.weights.encoder[encoder_block]
+                    while encoder_block >= len(self.pb.weights.pol_encoder):
+                        self.pb.weights.pol_encoder.add()
+                    pb_weights = self.pb.weights.pol_encoder[encoder_block]
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):
