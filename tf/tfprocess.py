@@ -117,11 +117,11 @@ class TFProcess:
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
-        self.policy_embedding_size = self.cfg['model'].get('policy_embedding_size', self.RESIDUAL_FILTERS)
-        self.encoder_layers = self.cfg['model'].get('encoder_layers', 1)
-        self.encoder_heads = self.cfg['model'].get('encoder_heads', 4)
-        self.encoder_d_model = self.cfg['model'].get('encoder_d_model', self.RESIDUAL_FILTERS)
-        self.encoder_dff = self.cfg['model'].get('encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
+        self.pol_embedding_size = self.cfg['model'].get('pol_embedding_size', self.RESIDUAL_FILTERS)
+        self.pol_encoder_layers = self.cfg['model'].get('pol_encoder_layers', 1)
+        self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
+        self.pol_encoder_d_model = self.cfg['model'].get('pol_encoder_d_model', self.RESIDUAL_FILTERS)
+        self.pol_encoder_dff = self.cfg['model'].get('pol_encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
         self.policy_d_model = self.cfg['model'].get('policy_d_model', self.RESIDUAL_FILTERS)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         precision = self.cfg['training'].get('precision', 'single')
@@ -139,7 +139,7 @@ class TFProcess:
         # Scale the loss to prevent gradient underflow
         self.loss_scale = 1 if self.model_dtype == tf.float32 else loss_scale
 
-        policy_head = self.cfg['model'].get('policy', 'attention')
+        policy_head = self.cfg['model'].get('policy', 'convolution')
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
@@ -155,8 +155,8 @@ class TFProcess:
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CONVOLUTION
         elif policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
-            if self.encoder_layers > 0:
-                self.net.set_headcount(self.encoder_heads)
+            if self.pol_encoder_layers > 0:
+                self.net.set_headcount(self.pol_encoder_heads)
         else:
             raise ValueError(
                 "Unknown policy head format: {}".format(policy_head))
@@ -1221,15 +1221,15 @@ class TFProcess:
             tokens = tf.reshape(tokens, [-1, 64, self.RESIDUAL_FILTERS])
 
             # SQUARE EMBEDDING: found to increase attention head performance
-            tokens = tf.keras.layers.Dense(self.policy_embedding_size, kernel_initializer='glorot_normal',
+            tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer='glorot_normal',
                                            kernel_regularizer=self.l2reg, activation='selu',
                                            name='policy/embedding')(tokens)
 
             # ENCODER LAYERS: intermediate layers of self-attention with residual connections
             attn_wts = []
-            for i in range(self.encoder_layers):
-                tokens, attn_wts_l = self.encoder_layer(tokens, self.policy_embedding_size, self.encoder_d_model,
-                                                        self.encoder_heads, self.encoder_dff,
+            for i in range(self.pol_encoder_layers):
+                tokens, attn_wts_l = self.encoder_layer(tokens, self.pol_embedding_size, self.pol_encoder_d_model,
+                                                        self.pol_encoder_heads, self.pol_encoder_dff,
                                                         name='policy/enc_layer_{}'.format(i + 1), training=True
                                                         )
                 attn_wts.append(attn_wts_l)

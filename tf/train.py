@@ -215,7 +215,7 @@ def main(cmd):
         test_dataset = test_dataset.with_options(options)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.with_options(options)
-    tfprocess.init(train_dataset, test_dataset, validation_dataset)  # None, None, None
+    tfprocess.init(train_dataset, test_dataset, validation_dataset)
 
     tfprocess.restore()
 
