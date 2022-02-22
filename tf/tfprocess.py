@@ -15,7 +15,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
-import math
+
 
 import numpy as np
 import os
@@ -156,7 +156,7 @@ class TFProcess:
         elif policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
             if self.pol_encoder_layers > 0:
-                self.net.set_headcount(self.pol_encoder_heads)
+                self.net.set_pol_headcount(self.pol_encoder_heads)
         else:
             raise ValueError(
                 "Unknown policy head format: {}".format(policy_head))
@@ -1114,8 +1114,8 @@ class TFProcess:
                                        name=name + '/2/conv2d')(out1)
 
         out2 = self.squeeze_excitation(self.batch_norm(conv2,
-                                                        name + '/2/bn',
-                                                        scale=True),
+                                                       name + '/2/bn',
+                                                       scale=True),
                                        channels,
                                        name=name + '/se')
         return tf.keras.layers.Activation('relu')(tf.keras.layers.add(

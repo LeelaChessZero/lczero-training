@@ -56,7 +56,7 @@ class Net:
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
 
-    def set_headcount(self, headcount):
+    def set_pol_headcount(self, headcount):
         self.pb.weights.pol_headcount = headcount
 
     def set_valueformat(self, value):
