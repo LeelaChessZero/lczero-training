@@ -143,11 +143,13 @@ class TFProcess:
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
+        default_activation = self.cfg['model'].get('default_activation', 'relu')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
         self.INPUT_MODE = None
+        self.DEFAULT_ACTIVATION = None
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
@@ -206,6 +208,17 @@ class TFProcess:
                 "Unknown input mode format: {}".format(input_mode))
 
         self.net.set_input(self.INPUT_MODE)
+
+        if default_activation == "relu":
+            self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+            self.DEFAULT_ACTIVATION = 'relu'
+        elif default_activation == "mish":
+            self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
+            import tensorflow_addons as tfa
+            self.DEFAULT_ACTIVATION = tfa.activations.mish
+        else:
+            raise ValueError(
+                "Unknown default activation type: {}".format(default_activation))
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -1063,7 +1076,7 @@ class TFProcess:
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(
             data_format='channels_first')(inputs)
-        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(
+        squeezed = tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(tf.keras.layers.Dense(
             channels // self.SE_ratio,
             kernel_initializer='glorot_normal',
             kernel_regularizer=self.l2reg,
@@ -1088,7 +1101,7 @@ class TFProcess:
                                       kernel_regularizer=self.l2reg,
                                       data_format='channels_first',
                                       name=name + '/conv2d')(inputs)
-        return tf.keras.layers.Activation('relu')(self.batch_norm(
+        return tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(self.batch_norm(
             conv, name=name + '/bn', scale=bn_scale))
 
     def residual_block(self, inputs, channels, name):
@@ -1100,7 +1113,7 @@ class TFProcess:
                                        kernel_regularizer=self.l2reg,
                                        data_format='channels_first',
                                        name=name + '/1/conv2d')(inputs)
-        out1 = tf.keras.layers.Activation('relu')(self.batch_norm(conv1,
+        out1 = tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(self.batch_norm(conv1,
                                                                   name +
                                                                   '/1/bn',
                                                                   scale=False))
@@ -1118,7 +1131,7 @@ class TFProcess:
                                                        scale=True),
                                        channels,
                                        name=name + '/se')
-        return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
+        return tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(tf.keras.layers.add(
             [inputs, out2]))
 
     @staticmethod
@@ -1283,7 +1296,7 @@ class TFProcess:
         h_fc2 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
                                       kernel_regularizer=self.l2reg,
-                                      activation='relu',
+                                      activation=self.DEFAULT_ACTIVATION,
                                       name='value/dense1')(h_conv_val_flat)
         if self.wdl:
             h_fc3 = tf.keras.layers.Dense(3,
@@ -1309,7 +1322,7 @@ class TFProcess:
                 128,
                 kernel_initializer='glorot_normal',
                 kernel_regularizer=self.l2reg,
-                activation='relu',
+                activation=self.DEFAULT_ACTIVATION,
                 name='moves_left/dense1')(h_conv_mov_flat)
 
             h_fc5 = tf.keras.layers.Dense(1,
