@@ -29,9 +29,20 @@ training:
         - 130000
     policy_loss_weight: 1.0            # weight of policy loss
     value_loss_weight: 1.0             # weight of value loss
+    moves_left_loss_weight: 1.0        # weight of moves-left loss
     path: '/path/to/store/networks'    # network storage dir
 
 model:
   filters: 64
   residual_blocks: 6
+  se_ratio: 2                          # Squeeze Excite structural network architecture.
+  policy: 'attention'                  # attention policy fields:
+  pol_embedding_size: 64               # embedding vector size
+  pol_encoder_layers: 1                # number of intermediate attention layers in the policy head
+  pol_encoder_heads: 4                 # number of attention heads in encoder layers
+  pol_encoder_d_model: 64              # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+  pol_encoder_dff: 128                 # size of the largest dense layer in encoder block feed-forward network
+  policy_d_model: 64                   # size of the query and key vectors in final attention layer
+  value: 'wdl'
+  moves_left: 'v1'
 ...
