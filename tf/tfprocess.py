@@ -188,7 +188,7 @@ class TFProcess:
         if default_activation == "relu":
             self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
             self.DEFAULT_ACTIVATION = 'relu'
-        elif:
+        elif default_activation == "mish":
             self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
             import tensorflow_addons as tfa
             self.DEFAULT_ACTIVATION = tfa.activations.mish
