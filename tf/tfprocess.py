@@ -696,11 +696,11 @@ class TFProcess:
         for _ in range(steps % total_steps, total_steps):
             self.process(batch_size, test_batches, batch_splits=batch_splits)
 
-    #@tf.function()
+    @tf.function()
     def read_weights(self):
         return [w.read_value() for w in self.model.weights]
 
-    #@tf.function()
+    @tf.function()
     def process_inner_loop(self, x, y, z, q, m):
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
@@ -739,7 +739,7 @@ class TFProcess:
         ]
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
-    #@tf.function()
+    @tf.function()
     def strategy_process_inner_loop(self, x, y, z, q, m):
         metrics, new_grads = self.strategy.run(self.process_inner_loop,
                                                args=(x, y, z, q, m))
@@ -764,7 +764,7 @@ class TFProcess:
                                        experimental_aggregate_gradients=False)
         return grad_norm
 
-    #@tf.function()
+    @tf.function()
     def strategy_apply_grads(self, grads, effective_batch_splits):
         grad_norm = self.strategy.run(self.apply_grads,
                                       args=(grads, effective_batch_splits))
@@ -773,11 +773,11 @@ class TFProcess:
                                          axis=None)
         return grad_norm
 
-    #@tf.function()
+    @tf.function()
     def merge_grads(self, grads, new_grads):
         return [tf.math.add(a, b) for (a, b) in zip(grads, new_grads)]
 
-    #@tf.function()
+    @tf.function()
     def strategy_merge_grads(self, grads, new_grads):
         return self.strategy.run(self.merge_grads, args=(grads, new_grads))
 
@@ -951,7 +951,7 @@ class TFProcess:
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    #@tf.function()
+    @tf.function()
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         outputs = self.model(x, training=False)
         policy = outputs[0]
@@ -988,7 +988,7 @@ class TFProcess:
         ]
         return metrics
 
-    #@tf.function()
+    @tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         metrics = self.strategy.run(self.calculate_test_summaries_inner_loop,
                                     args=(x, y, z, q, m))
@@ -1065,7 +1065,7 @@ class TFProcess:
                   end='')
         print()
 
-    #@tf.function()
+    @tf.function()
     def compute_update_ratio(self, before_weights, after_weights, steps):
         """Compute the ratio of gradient norm to weight norm.
 
