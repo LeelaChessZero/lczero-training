@@ -15,7 +15,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
-import math
+
 
 import numpy as np
 import os
@@ -132,6 +132,75 @@ class TFProcess:
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
 
+        self.POS_ENC = tf.constant(
+            [[
+                [0., 0., 0., 0., 0., 0.],
+                [0., 0., 0., 0., 0., 1.],
+                [0., 0., 0., 0., 1., 0.],
+                [0., 0., 0., 0., 1., 1.],
+                [0., 0., 0., 1., 0., 0.],
+                [0., 0., 0., 1., 0., 1.],
+                [0., 0., 0., 1., 1., 0.],
+                [0., 0., 0., 1., 1., 1.],
+                [0., 0., 1., 0., 0., 0.],
+                [0., 0., 1., 0., 0., 1.],
+                [0., 0., 1., 0., 1., 0.],
+                [0., 0., 1., 0., 1., 1.],
+                [0., 0., 1., 1., 0., 0.],
+                [0., 0., 1., 1., 0., 1.],
+                [0., 0., 1., 1., 1., 0.],
+                [0., 0., 1., 1., 1., 1.],
+                [0., 1., 0., 0., 0., 0.],
+                [0., 1., 0., 0., 0., 1.],
+                [0., 1., 0., 0., 1., 0.],
+                [0., 1., 0., 0., 1., 1.],
+                [0., 1., 0., 1., 0., 0.],
+                [0., 1., 0., 1., 0., 1.],
+                [0., 1., 0., 1., 1., 0.],
+                [0., 1., 0., 1., 1., 1.],
+                [0., 1., 1., 0., 0., 0.],
+                [0., 1., 1., 0., 0., 1.],
+                [0., 1., 1., 0., 1., 0.],
+                [0., 1., 1., 0., 1., 1.],
+                [0., 1., 1., 1., 0., 0.],
+                [0., 1., 1., 1., 0., 1.],
+                [0., 1., 1., 1., 1., 0.],
+                [0., 1., 1., 1., 1., 1.],
+                [1., 0., 0., 0., 0., 0.],
+                [1., 0., 0., 0., 0., 1.],
+                [1., 0., 0., 0., 1., 0.],
+                [1., 0., 0., 0., 1., 1.],
+                [1., 0., 0., 1., 0., 0.],
+                [1., 0., 0., 1., 0., 1.],
+                [1., 0., 0., 1., 1., 0.],
+                [1., 0., 0., 1., 1., 1.],
+                [1., 0., 1., 0., 0., 0.],
+                [1., 0., 1., 0., 0., 1.],
+                [1., 0., 1., 0., 1., 0.],
+                [1., 0., 1., 0., 1., 1.],
+                [1., 0., 1., 1., 0., 0.],
+                [1., 0., 1., 1., 0., 1.],
+                [1., 0., 1., 1., 1., 0.],
+                [1., 0., 1., 1., 1., 1.],
+                [1., 1., 0., 0., 0., 0.],
+                [1., 1., 0., 0., 0., 1.],
+                [1., 1., 0., 0., 1., 0.],
+                [1., 1., 0., 0., 1., 1.],
+                [1., 1., 0., 1., 0., 0.],
+                [1., 1., 0., 1., 0., 1.],
+                [1., 1., 0., 1., 1., 0.],
+                [1., 1., 0., 1., 1., 1.],
+                [1., 1., 1., 0., 0., 0.],
+                [1., 1., 1., 0., 0., 1.],
+                [1., 1., 1., 0., 1., 0.],
+                [1., 1., 1., 0., 1., 1.],
+                [1., 1., 1., 1., 0., 0.],
+                [1., 1., 1., 1., 0., 1.],
+                [1., 1., 1., 1., 1., 0.],
+                [1., 1., 1., 1., 1., 1.]
+            ]],
+            dtype=tf.float32)
+
         if precision == 'single':
             self.model_dtype = tf.float32
         elif precision == 'half':
@@ -142,15 +211,17 @@ class TFProcess:
         # Scale the loss to prevent gradient underflow
         self.loss_scale = 1 if self.model_dtype == tf.float32 else loss_scale
 
-        policy_head = self.cfg['model'].get('policy', 'attention')
+        policy_head = self.cfg['model'].get('policy', 'convolution')
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
+        default_activation = self.cfg['model'].get('default_activation', 'relu')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
         self.INPUT_MODE = None
+        self.DEFAULT_ACTIVATION = None
 
         if policy_head == "classical":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
@@ -209,6 +280,17 @@ class TFProcess:
                 "Unknown input mode format: {}".format(input_mode))
 
         self.net.set_input(self.INPUT_MODE)
+
+        if default_activation == "relu":
+            self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+            self.DEFAULT_ACTIVATION = 'relu'
+        elif default_activation == "mish":
+            self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
+            import tensorflow_addons as tfa
+            self.DEFAULT_ACTIVATION = tfa.activations.mish
+        else:
+            raise ValueError(
+                "Unknown default activation type: {}".format(default_activation))
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -614,11 +696,11 @@ class TFProcess:
         for _ in range(steps % total_steps, total_steps):
             self.process(batch_size, test_batches, batch_splits=batch_splits)
 
-    @tf.function()
+    #@tf.function()
     def read_weights(self):
         return [w.read_value() for w in self.model.weights]
 
-    @tf.function()
+    #@tf.function()
     def process_inner_loop(self, x, y, z, q, m):
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
@@ -657,7 +739,7 @@ class TFProcess:
         ]
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
-    @tf.function()
+    #@tf.function()
     def strategy_process_inner_loop(self, x, y, z, q, m):
         metrics, new_grads = self.strategy.run(self.process_inner_loop,
                                                args=(x, y, z, q, m))
@@ -682,7 +764,7 @@ class TFProcess:
                                        experimental_aggregate_gradients=False)
         return grad_norm
 
-    @tf.function()
+    #@tf.function()
     def strategy_apply_grads(self, grads, effective_batch_splits):
         grad_norm = self.strategy.run(self.apply_grads,
                                       args=(grads, effective_batch_splits))
@@ -691,11 +773,11 @@ class TFProcess:
                                          axis=None)
         return grad_norm
 
-    @tf.function()
+    #@tf.function()
     def merge_grads(self, grads, new_grads):
         return [tf.math.add(a, b) for (a, b) in zip(grads, new_grads)]
 
-    @tf.function()
+    #@tf.function()
     def strategy_merge_grads(self, grads, new_grads):
         return self.strategy.run(self.merge_grads, args=(grads, new_grads))
 
@@ -869,7 +951,7 @@ class TFProcess:
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    @tf.function()
+    #@tf.function()
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         outputs = self.model(x, training=False)
         policy = outputs[0]
@@ -906,7 +988,7 @@ class TFProcess:
         ]
         return metrics
 
-    @tf.function()
+    #@tf.function()
     def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         metrics = self.strategy.run(self.calculate_test_summaries_inner_loop,
                                     args=(x, y, z, q, m))
@@ -983,7 +1065,7 @@ class TFProcess:
                   end='')
         print()
 
-    @tf.function()
+    #@tf.function()
     def compute_update_ratio(self, before_weights, after_weights, steps):
         """Compute the ratio of gradient norm to weight norm.
 
@@ -1066,7 +1148,7 @@ class TFProcess:
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(
             data_format='channels_first')(inputs)
-        squeezed = tf.keras.layers.Activation('relu')(tf.keras.layers.Dense(
+        squeezed = tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(tf.keras.layers.Dense(
             channels // self.SE_ratio,
             kernel_initializer='glorot_normal',
             kernel_regularizer=self.l2reg,
@@ -1091,7 +1173,7 @@ class TFProcess:
                                       kernel_regularizer=self.l2reg,
                                       data_format='channels_first',
                                       name=name + '/conv2d')(inputs)
-        return tf.keras.layers.Activation('relu')(self.batch_norm(
+        return tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(self.batch_norm(
             conv, name=name + '/bn', scale=bn_scale))
 
     def residual_block(self, inputs, channels, name):
@@ -1103,7 +1185,7 @@ class TFProcess:
                                        kernel_regularizer=self.l2reg,
                                        data_format='channels_first',
                                        name=name + '/1/conv2d')(inputs)
-        out1 = tf.keras.layers.Activation('relu')(self.batch_norm(conv1,
+        out1 = tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(self.batch_norm(conv1,
                                                                   name +
                                                                   '/1/bn',
                                                                   scale=False))
@@ -1117,11 +1199,11 @@ class TFProcess:
                                        name=name + '/2/conv2d')(out1)
 
         out2 = self.squeeze_excitation(self.batch_norm(conv2,
-                                                        name + '/2/bn',
-                                                        scale=True),
+                                                       name + '/2/bn',
+                                                       scale=True),
                                        channels,
                                        name=name + '/se')
-        return tf.keras.layers.Activation('relu')(tf.keras.layers.add(
+        return tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(tf.keras.layers.add(
             [inputs, out2]))
 
     @staticmethod
@@ -1163,7 +1245,7 @@ class TFProcess:
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size, dff, name):
-        dense1 = tf.keras.layers.Dense(dff, kernel_initializer='glorot_normal', activation='selu',
+        dense1 = tf.keras.layers.Dense(dff, kernel_initializer='glorot_normal', activation=self.DEFAULT_ACTIVATION,
                                        name=name + "/dense1")(inputs)
         return tf.keras.layers.Dense(emb_size, kernel_initializer='glorot_normal', name=name + "/dense2")(dense1)
 
@@ -1180,11 +1262,12 @@ class TFProcess:
         return out2, attn_wts
 
     def construct_net(self, inputs):
-        flow = self.conv_block(inputs,
-                               filter_size=3,
-                               output_channels=self.RESIDUAL_FILTERS,
-                               name='input',
-                               bn_scale=True)
+        if self.RESIDUAL_BLOCKS > 0:
+            flow = self.conv_block(inputs,
+                                   filter_size=3,
+                                   output_channels=self.RESIDUAL_FILTERS,
+                                   name='input',
+                                   bn_scale=True)
         for i in range(self.RESIDUAL_BLOCKS):
             flow = self.residual_block(flow,
                                        self.RESIDUAL_FILTERS,
@@ -1219,13 +1302,25 @@ class TFProcess:
                                           bias_regularizer=self.l2reg,
                                           name='policy/dense')(h_conv_pol_flat)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
+            # TODO: re-add support for policy encoder blocks
             if self.encoder_layers > 0:
-                # redirect flow through encoder blocks
-                flow = tf.transpose(flow, perm=[0, 2, 3, 1])
-                flow = tf.reshape(flow, [-1, 64, self.RESIDUAL_FILTERS])
+                # if there are no residual blocks (pure transformer), do some input processing
+                if self.RESIDUAL_BLOCKS == 0:
+                    # redirect flow through encoder blocks
+                    flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
+                    flow = tf.reshape(flow, [-1, 64, self.RESIDUAL_FILTERS])
+                    # add positional encoding for each square to the input
+                    positional_encoding = tf.broadcast_to(self.POS_ENC,
+                                                          [tf.shape(inputs)[0], 64, tf.shape(self.POS_ENC)[2]])
+                    flow = tf.concat([flow, positional_encoding], axis=2)
+                else:
+                    # redirect flow through encoder blocks
+                    flow = tf.transpose(flow, perm=[0, 2, 3, 1])
+                    flow = tf.reshape(flow, [-1, 64, self.RESIDUAL_FILTERS])
+
                 # square embedding
                 flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer='glorot_normal',
-                                             kernel_regularizer=self.l2reg, activation='selu',
+                                             kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                              name='embedding')(flow)
                 attn_wts = []
                 for i in range(self.encoder_layers):
@@ -1236,13 +1331,14 @@ class TFProcess:
                     attn_wts.append(attn_wts_l)
                 flow_ = flow
             else:
+                # if there are no encoder blocks
                 # transpose and reshape for policy head, but leave flow untouched for other heads
                 flow_ = tf.transpose(flow, perm=[0, 2, 3, 1])
                 flow_ = tf.reshape(flow_, [-1, 64, self.RESIDUAL_FILTERS])
 
             # policy embedding
             tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer='glorot_normal',
-                                           kernel_regularizer=self.l2reg, activation='selu',
+                                           kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                            name='policy/embedding')(flow_)
 
             # create queries and keys for policy self-attention
@@ -1292,7 +1388,7 @@ class TFProcess:
         # Value head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION and self.encoder_layers > 0:
             embedded_val = tf.keras.layers.Dense(self.val_embedding_size, kernel_initializer='glorot_normal',
-                                                 kernel_regularizer=self.l2reg, activation='selu',
+                                                 kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                                  name='value/embedding')(flow)
             h_val_flat = tf.keras.layers.Flatten()(embedded_val)
         else:
@@ -1304,7 +1400,7 @@ class TFProcess:
         h_fc2 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
                                       kernel_regularizer=self.l2reg,
-                                      activation='relu',
+                                      activation=self.DEFAULT_ACTIVATION,
                                       name='value/dense1')(h_val_flat)
         if self.wdl:
             h_fc3 = tf.keras.layers.Dense(3,
@@ -1323,7 +1419,7 @@ class TFProcess:
         if self.moves_left:
             if self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION and self.encoder_layers > 0:
                 embedded_mov = tf.keras.layers.Dense(self.mov_embedding_size, kernel_initializer='glorot_normal',
-                                                     kernel_regularizer=self.l2reg, activation='selu',
+                                                     kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                                      name='moves_left/embedding')(flow)
                 h_mov_flat = tf.keras.layers.Flatten()(embedded_mov)
             else:
@@ -1336,7 +1432,7 @@ class TFProcess:
                 128,
                 kernel_initializer='glorot_normal',
                 kernel_regularizer=self.l2reg,
-                activation='relu',
+                activation=self.DEFAULT_ACTIVATION,
                 name='moves_left/dense1')(h_mov_flat)
 
             h_fc5 = tf.keras.layers.Dense(1,
