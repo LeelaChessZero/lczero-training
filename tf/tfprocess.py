@@ -132,7 +132,7 @@ class TFProcess:
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
 
-        self.POS_ENC = tf.constant(
+        self.POS_ENC = np.array(
             [[
                 [0., 0., 0., 0., 0., 0.],
                 [0., 0., 0., 0., 0., 1.],
@@ -199,7 +199,7 @@ class TFProcess:
                 [1., 1., 1., 1., 1., 0.],
                 [1., 1., 1., 1., 1., 1.]
             ]],
-            dtype=tf.float32)
+            dtype=np.float32)
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -355,6 +355,7 @@ class TFProcess:
         input_var = tf.keras.Input(shape=(112, 8, 8))
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
+        print("model parameters:", self.model.count_params())
 
         # swa_count initialized regardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
@@ -1222,13 +1223,13 @@ class TFProcess:
         return output, scaled_attention_logits
 
     # multi-head attention in encoder blocks
-    def mha(self, inputs, emb_size, d_model, num_heads, name):
+    def mha(self, inputs, emb_size, d_model, num_heads, initializer, name):
         assert d_model % num_heads == 0
         depth = d_model // num_heads
         # query, key, and value vectors for self-attention
         q = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
         k = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
-        v = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wv')(inputs)
+        v = tf.keras.layers.Dense(d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
         # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
         q = self.split_heads(q, batch_size, num_heads, depth)
@@ -1239,26 +1240,30 @@ class TFProcess:
             scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
             scaled_attention = tf.reshape(scaled_attention, (batch_size, -1, d_model))  # concatenate heads
         # final dense layer
-        output = tf.keras.layers.Dense(emb_size, kernel_initializer='glorot_normal',
-                                       name=name + "/dense")(scaled_attention)
+        output = tf.keras.layers.Dense(emb_size, kernel_initializer=initializer, name=name + "/dense")(scaled_attention)
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
-    def ffn(self, inputs, emb_size, dff, name):
-        dense1 = tf.keras.layers.Dense(dff, kernel_initializer='glorot_normal', activation=self.DEFAULT_ACTIVATION,
+    def ffn(self, inputs, emb_size, dff, initializer, name):
+        dense1 = tf.keras.layers.Dense(dff, kernel_initializer=initializer, activation=self.DEFAULT_ACTIVATION,
                                        name=name + "/dense1")(inputs)
-        return tf.keras.layers.Dense(emb_size, kernel_initializer='glorot_normal', name=name + "/dense2")(dense1)
+        return tf.keras.layers.Dense(emb_size, kernel_initializer=initializer, name=name + "/dense2")(dense1)
 
     def encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
-        attn_output, attn_wts = self.mha(inputs, emb_size, d_model, num_heads, name=name + "/mha")
+        # DeepNorm
+        alpha = tf.cast(tf.math.pow(2. * self.encoder_layers, 0.25), self.model_dtype)
+        beta = tf.cast(tf.math.pow(8. * self.encoder_layers, -0.25), self.model_dtype)
+        xavier_norm = tf.keras.initializers.VarianceScaling(scale=beta, mode='fan_avg', distribution='truncated_normal')
+        # multihead attention
+        attn_output, attn_wts = self.mha(inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
         # dropout for weight regularization
         attn_output = tf.keras.layers.Dropout(self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln1")(inputs + attn_output)
+        out1 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
         # feed-forward network
-        ffn_output = self.ffn(out1, emb_size, dff, name=name + "/ffn")
+        ffn_output = self.ffn(out1, emb_size, dff, xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln2")(out1 + ffn_output)
+        out2 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
         return out2, attn_wts
 
     def construct_net(self, inputs):
@@ -1268,10 +1273,10 @@ class TFProcess:
                                    output_channels=self.RESIDUAL_FILTERS,
                                    name='input',
                                    bn_scale=True)
-        for i in range(self.RESIDUAL_BLOCKS):
-            flow = self.residual_block(flow,
-                                       self.RESIDUAL_FILTERS,
-                                       name='residual_{}'.format(i + 1))
+            for i in range(self.RESIDUAL_BLOCKS):
+                flow = self.residual_block(flow,
+                                           self.RESIDUAL_FILTERS,
+                                           name='residual_{}'.format(i + 1))
 
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
@@ -1302,16 +1307,16 @@ class TFProcess:
                                           bias_regularizer=self.l2reg,
                                           name='policy/dense')(h_conv_pol_flat)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
+            attn_wts = []
             # TODO: re-add support for policy encoder blocks
             if self.encoder_layers > 0:
                 # if there are no residual blocks (pure transformer), do some input processing
                 if self.RESIDUAL_BLOCKS == 0:
-                    # redirect flow through encoder blocks
                     flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
-                    flow = tf.reshape(flow, [-1, 64, self.RESIDUAL_FILTERS])
+                    flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
                     # add positional encoding for each square to the input
-                    positional_encoding = tf.broadcast_to(self.POS_ENC,
-                                                          [tf.shape(inputs)[0], 64, tf.shape(self.POS_ENC)[2]])
+                    positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=self.model_dtype),
+                                                          [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
                     flow = tf.concat([flow, positional_encoding], axis=2)
                 else:
                     # redirect flow through encoder blocks
@@ -1322,7 +1327,6 @@ class TFProcess:
                 flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer='glorot_normal',
                                              kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                              name='embedding')(flow)
-                attn_wts = []
                 for i in range(self.encoder_layers):
                     flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
                                                           self.encoder_heads, self.encoder_dff,
