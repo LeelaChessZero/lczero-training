@@ -571,10 +571,13 @@ class Net:
                 if 'stddev:' in weights_name:
                     weights = np.square(weights) - 1e-5
                     name = name.replace('stddev', 'variance')
-
-            if name == 'input/conv2d/kernel:0' and self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                weights[:, 109, :, :] /= 99
+            
+            if self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if name == 'input/conv2d/kernel:0':
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    weights[:, 109, :, :] /= 99
+                elif name == 'embedding/kernel:0':
+                    weights[:, :, 109] /= 99
 
             pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
 
