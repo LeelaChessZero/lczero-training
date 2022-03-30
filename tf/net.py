@@ -577,7 +577,7 @@ class Net:
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     weights[:, 109, :, :] /= 99
                 elif name == 'embedding/kernel:0':
-                    weights[:, :, 109] /= 99
+                    weights[:, 109] /= 99
 
             pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
 
