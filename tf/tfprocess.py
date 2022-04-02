@@ -113,93 +113,30 @@ class TFProcess:
                                      self.cfg['name'])
 
         # Network structure
-        self.RESIDUAL_FILTERS = self.cfg['model']['filters']
-        self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
-        self.SE_ratio = self.cfg['model']['se_ratio']
+        self.RESIDUAL_FILTERS = self.cfg['model'].get('filters', 64)
+        self.RESIDUAL_BLOCKS = self.cfg['model'].get('residual_blocks', 6)
+        self.SE_ratio = self.cfg['model'].get('se_ratio', 2)
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
-        self.embedding_size = self.cfg['model'].get('embedding_size', self.RESIDUAL_FILTERS)
-        self.pol_embedding_size = self.cfg['model'].get('policy_embedding_size', self.RESIDUAL_FILTERS)
+        self.embedding_size = self.cfg['model'].get('embedding_size', 64)
+        self.pol_embedding_size = self.cfg['model'].get('policy_embedding_size', 64)
         self.val_embedding_size = self.cfg['model'].get('value_embedding_size', 32)
         self.mov_embedding_size = self.cfg['model'].get('moves_left_embedding_size', 8)
-        self.encoder_layers = self.cfg['model'].get('encoder_layers', 1)
-        self.encoder_heads = self.cfg['model'].get('encoder_heads', 4)
-        self.encoder_d_model = self.cfg['model'].get('encoder_d_model', self.RESIDUAL_FILTERS)
-        self.encoder_dff = self.cfg['model'].get('encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
-        self.policy_d_model = self.cfg['model'].get('policy_d_model', self.RESIDUAL_FILTERS)
+        self.encoder_layers = self.cfg['model'].get('encoder_layers', 0)
+        self.encoder_heads = self.cfg['model'].get('encoder_heads', 2)
+        self.encoder_d_model = self.cfg['model'].get('encoder_d_model', 64)
+        self.encoder_dff = self.cfg['model'].get('encoder_dff', 256)
+        self.pol_encoder_layers = self.cfg['model'].get('pol_encoder_layers', 0)
+        self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
+        self.pol_encoder_d_model = self.cfg['model'].get('pol_encoder_d_model', 64)
+        self.pol_encoder_dff = self.cfg['model'].get('pol_encoder_dff', 96)
+        self.policy_d_model = self.cfg['model'].get('policy_d_model', 64)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
 
-        self.POS_ENC = np.array(
-            [[
-                [0., 0., 0., 0., 0., 0.],
-                [0., 0., 0., 0., 0., 1.],
-                [0., 0., 0., 0., 1., 0.],
-                [0., 0., 0., 0., 1., 1.],
-                [0., 0., 0., 1., 0., 0.],
-                [0., 0., 0., 1., 0., 1.],
-                [0., 0., 0., 1., 1., 0.],
-                [0., 0., 0., 1., 1., 1.],
-                [0., 0., 1., 0., 0., 0.],
-                [0., 0., 1., 0., 0., 1.],
-                [0., 0., 1., 0., 1., 0.],
-                [0., 0., 1., 0., 1., 1.],
-                [0., 0., 1., 1., 0., 0.],
-                [0., 0., 1., 1., 0., 1.],
-                [0., 0., 1., 1., 1., 0.],
-                [0., 0., 1., 1., 1., 1.],
-                [0., 1., 0., 0., 0., 0.],
-                [0., 1., 0., 0., 0., 1.],
-                [0., 1., 0., 0., 1., 0.],
-                [0., 1., 0., 0., 1., 1.],
-                [0., 1., 0., 1., 0., 0.],
-                [0., 1., 0., 1., 0., 1.],
-                [0., 1., 0., 1., 1., 0.],
-                [0., 1., 0., 1., 1., 1.],
-                [0., 1., 1., 0., 0., 0.],
-                [0., 1., 1., 0., 0., 1.],
-                [0., 1., 1., 0., 1., 0.],
-                [0., 1., 1., 0., 1., 1.],
-                [0., 1., 1., 1., 0., 0.],
-                [0., 1., 1., 1., 0., 1.],
-                [0., 1., 1., 1., 1., 0.],
-                [0., 1., 1., 1., 1., 1.],
-                [1., 0., 0., 0., 0., 0.],
-                [1., 0., 0., 0., 0., 1.],
-                [1., 0., 0., 0., 1., 0.],
-                [1., 0., 0., 0., 1., 1.],
-                [1., 0., 0., 1., 0., 0.],
-                [1., 0., 0., 1., 0., 1.],
-                [1., 0., 0., 1., 1., 0.],
-                [1., 0., 0., 1., 1., 1.],
-                [1., 0., 1., 0., 0., 0.],
-                [1., 0., 1., 0., 0., 1.],
-                [1., 0., 1., 0., 1., 0.],
-                [1., 0., 1., 0., 1., 1.],
-                [1., 0., 1., 1., 0., 0.],
-                [1., 0., 1., 1., 0., 1.],
-                [1., 0., 1., 1., 1., 0.],
-                [1., 0., 1., 1., 1., 1.],
-                [1., 1., 0., 0., 0., 0.],
-                [1., 1., 0., 0., 0., 1.],
-                [1., 1., 0., 0., 1., 0.],
-                [1., 1., 0., 0., 1., 1.],
-                [1., 1., 0., 1., 0., 0.],
-                [1., 1., 0., 1., 0., 1.],
-                [1., 1., 0., 1., 1., 0.],
-                [1., 1., 0., 1., 1., 1.],
-                [1., 1., 1., 0., 0., 0.],
-                [1., 1., 1., 0., 0., 1.],
-                [1., 1., 1., 0., 1., 0.],
-                [1., 1., 1., 0., 1., 1.],
-                [1., 1., 1., 1., 0., 0.],
-                [1., 1., 1., 1., 0., 1.],
-                [1., 1., 1., 1., 1., 0.],
-                [1., 1., 1., 1., 1., 1.]
-            ]],
-            dtype=np.float32)
+        self.POS_ENC = apm.make_pos_enc()
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -214,6 +151,7 @@ class TFProcess:
         policy_head = self.cfg['model'].get('policy', 'convolution')
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
+        net_body = self.cfg['model'].get('body', 'convolution')
         input_mode = self.cfg['model'].get('input_type', 'classic')
         default_activation = self.cfg['model'].get('default_activation', 'relu')
 
@@ -1350,10 +1288,6 @@ class TFProcess:
                                             name='policy/attention/wq')(tokens)
             keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
                                          name='policy/attention/wk')(tokens)
-            # queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
-            #                                 name='policy/attention/wq')(flow)
-            # keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
-            #                              name='policy/attention/wk')(flow)
 
             # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
             dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))  # constant for scaling
