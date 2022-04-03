@@ -123,10 +123,175 @@ class SimpleGating(tf.keras.layers.Layer):
         return tf.add(inputs, self.gate) if self.additive else tf.multiply(inputs, self.gate)
 
 
-def based_dense(*args, **kwargs):
-    assert 'name' in kwargs
-    kwargs['use_bias'] = False
-    return tf.keras.layers.Sequential([tf.keras.layers.Dense(*args, **kwargs), SimpleGating(kwargs['name'] + '/gate')])
+class DyDense(tf.keras.layers.Layer):
+    temperature = tf.Variable(30.0, trainable=False)
+
+    def __init__(self, out_channels: int, n_kernels: int, name=None, per_channel=False, use_bias=False, full_bias=None, kernel_initializer='glorot_normal', **kwargs):
+        assert name is not None
+        super().__init__(name=name, **kwargs)
+        self.per_channel = per_channel
+        self.use_bias = use_bias
+        self.full_bias = full_bias
+        self.out_channels = out_channels
+        self.n_kernels = n_kernels
+        self.kernel_initializer = kernel_initializer
+
+    def build(self, input_shape):
+        self.attention_dense = tf.keras.layers.Dense(self.n_kernels * self.out_channels if
+                                                     self.per_channel else self.n_kernels, kernel_initializer='zeros', name=self.name+'/attention_dense')
+
+        self.in_channels = input_shape[-1]
+
+        if self.per_channel:
+            self.per_channel_reshape = tf.keras.layers.Reshape(
+                [self.n_kernels, self.out_channels])
+
+        kernel_initializer = self.kernel_initializer
+        if isinstance(kernel_initializer, str):
+            kernel_initializer = tf.keras.initializers.get(kernel_initializer)
+        kernels = [kernel_initializer(shape=[self.in_channels, self.out_channels])
+                   for _ in range(self.n_kernels)]
+        kernels = tf.concat(kernels, axis=0)
+        kernels = kernels.numpy()
+
+        self.kernels = self.add_weight(name=self.name+'/kernels',
+                                       shape=[self.n_kernels,
+                                              self.in_channels, self.out_channels],
+                                       initializer=tf.constant_initializer(
+                                           kernels),
+                                       trainable=True)
+        if self.use_bias:
+            if self.full_bias:
+                self.bias = self.add_weight(name=self.name+'/bias',
+                                            shape=[self.n_kernels,
+                                                   64, self.out_channels],
+                                            initializer='zeros',
+                                            trainable=True)
+            else:
+                self.bias = self.add_weight(name=self.name+'/bias',
+                                            shape=[self.n_kernels,
+                                                   self.channels],
+                                            initializer='zeros',
+                                            trainable=True)
+        else:
+            self.bias = None
+
+    def call(self, inputs, squeezed):
+        attention = self.attention_dense(squeezed)
+        if self.per_channel:
+            attention = self.per_channel_reshape(attention)
+        attention = tf.nn.softmax(
+            attention / tf.cast(DyDense.temperature, inputs.dtype), axis=1)
+
+        matmul_einsum = 'bkj, kij->bij' if self.per_channel else 'bk, kij->bij'
+        kernel = tf.einsum(matmul_einsum, attention, self.kernels)
+        out = inputs @ kernel
+        if self.use_bias:
+            if self.full_bias:
+                bias_einsum = 'bkj, krj->brj' if self.per_channel else 'bk, krj->brj'
+
+                bias = tf.einsum(bias_einsum, attention, self.bias)
+            else:
+                bias_einsum = 'bkj, kj->bj' if self.per_channel else 'bk, kj->bj'
+                if self.use_bias:
+                    bias = tf.einsum(bias_einsum, attention, self.bias)
+                    bias = tf.expand_dims(bias, 1)
+
+            out = out + bias
+        return out
+
+
+class DyRelu(tf.keras.layers.Layer):
+    def __init__(self, name: str = None, channelwise=True):
+        assert name is not None
+        super().__init__(name=name)
+        self.channelwise = channelwise
+        self.alpha_1 = 1
+        self.alpha_2 = 0
+        self.beta_1 = 0
+        self.beta_2 = 0
+        self.lambda_a = 1
+        self.lambda_b = .5
+
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        self.channels = channels
+        self.dense = tf.keras.layers.Dense(
+            4 * channels if self.channelwise else 4)
+        if self.channelwise:
+            self.reshape = tf.keras.layers.Reshape([channels, 4])
+
+    def call(self, x, squeezed):
+        resids = 2 * tf.keras.activations.sigmoid(self.dense(squeezed)) - 1
+        if self.channelwise:
+            resids = self.reshape(resids)
+        resids = tf.expand_dims(resids, 1)
+        a1_resid, a2_resid, b1_resid, b2_resid = tf.unstack(resids, axis=-1)
+        a1 = self.alpha_1 + self.lambda_a * a1_resid
+        a2 = self.alpha_2 + self.lambda_a * a2_resid
+        b1 = self.beta_1 + self.lambda_b * b1_resid
+        b2 = self.beta_2 + self.lambda_b * b2_resid
+        rhs = x * a1 + b1
+        lhs = x * a2 + b2
+        hi = tf.maximum(rhs, lhs)
+        return hi
+
+        lo = tf.minimum(rhs, lhs)
+
+        return tf.where(a1 > a2, hi, lo)
+
+
+class LinearScaling(tf.keras.layers.Layer):
+    def __init__(self, name, full=True):
+        super().__init__(name=name)
+        self.full = full
+
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        shape = input_shape[1:] if self.full else [channels]
+
+        self.p1s = self.add_weight(
+            name=self.name+'/p1s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
+        self.p2s = self.add_weight(
+            name=self.name+'/p2s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
+
+        self.lambda_a1 = self.lambda_a2 = .2
+
+    def call(self, x):
+        b = (self.p1s + self.p2s) / 2
+        a = (self.p1s - self.p2s) / 2
+        return a * tf.abs(x) + b * x
+
+
+class LinearScalingB(tf.keras.layers.Layer):
+    def __init__(self, name):
+        super().__init__(name=name)
+
+    def build(self, input_shape):
+        # 64 C
+        channels = input_shape[-1]
+        # residual reshape
+        self.reshape = tf.keras.layers.Reshape([channels, 2])
+        shape = input_shape[1:] if self.full else [channels]
+
+        self.a1s = self.add_weight(
+            name=self.name+'/a1s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
+        self.a2s = self.add_weight(
+            name=self.name+'/a2s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
+        self.dense = tf.keras.layers.Dense(
+            2 * channels)
+
+    def call(self, x, squeezed):
+        resids = 2 * tf.keras.activations.sigmoid(self.dense(squeezed)) - 1
+        resids = self.reshape(resids)
+        resids = tf.expand_dims(resids, 1)
+        a1_resid, a2_resid = tf.unstack(resids, axis=-1)
+        a1s = self.a1s + self.lambda_a1 * a1_resid
+        a2s = self.a2s + self.lambda_a2 * a2_resid
+
+        lin_coeff = (a1s + a2s) / 2
+        abs_coeff = (a1s - a2s) / 2
+        return abs_coeff * tf.abs(x) + lin_coeff * x
 
 
 class ApplySqueezeExcitation(tf.keras.layers.Layer):
@@ -1324,53 +1489,35 @@ class TFProcess:
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def att_mixer(self, att_weights, name: str, hidden_size: int = 128):
-        heads = att_weights.shape[1]
-
-        def matrix_comp():
-            comp = tf.keras.layers.Dense(
-                8, name=name+'/comp/dense1')(att_weights)
-            comp = tf.transpose(comp, perm=[0, 1, 3, 2])
-            comp = tf.keras.layers.Dense(8, name=name+'/comp/dense2')(comp)
-            comp = tf.transpose(comp, perm=[0, 1, 3, 2])
-            comp = tf.keras.layers.Reshape([heads, -1])(comp)
-            return comp
-
-        pool1 = tf.math.reduce_mean(att_weights, axis=2)
-        pool_combined = tf.concat([pool1, matrix_comp()], axis=2)
-        pool_combined = tf.keras.layers.Reshape([-1])(pool_combined)
-        hidden1 = tf.keras.layers.Dense(
-            hidden_size, name=name+'/dense1', activation='relu')(pool_combined)
-        hidden2 = tf.keras.layers.Dense(
-            hidden_size, name=name+'/dense2', activation='relu')(hidden1)
-
-        out1 = tf.keras.layers.Dense(
-            64 * heads, name=name+'/denseout1', kernel_initializer='zeros')(hidden2)
-        out1 = tf.keras.layers.Reshape([heads, 64, 1])(out1)
-        out2 = tf.keras.layers.Dense(
-            64 * heads, name=name+'/denseout2', bias_initializer='ones')(hidden2)
-        out2 = tf.keras.layers.Reshape([heads, 1, 64])(out2)
-        decomp = MatrixDecomp(heads=heads, name=name+'/decomp')(hidden2)
-        out = decomp + out1 * out2
-        gated_out = SimpleGating(name=name+'/mix_scale', additive=False)(out)
-
-        return gated_out
-
-    def scaled_dot_product_attention(self, q, k, v, name=None, use_gate=False, mix=False):
+    def scaled_dot_product_attention(self, q, k, v, name=None, use_gate=False, talking_heads=True):
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
-        if use_gate:
-            assert name is not None
-            scaled_attention_logits = SimpleGating(
-                name=name+'/gate')(scaled_attention_logits)
-
+        heads = scaled_attention_logits.shape[1]
         # 0 h 64 64
-        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
-        if mix:
-            deltas = self.att_mixer(attention_weights, name+'/mixer')
-            scaled_attention_logits = scaled_attention_logits + deltas
+        if talking_heads:
+            scaled_attention_logits = tf.transpose(
+                scaled_attention_logits, perm=[0, 2, 3, 1])
+
+            scaled_attention_logits = tf.keras.layers.Dense(heads, name=name+'/talking_heads1',
+                                                            use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
+            if use_gate:
+                assert name is not None
+                scaled_attention_logits = SimpleGating(
+                    name=name+'/gate')(scaled_attention_logits)
+            attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-2)
+            attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
+                                                      use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
+            attention_weights = tf.transpose(
+                attention_weights, perm=[0, 3, 1, 2])
+
+        else:
+            if use_gate:
+                assert name is not None
+                scaled_attention_logits = SimpleGating(
+                    name=name+'/gate')(scaled_attention_logits)
+
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
 
         output = tf.matmul(attention_weights, v)
@@ -1388,16 +1535,8 @@ class TFProcess:
         k = tf.keras.layers.Dense(
             d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
 
-        if True:
-            squeezed = tf.reduce_mean(inputs, axis=1)
-            dense1 = tf.keras.layers.Dense(
-                16, name=name+'wvintermediary', activation='relu')(squeezed)
-            dense1 = tf.keras.layers.BatchNormalization(center=False)(dense1)
-            v = DCDDense(sz=d_model, kernel_initializer=initializer,
-                         name=name+'/wv')(inputs, dense1)
-        else:
-            v = tf.keras.layers.Dense(
-                d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
+        v = tf.keras.layers.Dense(
+            d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
         # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
         q = self.split_heads(q, batch_size, num_heads, depth)
@@ -1405,7 +1544,7 @@ class TFProcess:
         v = self.split_heads(v, batch_size, num_heads, depth)
         #!!!
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, use_gate=True, mix=False)
+            q, k, v, name=name, use_gate=False)
         if num_heads > 1:
             scaled_attention = tf.transpose(
                 scaled_attention, perm=[0, 2, 1, 3])

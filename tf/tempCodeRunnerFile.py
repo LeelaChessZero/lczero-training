@@ -1,1 +1,1 @@
-use_gate=
+def constr
