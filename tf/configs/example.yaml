@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-name: 'talkingheadsbased'
+name: 'linearscaling'
 gpu: 0
 dataset:
   num_chunks: 5_000_000

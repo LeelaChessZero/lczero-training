@@ -108,7 +108,7 @@ class DCDDense(tf.keras.layers.Layer):
         return out  # I am sorry
 
 
-class SimpleGating(tf.keras.layers.Layer):
+class Gating(tf.keras.layers.Layer):
     def __init__(self, name=None, additive=True, **kwargs):
         self.additive = additive
         super().__init__(name=name, **kwargs)
@@ -123,10 +123,16 @@ class SimpleGating(tf.keras.layers.Layer):
         return tf.add(inputs, self.gate) if self.additive else tf.multiply(inputs, self.gate)
 
 
+def ma_gating(inputs, name):
+    out = Gating(name=name+'/mult_gate', additive=False)(inputs)
+    out = Gating(name=name+'/add_gate', additive=True)(out)
+    return out
+
+
 class DyDense(tf.keras.layers.Layer):
     temperature = tf.Variable(30.0, trainable=False)
 
-    def __init__(self, out_channels: int, n_kernels: int, name=None, per_channel=False, use_bias=False, full_bias=None, kernel_initializer='glorot_normal', **kwargs):
+    def __init__(self, out_channels: int, n_kernels: int, name=None, per_channel=False, use_bias=False, full_bias=False, kernel_initializer='glorot_normal', **kwargs):
         assert name is not None
         super().__init__(name=name, **kwargs)
         self.per_channel = per_channel
@@ -202,7 +208,7 @@ class DyDense(tf.keras.layers.Layer):
 
 
 class DyRelu(tf.keras.layers.Layer):
-    def __init__(self, name: str = None, channelwise=True):
+    def __init__(self, name: str = None, channelwise: bool = True):
         assert name is not None
         super().__init__(name=name)
         self.channelwise = channelwise
@@ -235,16 +241,13 @@ class DyRelu(tf.keras.layers.Layer):
         lhs = x * a2 + b2
         hi = tf.maximum(rhs, lhs)
         return hi
-
         lo = tf.minimum(rhs, lhs)
-
         return tf.where(a1 > a2, hi, lo)
 
 
 class LinearScaling(tf.keras.layers.Layer):
-    def __init__(self, name, full=True):
+    def __init__(self, name):
         super().__init__(name=name)
-        self.full = full
 
     def build(self, input_shape):
         channels = input_shape[-1]
@@ -255,12 +258,10 @@ class LinearScaling(tf.keras.layers.Layer):
         self.p2s = self.add_weight(
             name=self.name+'/p2s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
 
-        self.lambda_a1 = self.lambda_a2 = .2
-
     def call(self, x):
-        b = (self.p1s + self.p2s) / 2
-        a = (self.p1s - self.p2s) / 2
-        return a * tf.abs(x) + b * x
+        lin_coeff = (self.p1s + self.p2s) / 2
+        abs_coeff = (self.p1s - self.p2s) / 2
+        return abs_coeff * tf.abs(x) + lin_coeff * x
 
 
 class LinearScalingB(tf.keras.layers.Layer):
@@ -272,12 +273,15 @@ class LinearScalingB(tf.keras.layers.Layer):
         channels = input_shape[-1]
         # residual reshape
         self.reshape = tf.keras.layers.Reshape([channels, 2])
-        shape = input_shape[1:] if self.full else [channels]
+        shape = [channels]
 
         self.a1s = self.add_weight(
             name=self.name+'/a1s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
         self.a2s = self.add_weight(
             name=self.name+'/a2s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
+
+        self.lambda_a1 = self.lambda_a2 = .2
+
         self.dense = tf.keras.layers.Dense(
             2 * channels)
 
@@ -588,8 +592,8 @@ class TFProcess:
             print(gpus)
             tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
                                                        'GPU')
-            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
-                                                     True)
+            #!!!
+            #tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
             self.strategy = None
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
@@ -1489,7 +1493,7 @@ class TFProcess:
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v, name=None, use_gate=False, talking_heads=True):
+    def scaled_dot_product_attention(self, q, k, v, name=None, use_logit_gate=False, talking_heads=False):
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
@@ -1502,10 +1506,10 @@ class TFProcess:
 
             scaled_attention_logits = tf.keras.layers.Dense(heads, name=name+'/talking_heads1',
                                                             use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
-            if use_gate:
+            if use_logit_gate:
                 assert name is not None
-                scaled_attention_logits = SimpleGating(
-                    name=name+'/gate')(scaled_attention_logits)
+                scaled_attention_logits = Gating(
+                    name=name+'/logit_gate')(scaled_attention_logits)
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-2)
             attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
                                                       use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
@@ -1513,15 +1517,50 @@ class TFProcess:
                 attention_weights, perm=[0, 3, 1, 2])
 
         else:
-            if use_gate:
+            if use_logit_gate:
                 assert name is not None
-                scaled_attention_logits = SimpleGating(
-                    name=name+'/gate')(scaled_attention_logits)
+                scaled_attention_logits = Gating(
+                    name=name+'/logit_gate')(scaled_attention_logits)
 
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
 
         output = tf.matmul(attention_weights, v)
         return output, scaled_attention_logits
+
+    def dense(sz, inputs, name: str, squeezed=None, dydense: bool = False, dydense_kernels: int = None,
+              linear_scale: bool = False, dydense_per_channel: bool = False, gating: bool = False, dyrelu: bool = False, **kwargs):
+        if dydense or linear_scale:
+            assert squeezed is not None
+            '''
+            if squeezed is None:
+                print(f'Warning, squeezed needed but not provided in {name}, squeezing input')
+                squeezed = tf.reduce_mean(inputs, axis=1)
+                squeezed = tf.keras.layers.Dense(32, activation='relu')(squeezed)
+            '''
+        if gating:
+            kwargs['use_bias'] = False
+        if linear_scale:
+            assert not dyrelu
+            assert kwargs.get('activation') is None
+        if dyrelu:
+            assert kwargs.get('activation') is None
+
+        if dydense:
+            assert dydense_kernels is not None
+            out = DyDense(sz, name=name, n_kernels=dydense_kernels,
+                          per_channel=dydense_per_channel, **kwargs)(inputs, squeezed=squeezed)
+        else:
+            out = tf.keras.layers.Dense(sz, name=name, **kwargs)(inputs)
+
+        if linear_scale:
+            out = LinearScaling(name=name+'/linear_scale')(out)
+        if dyrelu:
+            out = DyRelu(name=name+'/dyrelu')(out)
+
+        if gating:
+            out = ma_gating(out, name=name)
+
+        return out
 
     # multi-head attention in encoder blocks
 
@@ -1534,6 +1573,39 @@ class TFProcess:
             d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
         k = tf.keras.layers.Dense(
             d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
+        v = tf.keras.layers.Dense(
+            d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
+        # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
+        batch_size = tf.shape(q)[0]
+        q = self.split_heads(q, batch_size, num_heads, depth)
+        k = self.split_heads(k, batch_size, num_heads, depth)
+        v = self.split_heads(v, batch_size, num_heads, depth)
+        #!!!
+        scaled_attention, attention_weights = self.scaled_dot_product_attention(
+            q, k, v, name=name, use_logit_gate=False)
+        if num_heads > 1:
+            scaled_attention = tf.transpose(
+                scaled_attention, perm=[0, 2, 1, 3])
+            scaled_attention = tf.reshape(
+                scaled_attention, (batch_size, -1, d_model))  # concatenate heads
+        # final dense layer
+        output = tf.keras.layers.Dense(
+            emb_size, kernel_initializer=initializer, name=name + "/dense")(scaled_attention)
+        return output, attention_weights
+
+    def based_mha(self, inputs, emb_size, d_model, num_heads, initializer, name, linear_scaling=False, squeezed=None):
+        assert d_model % num_heads == 0
+        depth = d_model // num_heads
+        # query, key, and value vectors for self-attention
+        # inputs b, 64, sz
+        q = tf.keras.layers.Dense(
+            d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
+        k = tf.keras.layers.Dense(
+            d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
+
+        if linear_scaling:
+            q = LinearScalingB(name=name+'/linear_scaling_q')(q, squeezed)
+            k = LinearScalingB(name=name+'/linear_scaling_k')(k, squeezed)
 
         v = tf.keras.layers.Dense(
             d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
@@ -1544,7 +1616,7 @@ class TFProcess:
         v = self.split_heads(v, batch_size, num_heads, depth)
         #!!!
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, use_gate=False)
+            q, k, v, name=name, use_logit_gate=False)
         if num_heads > 1:
             scaled_attention = tf.transpose(
                 scaled_attention, perm=[0, 2, 1, 3])
@@ -1556,6 +1628,7 @@ class TFProcess:
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
+
     def ffn(self, inputs, emb_size, dff, initializer, name):
         dense1 = tf.keras.layers.Dense(dff, kernel_initializer=initializer, activation=self.DEFAULT_ACTIVATION,
                                        name=name + "/dense1")(inputs)
@@ -1571,6 +1644,40 @@ class TFProcess:
             scale=beta, mode='fan_avg', distribution='truncated_normal')
         # multihead attention
         attn_output, attn_wts = self.mha(
+            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
+        '''
+        #!!!
+        if additive_gate:
+            attn_output = SimpleGating(name=name+'/gate1')
+        '''
+        # dropout for weight regularization
+        attn_output = tf.keras.layers.Dropout(
+            self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
+        # skip connection + layernorm
+        out1 = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
+        # feed-forward network
+        ffn_output = self.ffn(out1, emb_size, dff,
+                              xavier_norm, name=name + "/ffn")
+        ffn_output = tf.keras.layers.Dropout(
+            self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
+        out2 = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
+        return out2, attn_wts
+
+    def based_encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
+        # DeepNorm
+        alpha = tf.cast(tf.math.pow(
+            2. * self.encoder_layers, 0.25), self.model_dtype)
+        beta = tf.cast(tf.math.pow(
+            8. * self.encoder_layers, -0.25), self.model_dtype)
+        squeezed = tf.reduce_mean(inputs, axis=1)
+        squeezed = tf.keras.layers.Dense(
+            name=name+'/squeezed_dense', units=32, activation='relu')(squeezed)
+        xavier_norm = tf.keras.initializers.VarianceScaling(
+            scale=beta, mode='fan_avg', distribution='truncated_normal')
+        # multihead attention
+        attn_output, attn_wts = self.based_mha(
             inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
         '''
         #!!!
@@ -1658,16 +1765,13 @@ class TFProcess:
                                              name='embedding')(flow)
 
                 if self.input_gate:
-                    flow = SimpleGating(
-                        name='embeddingscale', additive=False)(flow)
-                    flow = SimpleGating(
-                        name='embeddingadd', additive=True)(flow)
+                    flow = ma_gating(flow, name='embedding')
 
                 for i in range(self.encoder_layers):
-                    flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
-                                                          self.encoder_heads, self.encoder_dff,
-                                                          name='encoder_{}'.format(i + 1), training=True
-                                                          )
+                    flow, attn_wts_l = self.based_encoder_layer(flow, self.embedding_size, self.encoder_d_model,
+                                                                self.encoder_heads, self.encoder_dff,
+                                                                name='encoder_{}'.format(i + 1), training=True
+                                                                )
                     attn_wts.append(attn_wts_l)
                 flow_ = flow
             else:
