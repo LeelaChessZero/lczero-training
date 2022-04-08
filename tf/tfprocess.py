@@ -31,6 +31,21 @@ import operator
 from net import Net
 
 
+class TalkingHeadsDynamicInitializer(tf.keras.initializers.Initializer):
+    def __init__(self, shape, dtype=None):
+        prod = reduce(operator.mul, shape, 1)
+        self.initializer = tf.keras.initializers.TruncatedNormal(
+            stddev=.1 * tf.cast(prod, tf.float32)**-0.5)
+        self.shape = shape
+        self.dtype = dtype
+
+    def __call__(self, shape, dtype=None):
+        return self.initializer(shape, dtype)
+
+    def get_config(self):
+        return {'shape': self.shape, 'dtype': self.dtype}
+
+
 class MatrixDecomp(tf.keras.layers.Layer):
     def __init__(self, heads: int, hidden_size: int = 8, sz: int = 64, name: str = None, use_bias: bool = False):
         assert name is not None
@@ -42,7 +57,7 @@ class MatrixDecomp(tf.keras.layers.Layer):
         self.reshape = tf.keras.layers.Reshape(
             [heads, hidden_size, hidden_size]
         )
-        stddev = 0.1  # !!!
+        stddev = 0.1
         decomp_init = tf.keras.initializers.RandomNormal(stddev=stddev)
         self.P = self.add_weight(name='P',
                                  shape=[heads, sz, hidden_size],
@@ -68,7 +83,7 @@ class MatrixDecomp1D(tf.keras.layers.Layer):
         self.reshape = tf.keras.layers.Reshape(
             [hidden_size, hidden_size]
         )
-        stddev = 0.1  # !!!
+        stddev = 0.1
         decomp_init = tf.keras.initializers.RandomNormal(stddev=stddev)
         self.P = self.add_weight(name=self.name+'/P',
                                  shape=[sz, hidden_size],
@@ -212,23 +227,39 @@ class DyRelu(tf.keras.layers.Layer):
         assert name is not None
         super().__init__(name=name)
         self.channelwise = channelwise
-        self.alpha_1 = 1
-        self.alpha_2 = 0
-        self.beta_1 = 0
-        self.beta_2 = 0
+        self.alpha_1_init = 1  # right slope
+        self.alpha_2_init = 0  # left slope
+        self.beta_1_init = 0  # right y intercept
+        self.beta_2_init = 0  # left y intercept
         self.lambda_a = 1
         self.lambda_b = .5
 
     def build(self, input_shape):
-        channels = input_shape[-1]
-        self.channels = channels
+
+        self.channels = channels = input_shape[-1]
+        self.alpha_1 = self.add_weight(
+            name=self.name+'/alpha_1', shape=[channels],
+            initializer=tf.constant_initializer(self.alpha_1_init))
+        self.alpha_2 = self.add_weight(
+            name=self.name+'/alpha_2', shape=[channels],
+            initializer=tf.constant_initializer(self.alpha_2_init))
+        self.beta_1 = self.add_weight(
+            name=self.name+'/beta_1', shape=[channels],
+            initializer=tf.constant_initializer(self.beta_1_init))
+        self.beta_2 = self.add_weight(
+            name=self.name+'/beta_2', shape=[channels],
+            initializer=tf.constant_initializer(self.beta_2_init))
+
         self.dense = tf.keras.layers.Dense(
             4 * channels if self.channelwise else 4)
+        self.bn = tf.keras.layers.BatchNormalization()
         if self.channelwise:
             self.reshape = tf.keras.layers.Reshape([channels, 4])
 
     def call(self, x, squeezed):
-        resids = 2 * tf.keras.activations.sigmoid(self.dense(squeezed)) - 1
+        #  !!! sigmoid may be slow?
+        resids = 2 * tf.keras.activations.hsigmoid(
+            self.bn(self.dense(squeezed))) - 1
         if self.channelwise:
             resids = self.reshape(resids)
         resids = tf.expand_dims(resids, 1)
@@ -241,8 +272,6 @@ class DyRelu(tf.keras.layers.Layer):
         lhs = x * a2 + b2
         hi = tf.maximum(rhs, lhs)
         return hi
-        lo = tf.minimum(rhs, lhs)
-        return tf.where(a1 > a2, hi, lo)
 
 
 class LinearScaling(tf.keras.layers.Layer):
@@ -280,7 +309,10 @@ class LinearScalingB(tf.keras.layers.Layer):
         self.a2s = self.add_weight(
             name=self.name+'/a2s', shape=shape, initializer=tf.initializers.constant(1), trainable=True)
 
-        self.lambda_a1 = self.lambda_a2 = .2
+        self.lambda_a1 = self.add_weight(
+            name=self.name+'/lambda_a1', shape=[1], initializer=tf.initializers.constant(.2), trainable=True)
+        self.lambda_a2 = self.add_weight(
+            name=self.name+'/lambda_a2', shape=[1], initializer=tf.initializers.constant(.2), trainable=True)
 
         self.dense = tf.keras.layers.Dense(
             2 * channels)
@@ -593,7 +625,7 @@ class TFProcess:
             tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
                                                        'GPU')
             #!!!
-            #tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
+            # tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
             self.strategy = None
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
@@ -972,7 +1004,11 @@ class TFProcess:
         self.profiling_start_step = None
 
         total_steps = self.cfg['training']['total_steps']
+        import os
+        import time
         for _ in range(steps % total_steps, total_steps):
+            while os.path.exists('stop'):
+                time.sleep(1)
             self.process(batch_size, test_batches, batch_splits=batch_splits)
 
     @tf.function()
@@ -1507,12 +1543,15 @@ class TFProcess:
             scaled_attention_logits = tf.keras.layers.Dense(heads, name=name+'/talking_heads1',
                                                             use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
             if use_logit_gate:
-                assert name is not None
                 scaled_attention_logits = Gating(
                     name=name+'/logit_gate')(scaled_attention_logits)
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-2)
+            if use_logit_gate:
+                attention_weights = Gating(
+                    name=name+'/early_mult_gate', additive=False)(attention_weights)
             attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
                                                       use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
+
             attention_weights = tf.transpose(
                 attention_weights, perm=[0, 3, 1, 2])
 
@@ -1523,13 +1562,16 @@ class TFProcess:
                     name=name+'/logit_gate')(scaled_attention_logits)
 
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
+        if use_logit_gate:
+            attention_weights = Gating(
+                name=name+'/logit_gate2', additive=False)(attention_weights)
 
         output = tf.matmul(attention_weights, v)
         return output, scaled_attention_logits
 
-    def dense(sz, inputs, name: str, squeezed=None, dydense: bool = False, dydense_kernels: int = None,
-              linear_scale: bool = False, dydense_per_channel: bool = False, gating: bool = False, dyrelu: bool = False, **kwargs):
-        if dydense or linear_scale:
+    def dense_layer(self, inputs, sz, *, name: str, squeezed=None, dydense: bool = False, dydense_kernels: int = None,
+                    linear_scale: bool = False, dydense_per_channel: bool = False, gating: bool = False, dyrelu: bool = False, **kwargs):
+        if dydense or linear_scale or dyrelu:
             assert squeezed is not None
             '''
             if squeezed is None:
@@ -1552,6 +1594,7 @@ class TFProcess:
         else:
             out = tf.keras.layers.Dense(sz, name=name, **kwargs)(inputs)
 
+        # mutually exclusive
         if linear_scale:
             out = LinearScaling(name=name+'/linear_scale')(out)
         if dyrelu:
@@ -1564,75 +1607,47 @@ class TFProcess:
 
     # multi-head attention in encoder blocks
 
-    def mha(self, inputs, emb_size, d_model, num_heads, initializer, name):
+    def mha(self, inputs, emb_size, d_model, num_heads, initializer, name, squeezed=None):
         assert d_model % num_heads == 0
         depth = d_model // num_heads
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
-        q = tf.keras.layers.Dense(
-            d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
-        k = tf.keras.layers.Dense(
-            d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
-        v = tf.keras.layers.Dense(
-            d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
+        '''
+        inputs = self.dense_layer(inputs, d_model, name=name+'/input_embed')
+        inputs = DyRelu(name=name+'/input_embed/dyrelu')(inputs)
+        '''
+        q = self.dense_layer(inputs,
+                             d_model, kernel_initializer='glorot_normal', name=name + '/wq', squeezed=squeezed)
+        k = self.dense_layer(inputs,
+                             d_model, kernel_initializer='glorot_normal', name=name + '/wk', squeezed=squeezed)
+        v = self.dense_layer(inputs,
+                             d_model, kernel_initializer=initializer, name=name + '/wv', squeezed=squeezed)
         # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
         q = self.split_heads(q, batch_size, num_heads, depth)
         k = self.split_heads(k, batch_size, num_heads, depth)
         v = self.split_heads(v, batch_size, num_heads, depth)
+
         #!!!
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, use_logit_gate=False)
+            q, k, v, name=name, use_logit_gate=False, talking_heads=False)
         if num_heads > 1:
             scaled_attention = tf.transpose(
                 scaled_attention, perm=[0, 2, 1, 3])
-            scaled_attention = tf.reshape(
-                scaled_attention, (batch_size, -1, d_model))  # concatenate heads
+            scaled_attention = tf.keras.layers.Reshape(
+                (-1, d_model))(scaled_attention)
         # final dense layer
-        output = tf.keras.layers.Dense(
-            emb_size, kernel_initializer=initializer, name=name + "/dense")(scaled_attention)
-        return output, attention_weights
+        output = self.dense_layer(scaled_attention,
+                                  emb_size, kernel_initializer=initializer, name=name + "/dense", squeezed=squeezed)
 
-    def based_mha(self, inputs, emb_size, d_model, num_heads, initializer, name, linear_scaling=False, squeezed=None):
-        assert d_model % num_heads == 0
-        depth = d_model // num_heads
-        # query, key, and value vectors for self-attention
-        # inputs b, 64, sz
-        q = tf.keras.layers.Dense(
-            d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
-        k = tf.keras.layers.Dense(
-            d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
-
-        if linear_scaling:
-            q = LinearScalingB(name=name+'/linear_scaling_q')(q, squeezed)
-            k = LinearScalingB(name=name+'/linear_scaling_k')(k, squeezed)
-
-        v = tf.keras.layers.Dense(
-            d_model, kernel_initializer=initializer, name=name + '/wv')(inputs)
-        # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
-        batch_size = tf.shape(q)[0]
-        q = self.split_heads(q, batch_size, num_heads, depth)
-        k = self.split_heads(k, batch_size, num_heads, depth)
-        v = self.split_heads(v, batch_size, num_heads, depth)
-        #!!!
-        scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, use_logit_gate=False)
-        if num_heads > 1:
-            scaled_attention = tf.transpose(
-                scaled_attention, perm=[0, 2, 1, 3])
-            scaled_attention = tf.reshape(
-                scaled_attention, (batch_size, -1, d_model))  # concatenate heads
-        # final dense layer
-        output = tf.keras.layers.Dense(
-            emb_size, kernel_initializer=initializer, name=name + "/dense")(scaled_attention)
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
 
-    def ffn(self, inputs, emb_size, dff, initializer, name):
-        dense1 = tf.keras.layers.Dense(dff, kernel_initializer=initializer, activation=self.DEFAULT_ACTIVATION,
-                                       name=name + "/dense1")(inputs)
-        return tf.keras.layers.Dense(emb_size, kernel_initializer=initializer, name=name + "/dense2")(dense1)
+    def ffn(self, inputs, emb_size, dff, initializer, name, squeezed=None):
+        dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=self.DEFAULT_ACTIVATION,
+                                  name=name + "/dense1", squeezed=squeezed)
+        return self.dense_layer(dense1, emb_size, kernel_initializer=initializer, name=name + "/dense2", squeezed=squeezed)
 
     def encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
         # DeepNorm
@@ -1643,47 +1658,13 @@ class TFProcess:
         xavier_norm = tf.keras.initializers.VarianceScaling(
             scale=beta, mode='fan_avg', distribution='truncated_normal')
         # multihead attention
-        attn_output, attn_wts = self.mha(
-            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
-        '''
-        #!!!
-        if additive_gate:
-            attn_output = SimpleGating(name=name+'/gate1')
-        '''
-        # dropout for weight regularization
-        attn_output = tf.keras.layers.Dropout(
-            self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
-        # skip connection + layernorm
-        out1 = tf.keras.layers.LayerNormalization(
-            epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
-        # feed-forward network
-        ffn_output = self.ffn(out1, emb_size, dff,
-                              xavier_norm, name=name + "/ffn")
-        ffn_output = tf.keras.layers.Dropout(
-            self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = tf.keras.layers.LayerNormalization(
-            epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
-        return out2, attn_wts
-
-    def based_encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
-        # DeepNorm
-        alpha = tf.cast(tf.math.pow(
-            2. * self.encoder_layers, 0.25), self.model_dtype)
-        beta = tf.cast(tf.math.pow(
-            8. * self.encoder_layers, -0.25), self.model_dtype)
         squeezed = tf.reduce_mean(inputs, axis=1)
         squeezed = tf.keras.layers.Dense(
-            name=name+'/squeezed_dense', units=32, activation='relu')(squeezed)
-        xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode='fan_avg', distribution='truncated_normal')
-        # multihead attention
-        attn_output, attn_wts = self.based_mha(
-            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
-        '''
-        #!!!
-        if additive_gate:
-            attn_output = SimpleGating(name=name+'/gate1')
-        '''
+            32, activation='relu', name=name+'/squeezed_dense')(squeezed)
+
+        attn_output, attn_wts = self.mha(
+            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha", squeezed=squeezed)
+
         # dropout for weight regularization
         attn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
@@ -1692,7 +1673,7 @@ class TFProcess:
             epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
-                              xavier_norm, name=name + "/ffn")
+                              xavier_norm, name=name + "/ffn", squeezed=squeezed)
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
         out2 = tf.keras.layers.LayerNormalization(
@@ -1764,14 +1745,15 @@ class TFProcess:
                                              kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                              name='embedding')(flow)
 
-                if self.input_gate:
-                    flow = ma_gating(flow, name='embedding')
+                # !!!
+                # if True or self.input_gate:
+                flow = ma_gating(flow, name='embedding')
 
                 for i in range(self.encoder_layers):
-                    flow, attn_wts_l = self.based_encoder_layer(flow, self.embedding_size, self.encoder_d_model,
-                                                                self.encoder_heads, self.encoder_dff,
-                                                                name='encoder_{}'.format(i + 1), training=True
-                                                                )
+                    flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
+                                                          self.encoder_heads, self.encoder_dff,
+                                                          name='encoder_{}'.format(i + 1), training=True
+                                                          )
                     attn_wts.append(attn_wts_l)
                 flow_ = flow
             else:
@@ -1858,6 +1840,7 @@ class TFProcess:
                                       kernel_regularizer=self.l2reg,
                                       activation=self.DEFAULT_ACTIVATION,
                                       name='value/dense1')(h_val_flat)
+        h_fc2 = tf.keras.layers.LayerNormalization(name='value/norm1')(h_fc2)
         if self.wdl:
             h_fc3 = tf.keras.layers.Dense(3,
                                           kernel_initializer='glorot_normal',
@@ -1890,6 +1873,9 @@ class TFProcess:
                 kernel_regularizer=self.l2reg,
                 activation=self.DEFAULT_ACTIVATION,
                 name='moves_left/dense1')(h_mov_flat)
+
+            h_fc4 = tf.keras.layers.LayerNormalization(
+                name='moves_left/norm1')(h_fc4)
 
             h_fc5 = tf.keras.layers.Dense(1,
                                           kernel_initializer='glorot_normal',
