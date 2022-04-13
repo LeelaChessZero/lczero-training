@@ -1,13 +1,14 @@
 %YAML 1.2
 ---
-name: '20b_T03'
-gpu: 3
+name: 'test1'
+gpu: 0
 dataset:
-  num_chunks: 5_000_000
+  num_chunks: 1_000_000 # !!!
   allow_less_chunks: true
   train_ratio: 0.95
   sort_type: name
-  input: 'C:/Users/micro/leeladata/train/*/'
+  #input: 'C:/Users/micro/leeladata/train/*/' !!!
+  #input: 'C:/Users/micro/leeladata/train/training-run2-test77-20211201-0018/'
   experimental_v5_only_dataset: false
   train_workers: 8
   test_workers: 4
@@ -19,7 +20,7 @@ training:
     swa_steps: 100
     max_grad_norm: 1.0
     batch_size: 1024
-    num_batch_splits: 1
+    num_batch_splits: 2
     q_ratio: 0
     value_focus_min: 1.0
     value_focus_slope: 0.0
@@ -28,10 +29,10 @@ training:
     renorm_max_r: 1.0
     renorm_max_d: 0.0
     test_steps: 2500
-    validation_steps: 5000
+    # validation_steps: 5000
     num_test_positions: 131_072
     train_avg_report_steps: 2500
-    total_steps: 2_000_000
+    total_steps: 500_000
     #checkpoint_steps: 5000
     shuffle_size: 250_000
     warmup_steps: 4000
@@ -83,19 +84,34 @@ training:
     moves_left_loss_weight: 1.0
     path: '/networks'
 model:
-    filters: 256                         # Number of filters
+    filters: 64                         # Number of filters
     residual_blocks: 0                   # Number of blocks
-    se_ratio: 8                          # Squeeze Excite structural network architecture.
-    embedding_size: 256
-    policy_embedding_size: 256
+    se_ratio: 8   # Squeeze Excite structural network architecture.                 
+    embedding_size: 64
+    policy_embedding_size: 128
     value_embedding_size: 32
     moves_left_embedding_size: 8
-    encoder_layers: 5                   # number of intermediate attention layers in the policy head
-    encoder_heads: 8                     # number of attention heads in encoder layers
-    encoder_d_model: 256                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
-    encoder_dff: 1024                    # size of the largest dense layer in encoder layer ffn
-    policy_d_model: 256                  # size of the query and key vectors in final attention layer
+    encoder_layers: 4                   # number of intermediate attention layers in the policy head
+    encoder_heads: 4                     # number of attention heads in encoder layers
+    encoder_d_model: 64                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    encoder_dff: 256                    # size of the largest dense layer in encoder layer ffn
+    policy_d_model: 64                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
     policy: 'attention'                  # new option: attention
     value: 'wdl'
     moves_left: 'v1'
+    input_type: "canonical_100"
+
+    # Monroe's magical menagerie
+    talking_heads: true
+    logit_gate: true
+    gating_everywhere: false
+
+    # Daniel's dynamic designs
+    dydense_temp_start: 30 # should probably move to training
+    dydense_temp_anneal_steps: 100_000 #!!! slower?
+    dydense_usage: '' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
+    dydense_kernels: 2 # if dydense use
+    dydense_pc: true # channelwise: true or false
+    use_dyrelu: false # whether to use dyrelu at dff
+    dytalking_heads: false # !!! not implemented yet

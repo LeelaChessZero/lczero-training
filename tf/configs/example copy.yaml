@@ -1,14 +1,13 @@
 %YAML 1.2
 ---
-name: 'dydense2qkvonpc'
+name: '64x3test'
 gpu: 0
 dataset:
-  num_chunks: 5_000_000
+  num_chunks: 1_000_000
   allow_less_chunks: true
   train_ratio: 0.95
   sort_type: name
-  input: 'C:/Users/micro/leeladata/train/*/'
-  #input: 'C:/Users/micro/leeladata/train/training-run2-test77-20211201-0018/'
+  input: '!!!'
   experimental_v5_only_dataset: false
   train_workers: 8
   test_workers: 4
@@ -20,7 +19,7 @@ training:
     swa_steps: 100
     max_grad_norm: 1.0
     batch_size: 1024
-    num_batch_splits: 2
+    num_batch_splits: 1
     q_ratio: 0
     value_focus_min: 1.0
     value_focus_slope: 0.0
@@ -33,7 +32,7 @@ training:
     num_test_positions: 131_072
     train_avg_report_steps: 2500
     total_steps: 500_000
-    #checkpoint_steps: 5000 
+    #checkpoint_steps: 5000
     shuffle_size: 250_000
     warmup_steps: 4000
     mask_legal_moves: true
@@ -84,17 +83,17 @@ training:
     moves_left_loss_weight: 1.0
     path: '/networks'
 model:
-    filters: 128                         # Number of filters
+    filters: 64                         # Number of filters
     residual_blocks: 0                   # Number of blocks
     se_ratio: 8   # Squeeze Excite structural network architecture.                 
-    embedding_size: 128
-    policy_embedding_size: 128
+    embedding_size: 64
+    policy_embedding_size: 64
     value_embedding_size: 32
     moves_left_embedding_size: 8
-    encoder_layers: 5                   # number of intermediate attention layers in the policy head
-    encoder_heads: 8                     # number of attention heads in encoder layers
-    encoder_d_model: 128                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
-    encoder_dff: 512                    # size of the largest dense layer in encoder layer ffn
+    encoder_layers: 3                   # number of intermediate attention layers in the policy head
+    encoder_heads: 4                     # number of attention heads in encoder layers
+    encoder_d_model: 32                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    encoder_dff: 256                   # size of the largest dense layer in encoder layer ffn
     policy_d_model: 128                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
     policy: 'attention'                  # new option: attention
@@ -110,8 +109,8 @@ model:
     # Daniel's dynamic designs
     dydense_temp_start: 30 # should probably move to training
     dydense_temp_anneal_steps: 100_000 #!!! slower?
-    dydense_usage: 'qkvo' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
+    dydense_usage: '' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
     dydense_kernels: 2 # if dydense use
-    dydense_pc: false # channelwise: true or false
+    dydense_pc: true # channelwise: true or false
     use_dyrelu: false # whether to use dyrelu at dff
     dytalking_heads: false # !!! not implemented yet
