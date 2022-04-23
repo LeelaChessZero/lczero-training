@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-name: 'dydense2qkvonpc'
+name: 'genweights4'
 gpu: 0
 dataset:
   num_chunks: 5_000_000
@@ -15,12 +15,12 @@ dataset:
 training:
     precision: half
     swa: true
-    swa_output: true
+    swa_output: true    
     swa_max_n: 10
     swa_steps: 100
     max_grad_norm: 1.0
     batch_size: 1024
-    num_batch_splits: 2
+    num_batch_splits: 1
     q_ratio: 0
     value_focus_min: 1.0
     value_focus_slope: 0.0
@@ -33,7 +33,8 @@ training:
     num_test_positions: 131_072
     train_avg_report_steps: 2500
     total_steps: 500_000
-    #checkpoint_steps: 5000 
+    checkpoint_steps: 10_000 
+    
     shuffle_size: 250_000
     warmup_steps: 4000
     mask_legal_moves: true
@@ -59,7 +60,7 @@ training:
         - 0.00360
         - 0.00288  # 2M
     lr_boundaries:
-        - 100_000
+        - 100_000 
         - 200_000
         - 300_000
         - 400_000
@@ -82,7 +83,7 @@ training:
     value_loss_weight: 1.0
     reg_term_weight: 1.0
     moves_left_loss_weight: 1.0
-    path: '/networks'
+    path: 'C:/Users/micro/Documents/GitHub/lczero-attention/networks'
 model:
     filters: 128                         # Number of filters
     residual_blocks: 0                   # Number of blocks
@@ -105,13 +106,17 @@ model:
     # Monroe's magical menagerie
     talking_heads: true
     logit_gate: true
+    weight_gen: true
     gating_everywhere: false
 
     # Daniel's dynamic designs
     dydense_temp_start: 30 # should probably move to training
     dydense_temp_anneal_steps: 100_000 #!!! slower?
-    dydense_usage: 'qkvo' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
+    dydense_usage: '' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
     dydense_kernels: 2 # if dydense use
     dydense_pc: false # channelwise: true or false
     use_dyrelu: false # whether to use dyrelu at dff
     dytalking_heads: false # !!! not implemented yet
+
+    # Buckets
+    buckets: 1
