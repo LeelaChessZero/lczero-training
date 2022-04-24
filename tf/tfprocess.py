@@ -28,7 +28,7 @@ import proto.net_pb2 as pb
 from functools import reduce
 import operator
 from net import Net
-import tensorflow_probability as tfp
+from math import sqrt
 
 
 @tf.function()
@@ -54,6 +54,7 @@ def permute_backward(permutation, inputs):
 
 
 def make_permutation(inputs):
+    import tensorflow_probability as tfp
     b = inputs.shape[0]
     scores = calc_scores(inputs)
     mult = 2 ** 20
@@ -85,6 +86,24 @@ def selective_iter(input_iter):
         x, *attrs = next(input_iter)
         x, attrs = take_slices(x, attrs)
         yield x, *attrs
+
+
+class WrinkleInitializer(tf.keras.initializers.Initializer):
+    def __init__(self, scale=0.1):
+        super().__init__()
+        self.scale = scale
+
+    def __call__(self, shape, dtype=None):
+        stddev = self.scale / sqrt(shape[-1] * shape[-2])
+        return tf.initializers.random_normal(stddev=stddev)(shape, dtype)
+
+
+def wrinkle_dense(inputs, units, name, squeezed):
+    in_units = inputs.shape[-1]
+    kernel = tf.keras.layers.Dense(
+        in_units * units, name=name+'/weight_gen', kernel_initializer=WrinkleInitializer())(squeezed)
+    kernel = tf.reshape(kernel, [-1, 1, in_units, units])
+    return inputs @ kernel
 
 
 class LayerScaling(tf.keras.layers.Layer):
@@ -218,7 +237,6 @@ def ma_gating(inputs, name):
 
 
 class DyDense(tf.keras.layers.Layer):
-    temperature = tf.Variable(30.0, trainable=False)
 
     def __init__(self, out_channels: int, n_kernels: int, name=None, per_channel=False, use_bias=False, full_bias=False, kernel_initializer='glorot_normal', activation=None, **kwargs):
         assert name is not None
@@ -273,12 +291,15 @@ class DyDense(tf.keras.layers.Layer):
         else:
             self.bias = None
 
+        self.temperature = self.add_weight(
+            trainable=False, initializer=tf.constant_initializer(30.0))
+
     def call(self, inputs, squeezed):
         attention = self.attention_dense(squeezed)
         if self.per_channel:
             attention = self.per_channel_reshape(attention)
         attention = tf.nn.softmax(
-            attention / tf.cast(DyDense.temperature, inputs.dtype), axis=1)
+            attention / tf.cast(self.temperature, inputs.dtype), axis=1)
 
         if self.per_channel:
             kernel = tf.einsum('bkj, kij->bij', attention, self.kernels)
@@ -536,7 +557,9 @@ class TFProcess:
         self.dydense_temp_anneal_steps = self.cfg['model'].get(
             'dydense_temp_anneal_steps', 100_000)
         self.use_dyrelu = self.cfg['model'].get('use_dyrelu', False)
-        self.weight_gen = self.cfg['model'].get('weight_gen', False)
+        self.weight_gen = self.cfg['model']['weight_gen']
+        self.attention_transpose = self.cfg['model']['attention_transpose']
+        self.dytalking_heads = self.cfg['model']['dytalking_heads']
 
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
@@ -549,8 +572,6 @@ class TFProcess:
             self.buckets = 1
         else:
             print(f'Using {self.buckets} nets')
-
-        self.POS_ENC = apm.make_pos_enc()
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -668,9 +689,10 @@ class TFProcess:
             print(gpus)
             tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
                                                        'GPU')
-            #!!!
-            # tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']], True)
+            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
+                                                     True)
             self.strategy = None
+
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
 
@@ -1323,7 +1345,10 @@ class TFProcess:
         if self.dydense_usage != '':
             temperature = 1 + self.dydense_temp_start * max(
                 1 - steps / self.dydense_temp_anneal_steps, 0)
-            DyDense.temperature.assign(tf.cast(temperature, tf.float32))
+            temperature = tf.cast(temperature, tf.float32)
+            for layer in self.model.layers:
+                if isinstance(layer, DyDense):
+                    layer.temperature.assign(temperature)
 
         if self.swa_enabled and steps % self.cfg['training']['swa_steps'] == 0:
             self.update_swa()
@@ -1654,7 +1679,7 @@ class TFProcess:
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v, name=None, use_logit_gate=False, talking_heads=False, inputs=None, use_simple_gating=False):
+    def scaled_dot_product_attention(self, q, k, v, name=None, use_logit_gate=False, talking_heads=False, dytalking_heads=False, inputs=None, use_simple_gating=False, squeezed=None):
         if use_simple_gating:
             assert inputs is not None
 
@@ -1665,15 +1690,23 @@ class TFProcess:
         heads = scaled_attention_logits.shape[1]
         # 0 h 64 64
         if talking_heads:
-
-            gen_weights = self.simple_weights(inputs, name+'/gen_weights')
-            scaled_attention_logits = tf.concat(
-                [gen_weights, scaled_attention_logits], axis=1)
+            if self.attention_transpose:
+                transpose_logits = tf.transpose(
+                    scaled_attention_logits, perm=[0, 1, 3, 2])
+                scaled_attention_logits = tf.concat(
+                    [transpose_logits, scaled_attention_logits], axis=1)
+            if self.weight_gen:
+                gen_weights = self.simple_weights(inputs, name+'/gen_weights')
+                scaled_attention_logits = tf.concat(
+                    [gen_weights, scaled_attention_logits], axis=1)
             scaled_attention_logits = tf.transpose(
                 scaled_attention_logits, perm=[0, 2, 3, 1])
-
-            scaled_attention_logits = tf.keras.layers.Dense(heads, name=name+'/talking_heads1',
-                                                            use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
+            if dytalking_heads:
+                scaled_attention_logits = wrinkle_dense(
+                    scaled_attention_logits, heads, name+'/dy_talking_heads', squeezed)
+            else:
+                scaled_attention_logits = tf.keras.layers.Dense(heads, name=name+'/talking_heads1',
+                                                                use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
             if use_logit_gate:
                 scaled_attention_logits = Gating(
                     name=name+'/logit_gate')(scaled_attention_logits)
@@ -1681,8 +1714,12 @@ class TFProcess:
             if use_logit_gate:
                 attention_weights = Gating(
                     name=name+'/early_mult_gate', additive=False)(attention_weights)
-            attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
-                                                      use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
+            if dytalking_heads:
+                attention_weights = wrinkle_dense(
+                    attention_weights, heads, name+'/dy_talking_heads2', squeezed)
+            else:
+                attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
+                                                          use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
 
             attention_weights = tf.transpose(
                 attention_weights, perm=[0, 3, 1, 2])
@@ -1858,9 +1895,9 @@ class TFProcess:
         k = self.split_heads(k, batch_size, num_heads, depth)
         v = self.split_heads(v, batch_size, num_heads, depth)
 
-        #!!!
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, use_logit_gate=self.use_logit_gate, talking_heads=self.use_talking_heads, inputs=inputs, use_simple_gating=False)
+            q, k, v, name=name, use_logit_gate=self.use_logit_gate, talking_heads=self.use_talking_heads, inputs=inputs, use_simple_gating=False, dytalking_heads=self.dytalking_heads, squeezed=squeezed)
+
         if num_heads > 1:
             scaled_attention = tf.transpose(
                 scaled_attention, perm=[0, 2, 1, 3])
@@ -1869,7 +1906,6 @@ class TFProcess:
         # final dense layer
         output = self.dense_layer(scaled_attention,
                                   emb_size, kernel_initializer=initializer, name=name + "/dense", dydense='o' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
-
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
@@ -1978,11 +2014,6 @@ class TFProcess:
                     flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
                     flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
                     # add positional encoding for each square to the input
-
-                    if False and not self.input_gate:
-                        positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=tf.float32),
-                                                              [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                        flow = tf.concat([flow, positional_encoding], axis=2)
                 else:
                     # redirect flow through encoder blocks
                     flow = tf.transpose(flow, perm=[0, 2, 3, 1])
@@ -2019,6 +2050,21 @@ class TFProcess:
                                             name=name+'policy/attention/wq')(tokens)
             keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
                                          name=name+'policy/attention/wk')(tokens)
+            if True:
+                num_heads = 16
+                depth = self.policy_d_model // num_heads
+                batch_size = tf.shape(queries)[0]
+                q = self.split_heads(queries, batch_size, num_heads, depth)
+                k = self.split_heads(keys, batch_size, num_heads, depth)
+                matmul_qk = tf.matmul(q, k, transpose_b=True)
+                # 0 h 64 64; gate worthwhile attribs
+                matmul_qk = Gating('policy/attention/mult_gating',
+                                   additive=False)(matmul_qk)
+                matmul_qk = tf.reduce_sum(matmul_qk, axis=1)
+            else:
+                # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
+                # Bx64x64 (from 64 queries, 64 keys)
+                matmul_qk = tf.matmul(queries, keys, transpose_b=True)
             # queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
             #                                 name='policy/attention/wq')(flow)
             # keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
@@ -2036,10 +2082,6 @@ class TFProcess:
             # knight offset is added to the other three
             promotion_offsets = promotion_offsets[:,
                                                   :3, :] + promotion_offsets[:, 3:4, :]
-
-            # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
-            # Bx64x64 (from 64 queries, 64 keys)
-            matmul_qk = tf.matmul(queries, keys, transpose_b=True)
 
             # q, r, and b promotions are offset from the default promotion logit (knight)
             # default traversals from penultimate rank to promotion rank

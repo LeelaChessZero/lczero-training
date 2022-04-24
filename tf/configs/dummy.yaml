@@ -1,14 +1,14 @@
 %YAML 1.2
 ---
-name: 'policygate'
+name: 'dydensedummy'
 gpu: 0
 dataset:
-  num_chunks: 5_000_000
+  num_chunks: 100_000
   allow_less_chunks: true
   train_ratio: 0.95
   sort_type: name
-  input: 'C:/Users/micro/leeladata/train/*/'
-  #input: 'C:/Users/micro/leeladata/train/training-run2-test77-20211201-0018/'
+  #input: 'C:/Users/micro/leeladata/train/*/'
+  input: 'C:/Users/micro/leeladata/train/training-run2-test77-20211201-0018/'
   experimental_v5_only_dataset: false
   train_workers: 8
   test_workers: 4
@@ -31,9 +31,9 @@ training:
     test_steps: 2500
     # validation_steps: 5000
     num_test_positions: 131_072
-    train_avg_report_steps: 2500
+    train_avg_report_steps: 10
     total_steps: 500_000
-    checkpoint_steps: 10_000 
+    checkpoint_steps: 10
     
     shuffle_size: 250_000
     warmup_steps: 4000
@@ -117,7 +117,7 @@ model:
     dydense_kernels: 2 # if dydense use
     dydense_pc: false # channelwise: true or false
     use_dyrelu: false # whether to use dyrelu at dff
-    dytalking_heads: false # !!! not implemented yet
+    dytalking_heads: true # !!! not implemented yet
 
     # Buckets
     buckets: 1

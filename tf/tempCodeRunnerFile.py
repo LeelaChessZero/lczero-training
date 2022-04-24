@@ -1,1 +1,1 @@
-def constr
+if True:

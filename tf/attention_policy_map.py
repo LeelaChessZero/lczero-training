@@ -4,8 +4,8 @@ import numpy as np
 move = np.arange(1, 8)
 
 diag = np.array([
-    move    + move*8,
-    move    - move*8,
+    move + move*8,
+    move - move*8,
     move*-1 - move*8,
     move*-1 + move*8
 ])
@@ -51,14 +51,20 @@ def make_map():
                     np.int32(
                         np.concatenate((
                             orthog[0][:7-j], orthog[2][:j], orthog[1][:i], orthog[3][:7-i],
-                            diag[0][:np.min((7-i, 7-j))], diag[3][:np.min((7-i, j))],
-                            diag[1][:np.min((i, 7-j))], diag[2][:np.min((i, j))],
-                            knight[0] if i < 7 and j < 6 else [], knight[1] if i > 0 and j < 6 else [],
-                            knight[2] if i > 1 and j < 7 else [], knight[3] if i > 1 and j > 0 else [],
-                            knight[4] if i > 0 and j > 1 else [], knight[5] if i < 7 and j > 1 else [],
-                            knight[6] if i < 6 and j > 0 else [], knight[7] if i < 6 and j < 7 else [],
+                            diag[0][:np.min((7-i, 7-j))
+                                    ], diag[3][:np.min((7-i, j))],
+                            diag[1][:np.min((i, 7-j))
+                                    ], diag[2][:np.min((i, j))],
+                            knight[0] if i < 7 and j < 6 else [
+                            ], knight[1] if i > 0 and j < 6 else [],
+                            knight[2] if i > 1 and j < 7 else [
+                            ], knight[3] if i > 1 and j > 0 else [],
+                            knight[4] if i > 0 and j > 1 else [
+                            ], knight[5] if i < 7 and j > 1 else [],
+                            knight[6] if i < 6 and j > 0 else [
+                            ], knight[7] if i < 6 and j < 7 else [],
                             pawn_promotion[0] if i == 6 and j > 0 else [],
-                            pawn_promotion[1] if i == 6           else [],
+                            pawn_promotion[1] if i == 6 else [],
                             pawn_promotion[2] if i == 6 and j < 7 else [],
                         ))
                     )
@@ -87,7 +93,8 @@ def make_map():
                 pickup_file = pickup_index % 8
                 promotion_file = putdown_index % 8
                 promotion_rank = (putdown_index // 8) - 8
-                z[4096 + pickup_file*24 + (promotion_file*3+promotion_rank), i] = 1
+                z[4096 + pickup_file*24 +
+                    (promotion_file*3+promotion_rank), i] = 1
                 i += ls[j]
                 j += 1
 
