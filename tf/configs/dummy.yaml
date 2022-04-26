@@ -113,11 +113,11 @@ model:
     # Daniel's dynamic designs
     dydense_temp_start: 30 # should probably move to training
     dydense_temp_anneal_steps: 100_000 #!!! slower?
-    dydense_usage: '' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
+    dydense_usage: 'vo' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
     dydense_kernels: 2 # if dydense use
     dydense_pc: false # channelwise: true or false
     use_dyrelu: false # whether to use dyrelu at dff
-    dytalking_heads: true # !!! not implemented yet
+    dytalking_heads: false # !!! not implemented yet
 
     # Buckets
     buckets: 1

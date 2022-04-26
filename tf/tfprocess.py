@@ -247,14 +247,8 @@ class DyDense(tf.keras.layers.Layer):
         self.out_channels = out_channels
         self.n_kernels = n_kernels
         self.kernel_initializer = kernel_initializer
-        self.activation = tf.keras.activations.get(
-            activation) if isinstance(activation, str) else activation
-        self.ln = tf.keras.layers.LayerNormalization(name=self.name+'/ln')
 
     def build(self, input_shape):
-        self.attention_dense = tf.keras.layers.Dense(self.n_kernels * self.out_channels if
-                                                     self.per_channel else self.n_kernels, kernel_initializer='zeros', name=self.name+'/attention_dense')
-
         self.in_channels = input_shape[-1]
 
         if self.per_channel:
@@ -292,10 +286,9 @@ class DyDense(tf.keras.layers.Layer):
             self.bias = None
 
         self.temperature = self.add_weight(
-            trainable=False, initializer=tf.constant_initializer(30.0))
+            trainable=False, initializer=tf.constant_initializer(30.0), name=self.name+'/temperature')
 
-    def call(self, inputs, squeezed):
-        attention = self.attention_dense(squeezed)
+    def call(self, inputs, attention):
         if self.per_channel:
             attention = self.per_channel_reshape(attention)
         attention = tf.nn.softmax(
@@ -308,8 +301,8 @@ class DyDense(tf.keras.layers.Layer):
                 self.kernels, [self.n_kernels, self.in_channels * self.out_channels])
             kernel = attention @ kernels
             # now has batch dim at start
-            kernel = tf.keras.layers.Reshape(
-                [self.in_channels, self.out_channels])(kernel)
+            kernel = tf.reshape(
+                kernel, [-1, self.in_channels, self.out_channels])
 
         out = inputs @ kernel
         if self.use_bias:
@@ -324,9 +317,23 @@ class DyDense(tf.keras.layers.Layer):
                     bias = tf.expand_dims(bias, 1)
 
             out = out + bias
-        if self.activation is not None:
-            out = self.activation(out)
-        return self.ln(out)
+        return out
+
+
+def dydense(inputs, squeezed, out_channels, n_kernels, name=None, activation=None, **kwargs):
+    attention_sz = n_kernels * \
+        out_channels if kwargs.get('per_channel') else n_kernels
+    attention = tf.keras.layers.Dense(attention_sz,
+                                      kernel_initializer='zeros', name=name+'/attention_dense')(squeezed)
+    activation = tf.keras.activations.get(
+        activation) if isinstance(activation, str) else activation
+    ln = tf.keras.layers.LayerNormalization(name=name+'/ln')
+    out = DyDense(out_channels, n_kernels,
+                  name=name, **kwargs)(inputs, attention)
+    if activation is not None:
+        out = activation(out)
+    out = ln(out)
+    return out
 
 
 class DyRelu(tf.keras.layers.Layer):
@@ -1827,7 +1834,7 @@ class TFProcess:
             x.shape[-1], name=name+'/out_dense', use_bias=False)(output)
         return output
 
-    def dense_layer(self, inputs, sz, *, name: str, squeezed=None, dydense: bool = False, dydense_kernels: int = None,
+    def dense_layer(self, inputs, sz, *, name: str, squeezed=None, use_dydense: bool = False, dydense_kernels: int = None,
                     dydense_per_channel: bool = None, gating: bool = None, **kwargs):
 
         dyrelu = kwargs.get('activation') == 'dyrelu'
@@ -1836,7 +1843,7 @@ class TFProcess:
         if dyrelu or linear_scale:
             kwargs['activation'] = None
 
-        if dydense or linear_scale or dyrelu:
+        if use_dydense or linear_scale or dyrelu:
             assert squeezed is not None
             '''
             if squeezed is None:
@@ -1851,17 +1858,17 @@ class TFProcess:
         if gating:
             kwargs['use_bias'] = False
 
-        if dydense:
+        if use_dydense:
             if dydense_kernels is None:
                 print(
-                    f'Warning, dydense_kernels not provided in dense_layer {name}, using default {self.dydense_kernels=}')
+                    f'INFO: dydense_kernels not provided in dense_layer {name}, using default {self.dydense_kernels=}')
             dydense_kernels = self.dydense_kernels
             if dydense_per_channel is None:
                 print(
-                    f'Warning, dydense_per_channel not provided in dense_layer {name}, using default {self.dydense_pc=}')
+                    f'INFO: dydense_per_channel not provided in dense_layer {name}, using default {self.dydense_pc=}')
                 dydense_per_channel = self.dydense_pc
-            out = DyDense(sz, name=name, n_kernels=dydense_kernels,
-                          per_channel=dydense_per_channel, **kwargs)(inputs, squeezed=squeezed)
+            out = dydense(inputs, squeezed, sz, name=name, n_kernels=dydense_kernels,
+                          per_channel=dydense_per_channel, **kwargs)
         else:
             out = tf.keras.layers.Dense(sz, name=name, **kwargs)(inputs)
 
@@ -1884,11 +1891,11 @@ class TFProcess:
         inputs = DyRelu(name=name+'/input_embed/dyrelu')(inputs)
         '''
         q = self.dense_layer(inputs,
-                             d_model,  kernel_initializer='glorot_normal', name=name + '/wq', dydense='q' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+                             d_model,  kernel_initializer='glorot_normal', name=name + '/wq', use_dydense='q' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         k = self.dense_layer(inputs,
-                             d_model, kernel_initializer='glorot_normal', name=name + '/wk', dydense='k' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+                             d_model, kernel_initializer='glorot_normal', name=name + '/wk', use_dydense='k' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         v = self.dense_layer(inputs,
-                             d_model, kernel_initializer=initializer, name=name + '/wv', dydense='v' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+                             d_model, kernel_initializer=initializer, name=name + '/wv', use_dydense='v' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
         q = self.split_heads(q, batch_size, num_heads, depth)
@@ -1905,15 +1912,15 @@ class TFProcess:
                 (-1, d_model))(scaled_attention)
         # final dense layer
         output = self.dense_layer(scaled_attention,
-                                  emb_size, kernel_initializer=initializer, name=name + "/dense", dydense='o' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+                                  emb_size, kernel_initializer=initializer, name=name + "/dense", use_dydense='o' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size, dff, initializer, name, squeezed=None):
         activation = 'dyrelu' if self.use_dyrelu else self.DEFAULT_ACTIVATION
         dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=activation,
-                                  name=name + "/dense1", dydense='1' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
-        return self.dense_layer(dense1, emb_size, kernel_initializer=initializer, name=name + "/dense2", dydense='2' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+                                  name=name + "/dense1", use_dydense='1' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
+        return self.dense_layer(dense1, emb_size, kernel_initializer=initializer, name=name + "/dense2", use_dydense='2' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
 
     def encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
         # DeepNorm
