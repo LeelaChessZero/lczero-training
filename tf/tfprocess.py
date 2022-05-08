@@ -31,6 +31,37 @@ from net import Net
 from math import sqrt
 
 
+def rank_weight_init(in_channels, out_channels):
+    '''
+    Initializes a weight matrix for rank/file-based weights
+    Ones are placed where a square is between two other squares, and where the channels line up
+    (channels should communicate, but not initialized that way)
+    The weights should be shared between all 8 ranks/files
+    '''
+    assert in_channels >= out_channels
+    weights = np.zeros((8, in_channels, out_channels, 8, 8), dtype=np.float32)
+    for i in range(8):
+        for j in range(8):
+            for inner in range(8):
+                # inner between i and j
+                if (inner - i) * (inner - j) < 0:
+                    for channel in range(out_channels):
+                        # in between square should affect attention between squares i and j
+                        weights[inner, channel, channel, i, j] = 1
+    return np.reshape(weights, [8 * in_channels, out_channels * 64])
+
+
+def block_diag(inputs, transpose=False):
+    inputs = [tf.linalg.LinearOperatorFullMatrix(i) for i in inputs]
+    operator = tf.linalg.LinearOperatorBlockDiag(inputs)
+    matrix = operator.to_dense()
+    if transpose:
+        matrix = tf.reshape(matrix, [-1, 8, 8, 8, 8])
+        matrix = tf.transpose(matrix, [0, 2, 1, 4, 3])
+        matrix = tf.reshape(matrix, [-1, 64, 64])
+    return matrix
+
+
 @tf.function()
 def calc_scores(inputs):
     pieces = inputs[:, 0:12]
@@ -42,7 +73,6 @@ def calc_scores(inputs):
     piece_totals = tf.reduce_sum(pieces, axis=-1)
     scores = piece_totals * values
     scores = tf.reduce_sum(scores, axis=-1)
-
     return scores
 
 
@@ -98,11 +128,14 @@ class WrinkleInitializer(tf.keras.initializers.Initializer):
         return tf.initializers.random_normal(stddev=stddev)(shape, dtype)
 
 
-def wrinkle_dense(inputs, units, name, squeezed):
+def wrinkle_dense(inputs, out_units, name, squeezed):
     in_units = inputs.shape[-1]
+    kernel_init = tf.keras.initializers.GlorotNormal()([in_units, out_units])
+    kernel_init = tf.constant_initializer(
+        tf.reshape(kernel_init, [-1]).numpy())
     kernel = tf.keras.layers.Dense(
-        in_units * units, name=name+'/weight_gen', kernel_initializer=WrinkleInitializer())(squeezed)
-    kernel = tf.reshape(kernel, [-1, 1, in_units, units])
+        in_units * out_units, name=name+'/weight_gen', kernel_initializer='zeros', bias_initializer=kernel_init)(squeezed)
+    kernel = tf.reshape(kernel, [-1, 1, in_units, out_units])
     return inputs @ kernel
 
 
@@ -330,9 +363,9 @@ def dydense(inputs, squeezed, out_channels, n_kernels, name=None, activation=Non
     ln = tf.keras.layers.LayerNormalization(name=name+'/ln')
     out = DyDense(out_channels, n_kernels,
                   name=name, **kwargs)(inputs, attention)
+    out = ln(out)
     if activation is not None:
         out = activation(out)
-    out = ln(out)
     return out
 
 
@@ -525,7 +558,7 @@ class TFProcess:
         self.root_dir = os.path.join(self.cfg['training']['path'],
                                      self.cfg['name'])
 
-        # Network structure
+        # NETWORK STRUCTURE
         self.RESIDUAL_FILTERS = self.cfg['model']['filters']
         self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
         self.SE_ratio = self.cfg['model']['se_ratio']
@@ -541,18 +574,25 @@ class TFProcess:
             'moves_left_embedding_size', 8)
         self.encoder_layers = self.cfg['model'].get('encoder_layers', 1)
         self.encoder_heads = self.cfg['model'].get('encoder_heads', 4)
-        self.encoder_d_model = self.cfg['model'].get(
-            'encoder_d_model', self.RESIDUAL_FILTERS)
+        self.kq_heads = self.cfg['model'].get('kq_heads', self.encoder_heads)
+        self.inner_heads = self.cfg['model'].get(
+            'inner_heads', self.encoder_heads)
+        '''
+        self.v_heads = self.cfg['model'].get('v_heads', self.encoder_heads)
+        self.qk_d_model = self.cfg['model'].get(
+            'qk_d_model', self.RESIDUAL_FILTERS)
+        self.v_d_model = self.cfg['model'].get(
+            'v_d_model', self.RESIDUAL_FILTERS)
+        '''
+        self.encoder_d_model = self.cfg['model'].get('encoder_d_model', 256)
         self.encoder_dff = self.cfg['model'].get(
             'encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
         self.policy_d_model = self.cfg['model'].get(
             'policy_d_model', self.RESIDUAL_FILTERS)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
-
-        self.use_logit_gate = self.cfg['model']['logit_gate']
-        self.use_talking_heads = self.cfg['model']['talking_heads']
         self.gating_everywhere = self.cfg['model']['gating_everywhere']
 
+        # Dynamic stuff
         dydense_usage = self.cfg['model'].get('dydense_usage', '')
         assert isinstance(
             dydense_usage, str), f'dydense_usage must be a string but is {dydense_usage}'
@@ -568,10 +608,39 @@ class TFProcess:
         self.attention_transpose = self.cfg['model']['attention_transpose']
         self.dytalking_heads = self.cfg['model']['dytalking_heads']
 
+        # Training
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
+
+        # Logit processing
+        self.use_logit_gate = self.cfg['model']['logit_gate']
+        self.use_talking_heads = self.cfg['model']['talking_heads']
+
+        # Fullgen
+        self.use_fullgen = self.cfg['model'].get('use_fullgen', False)
+        self.use_fullgen_scaling = self.cfg['model'].get(
+            'use_fullgen_scaling', False)
+        assert not self.use_fullgen_scaling or self.use_fullgen, 'use_fullgen_scaling requires use_fullgen'
+        self.fullgen_hidden_channels = self.cfg['model'].get(
+            'fullgen_hidden_channels')
+        self.fullgen_hidden_sz = self.cfg['model'].get('fullgen_hidden_sz')
+        self.fullgen_out_maps = self.cfg['model'].get('fullgen_out_maps')
+        self.fullgen_history = self.cfg['model'].get('fullgen_history', 1)
+        self.fullgen_relu = self.cfg['model'].get(
+            'fullgen_relu', False)
+        if self.fullgen_relu:
+            print(
+                'Warning, fullgen_relu is True, this is not recommended because it is bad ._.')
+
+        # Policy fullgen
+        self.use_policy_fullgen = self.cfg['model'].get(
+            'use_policy_fullgen', False)
+        self.policy_fullgen_hidden_channels = self.cfg['model'].get(
+            'policy_fullgen_hidden_channels')
+        self.policy_fullgen_hidden_sz = self.cfg['model'].get(
+            'policy_fullgen_hidden_sz')
 
         self.buckets = self.cfg['model'].get('buckets', None)
         if self.buckets is None:
@@ -714,13 +783,17 @@ class TFProcess:
                 train_dataset)
         else:
             self.train_dataset = train_dataset
-        self.train_iter = selective_iter(iter(self.train_dataset))
+        self.train_iter = iter(self.train_dataset)
+        if self.buckets > 1:
+            self.train_iter = selective_iter(self.train_iter)
         if self.strategy is not None:
             self.test_dataset = self.strategy.experimental_distribute_dataset(
                 test_dataset)
         else:
             self.test_dataset = test_dataset
-        self.test_iter = selective_iter(iter(self.test_dataset))
+        self.test_iter = iter(self.test_dataset)
+        if self.buckets > 1:
+            self.test_iter = selective_iter(self.test_iter)
         if self.strategy is not None and validation_dataset is not None:
             self.validation_dataset = self.strategy.experimental_distribute_dataset(
                 validation_dataset)
@@ -975,7 +1048,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def simple_weights(self, inputs, name, compress_sz=8, n_inner=8):
+    def simple_weights(self, inputs, name: str, compress_sz: int = 8, n_inner: int = 8):
         compressed = tf.keras.layers.Dense(
             compress_sz * n_inner, name=name+'/compress')(inputs)
         compressed = tf.keras.layers.ReLU()(compressed)
@@ -989,7 +1062,7 @@ class TFProcess:
 
         return tf.concat([weights, trans_weights], axis=1)
 
-    def replace_weights(self, proto_filename, ignore_errors=False):
+    def replace_weights(self, proto_filename: str, ignore_errors: bool = False):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -1081,7 +1154,7 @@ class TFProcess:
             print("Restoring from {0}".format(self.manager.latest_checkpoint))
             self.checkpoint.restore(self.manager.latest_checkpoint)
 
-    def process_loop(self, batch_size, test_batches, batch_splits=1):
+    def process_loop(self, batch_size: int, test_batches: int, batch_splits: int = 1):
         if self.swa_enabled:
             # split half of test_batches between testing regular weights and SWA weights
             test_batches //= 2
@@ -1137,7 +1210,6 @@ class TFProcess:
 
     @tf.function()
     def process_inner_loop(self, x, y, z, q, m):
-
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
             policy = outputs[0]
@@ -1197,7 +1269,7 @@ class TFProcess:
         ]
         return metrics, new_grads
 
-    def apply_grads(self, grads, effective_batch_splits):
+    def apply_grads(self, grads, effective_batch_splits: int):
         grads = [
             g[0] for g in self.orig_optimizer.gradient_aggregator(
                 zip(grads, self.model.trainable_weights))
@@ -1213,7 +1285,7 @@ class TFProcess:
         return grad_norm
 
     @tf.function()
-    def strategy_apply_grads(self, grads, effective_batch_splits):
+    def strategy_apply_grads(self, grads, effective_batch_splits: int):
         grad_norm = self.strategy.run(self.apply_grads,
                                       args=(grads, effective_batch_splits))
         grad_norm = self.strategy.reduce(tf.distribute.ReduceOp.MEAN,
@@ -1229,7 +1301,7 @@ class TFProcess:
     def strategy_merge_grads(self, grads, new_grads):
         return self.strategy.run(self.merge_grads, args=(grads, new_grads))
 
-    def train_step(self, steps, batch_size, batch_splits):
+    def train_step(self, steps: int, batch_size: int, batch_splits: int):
         # need to add 1 to steps because steps will be incremented after gradient update
         if (steps +
                 1) % self.cfg['training']['train_avg_report_steps'] == 0 or (
@@ -1314,7 +1386,7 @@ class TFProcess:
                 metric.reset()
         return steps
 
-    def process(self, batch_size, test_batches, batch_splits):
+    def process(self, batch_size: int, test_batches: int, batch_splits: int):
         # Get the initial steps value before we do a training step.
         steps = self.global_step.read_value()
 
@@ -1412,7 +1484,7 @@ class TFProcess:
             tf.profiler.experimental.stop()
             self.profiling_start_step = None
 
-    def calculate_swa_summaries(self, test_batches, steps):
+    def calculate_swa_summaries(self, test_batches: int, steps: int):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
@@ -1470,7 +1542,7 @@ class TFProcess:
         ]
         return metrics
 
-    def calculate_test_summaries(self, test_batches, steps):
+    def calculate_test_summaries(self, test_batches: int, steps: int):
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
@@ -1502,7 +1574,7 @@ class TFProcess:
                   end='')
         print()
 
-    def calculate_swa_validations(self, steps):
+    def calculate_swa_validations(self, steps: int):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
@@ -1513,7 +1585,7 @@ class TFProcess:
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    def calculate_test_validations(self, steps):
+    def calculate_test_validations(self, steps: int):
         for metric in self.test_metrics:
             metric.reset()
         for (x, y, z, q, m) in self.validation_dataset:
@@ -1538,7 +1610,7 @@ class TFProcess:
         print()
 
     @tf.function()
-    def compute_update_ratio(self, before_weights, after_weights, steps):
+    def compute_update_ratio(self, before_weights, after_weights, steps: int):
         """Compute the ratio of gradient norm to weight norm.
 
         Adapted from https://github.com/tensorflow/minigo/blob/c923cd5b11f7d417c9541ad61414bf175a84dc31/dual_net.py#L567
@@ -1574,7 +1646,7 @@ class TFProcess:
                        (1. / (num + 1.)))
         self.swa_count.assign(min(num + 1., self.swa_max_n))
 
-    def save_swa_weights(self, filename):
+    def save_swa_weights(self, filename: str):
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
@@ -1582,14 +1654,14 @@ class TFProcess:
         for (old, w) in zip(backup, self.model.weights):
             w.assign(old)
 
-    def save_leelaz_weights(self, filename):
+    def save_leelaz_weights(self, filename: str):
         numpy_weights = []
         for weight in self.model.weights:
             numpy_weights.append([weight.name, weight.numpy()])
         self.net.fill_net_v2(numpy_weights)
         self.net.save_proto(filename)
 
-    def batch_norm(self, input, name, scale=False):
+    def batch_norm(self, input, name: str, scale: bool = False):
         if self.renorm_enabled:
             clipping = {
                 "rmin": 1.0 / self.renorm_max_r,
@@ -1615,7 +1687,7 @@ class TFProcess:
                 virtual_batch_size=self.virtual_batch_size,
                 name=name)(input)
 
-    def squeeze_excitation(self, inputs, channels, name):
+    def squeeze_excitation(self, inputs, channels: int, name):
         assert channels % self.SE_ratio == 0
 
         pooled = tf.keras.layers.GlobalAveragePooling2D(
@@ -1648,7 +1720,7 @@ class TFProcess:
         return tf.keras.layers.Activation(self.DEFAULT_ACTIVATION)(self.batch_norm(
             conv, name=name + '/bn', scale=bn_scale))
 
-    def residual_block(self, inputs, channels, name):
+    def residual_block(self, inputs, channels: int, name: str):
         conv1 = tf.keras.layers.Conv2D(channels,
                                        3,
                                        use_bias=False,
@@ -1679,14 +1751,14 @@ class TFProcess:
             [inputs, out2]))
 
     @staticmethod
-    def split_heads(inputs, batch_size, num_heads, depth):
+    def split_heads(inputs, batch_size: int, num_heads: int, depth: int):
         if num_heads < 2:
             return inputs
         reshaped = tf.reshape(inputs, (batch_size, 64, num_heads, depth))
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v, name=None, use_logit_gate=False, talking_heads=False, dytalking_heads=False, inputs=None, use_simple_gating=False, squeezed=None):
+    def scaled_dot_product_attention(self, q, k, v, name: str = None, use_logit_gate: bool = False, talking_heads: bool = False, dytalking_heads=False, inputs=None, use_simple_gating=False, squeezed=None):
         if use_simple_gating:
             assert inputs is not None
 
@@ -1702,12 +1774,20 @@ class TFProcess:
                     scaled_attention_logits, perm=[0, 1, 3, 2])
                 scaled_attention_logits = tf.concat(
                     [transpose_logits, scaled_attention_logits], axis=1)
-            if self.weight_gen:
-                gen_weights = self.simple_weights(inputs, name+'/gen_weights')
-                scaled_attention_logits = tf.concat(
-                    [gen_weights, scaled_attention_logits], axis=1)
+
             scaled_attention_logits = tf.transpose(
                 scaled_attention_logits, perm=[0, 2, 3, 1])
+
+            if self.use_fullgen:
+                self.fullgen_past_weights.append(self.fullgen(
+                    inputs, self.fullgen_hidden_channels, self.fullgen_hidden_sz, self.fullgen_out_maps, name=name+'/fullgen'))
+                num_take = max(self.fullgen_history,
+                               len(self.fullgen_past_weights))
+                combined_fullgen_weights = tf.concat(
+                    self.fullgen_past_weights[-num_take:], axis=-1)
+                scaled_attention_logits = tf.concat(
+                    [combined_fullgen_weights, scaled_attention_logits], axis=-1)
+
             if dytalking_heads:
                 scaled_attention_logits = wrinkle_dense(
                     scaled_attention_logits, heads, name+'/dy_talking_heads', squeezed)
@@ -1727,6 +1807,11 @@ class TFProcess:
             else:
                 attention_weights = tf.keras.layers.Dense(heads, name=name+'/talking_heads2',
                                                           use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
+            if self.use_fullgen_scaling:
+                attention_scaling = tf.keras.layers.Dense(
+                    heads, name=name+'/attention_scaling', use_bias=False, kernel_initializer='glorot_normal')(combined_fullgen_weights)
+                attention_weights = (attention_weights *
+                                     tf.nn.sigmoid(attention_scaling) * 2)
 
             attention_weights = tf.transpose(
                 attention_weights, perm=[0, 3, 1, 2])
@@ -1834,7 +1919,7 @@ class TFProcess:
             x.shape[-1], name=name+'/out_dense', use_bias=False)(output)
         return output
 
-    def dense_layer(self, inputs, sz, *, name: str, squeezed=None, use_dydense: bool = False, dydense_kernels: int = None,
+    def dense_layer(self, inputs, sz: int, *, name: str, squeezed=None, use_dydense: bool = False, dydense_kernels: int = None,
                     dydense_per_channel: bool = None, gating: bool = None, **kwargs):
 
         dyrelu = kwargs.get('activation') == 'dyrelu'
@@ -1881,15 +1966,12 @@ class TFProcess:
         return out
 
     # multi-head attention in encoder blocks
-    def mha(self, inputs, emb_size, d_model, num_heads, initializer, name, squeezed=None):
+    def mha(self, inputs, emb_size: int, d_model: int, num_heads: int, initializer, name: str, squeezed=None):
         assert d_model % num_heads == 0
         depth = d_model // num_heads
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
-        '''
-        inputs = >:?"(inputs, d_model, name=name+'/input_embed')
-        inputs = DyRelu(name=name+'/input_embed/dyrelu')(inputs)
-        '''
+
         q = self.dense_layer(inputs,
                              d_model,  kernel_initializer='glorot_normal', name=name + '/wq', use_dydense='q' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         k = self.dense_layer(inputs,
@@ -1916,13 +1998,13 @@ class TFProcess:
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
-    def ffn(self, inputs, emb_size, dff, initializer, name, squeezed=None):
+    def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str, squeezed=None):
         activation = 'dyrelu' if self.use_dyrelu else self.DEFAULT_ACTIVATION
         dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=activation,
                                   name=name + "/dense1", use_dydense='1' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
         return self.dense_layer(dense1, emb_size, kernel_initializer=initializer, name=name + "/dense2", use_dydense='2' in self.dydense_usage, gating=self.gating_everywhere, squeezed=squeezed)
 
-    def encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
+    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
             2. * self.encoder_layers, 0.25), self.model_dtype)
@@ -1932,8 +2014,11 @@ class TFProcess:
             scale=beta, mode='fan_avg', distribution='truncated_normal')
         # multihead attention
         squeezed = tf.reduce_mean(inputs, axis=1)
-        squeezed = tf.keras.layers.Dense(
-            32, activation='relu', name=name+'/squeezed_dense')(squeezed)
+        if self.dytalking_heads:
+            print('WARNING: dytalking_heads will not squeeze squeezed')
+        else:
+            squeezed = tf.keras.layers.Dense(
+                32, activation='relu', name=name+'/squeezed_dense')(squeezed)
         squeezed = tf.keras.layers.BatchNormalization(
             name=name+'/squeezed_dense/bn')(squeezed)
 
@@ -1955,7 +2040,56 @@ class TFProcess:
             epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
         return out2, attn_wts
 
-    def construct_nets(self, inputs, n):
+    def fancy_weights(self, inputs, in_channels: int, out_channels: int, name: str):
+        weights = tf.keras.layers.Dense(
+            2 * in_channels, name=name+'/dense', activation='relu')(inputs)
+        weights = tf.reshape(weights, (-1, 8, 8, 2*in_channels))
+        rank_weights, file_weights = tf.split(weights, 2, axis=-1)
+        # (-1, 8, 8, in_channels) -->  (-1, 8, 8 * in_channels)
+        rank_weights = tf.reshape(rank_weights, (-1, 8, 8 * in_channels))
+
+        # (-1, 8, 8 * in_channels) -->  (-1, 8, 8, out_channels, 64)
+        rank_weights = tf.keras.layers.Dense(
+            out_channels * 64, kernel_initializer=tf.constant_initializer(rank_weight_init(in_channels, out_channels)), use_bias=False)(rank_weights)
+        rank_weights = tf.reshape(rank_weights, (-1, 8, out_channels, 64))
+
+        # Make block diagonal matrix by merging out_channels into batch dim
+        rank_weights = tf.transpose(
+            rank_weights, perm=[0, 2, 1, 3])  # (-1, out_channels, 8, 64)
+        rank_weights = tf.reshape(rank_weights, [-1, 8, 8, 8])
+
+        # split into 8 ranks of attention weights
+        rank_weights = tf.split(rank_weights, 8, axis=1)
+
+        rank_attention = block_diag(rank_weights)
+        rank_attention = tf.reshape(rank_attention, (-1, out_channels, 64, 64))
+        return rank_attention
+
+    def fullgen(self, inputs, hidden_channels: int, hidden_sz: int, out_heads: int, name: str, is_policy=False):
+        compressed = tf.keras.layers.Dense(
+            hidden_channels, name=name+'/compress')(inputs)
+        compressed = tf.reshape(compressed, [-1, 64 * hidden_channels])
+        hidden = tf.keras.layers.Dense(
+            hidden_sz, name=name+'/hidden1_dense', activation='relu')(compressed)
+        hidden = tf.keras.layers.LayerNormalization(
+            name=name+'/hidden1_ln')(hidden)
+        hidden = tf.keras.layers.Dense(
+            hidden_sz, name=name+'/hidden2_dense', activation='relu')(hidden)
+        hidden = tf.keras.layers.LayerNormalization(
+            name=name+'/hidden2_ln')(hidden)
+        if is_policy:
+            weights = tf.keras.layers.Dense(
+                64*64, name=name+'/policy_dense')(hidden)
+            return tf.reshape(weights, [-1, 64, 64])
+        else:
+            weights = self.full_weight_gen_dense(hidden)
+            if self.fullgen_relu:
+                weights = tf.keras.activations.relu(weights)
+            weights = tf.reshape(weights, [-1, 64, 64, out_heads])
+            return weights
+
+    def construct_nets(self, inputs, n: int):
+        assert not self.use_fullgen, "full gen will give trouble with storing past weights"  # !!
         assert n != 1
         # split along batch diml
         inputs_split = tf.split(inputs, n, axis=0)
@@ -1969,7 +2103,7 @@ class TFProcess:
             outputs[i] = tf.concat(outputs[i], axis=0)
         return outputs
 
-    def construct_net(self, inputs, name=''):
+    def construct_net(self, inputs, name: str = ''):
         if name != '' and name[-1] != '/':
             name += '/'
         if self.RESIDUAL_BLOCKS > 0:
@@ -2016,7 +2150,9 @@ class TFProcess:
             # TODO: re-add support for policy encoder blocks
             if self.encoder_layers > 0:
                 # if there are no residual blocks (pure transformer), do some input processing
-
+                if self.use_fullgen:
+                    self.full_weight_gen_dense = tf.keras.layers.Dense(
+                        self.fullgen_out_maps * 64 * 64, name=name+'weight_gen')
                 if self.RESIDUAL_BLOCKS == 0:
                     flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
                     flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
@@ -2034,6 +2170,7 @@ class TFProcess:
                 # !!!
                 # if self.input_gate:
                 flow = ma_gating(flow, name=name+'embedding')
+                self.fullgen_past_weights = []
 
                 for i in range(self.encoder_layers):
                     flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
@@ -2047,6 +2184,12 @@ class TFProcess:
                 flow_ = tf.transpose(flow, perm=[0, 2, 3, 1])
                 flow_ = tf.reshape(flow_, [-1, 64, self.RESIDUAL_FILTERS])
 
+            '''
+            if self.use_policy_fullgen:
+                policy_attn_logits = self.fullgen(flow_, self.policy_fullgen_hidden_channels, self.policy_fullgen_hidden_sz, 1,
+                                                  name=name+'policy/fullgen', is_policy=True)
+            else:
+            '''
             # policy embedding
             tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer='glorot_normal',
                                            kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
@@ -2057,29 +2200,17 @@ class TFProcess:
                                             name=name+'policy/attention/wq')(tokens)
             keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
                                          name=name+'policy/attention/wk')(tokens)
-            if True:
-                num_heads = 16
-                depth = self.policy_d_model // num_heads
-                batch_size = tf.shape(queries)[0]
-                q = self.split_heads(queries, batch_size, num_heads, depth)
-                k = self.split_heads(keys, batch_size, num_heads, depth)
-                matmul_qk = tf.matmul(q, k, transpose_b=True)
-                # 0 h 64 64; gate worthwhile attribs
-                matmul_qk = Gating('policy/attention/mult_gating',
-                                   additive=False)(matmul_qk)
-                matmul_qk = tf.reduce_sum(matmul_qk, axis=1)
-            else:
-                # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
-                # Bx64x64 (from 64 queries, 64 keys)
-                matmul_qk = tf.matmul(queries, keys, transpose_b=True)
-            # queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
-            #                                 name='policy/attention/wq')(flow)
-            # keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
-            #                              name='policy/attention/wk')(flow)
+
+            # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
+            # Bx64x64 (from 64 queries, 64 keys)
+            matmul_qk = tf.matmul(queries, keys, transpose_b=True)
+            # Bx64x64 (64 from-squares, 64 to-squares)
 
             # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
             # constant for scaling
             dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))
+            policy_attn_logits = matmul_qk / dk
+
             promotion_keys = keys[:, -8:, :]
             # queen, rook, bishop, knight order
             promotion_offsets = tf.keras.layers.Dense(4, kernel_initializer='glorot_normal',
@@ -2107,8 +2238,6 @@ class TFProcess:
             # scale the logits by dividing them by sqrt(d_model) to stabilize gradients
             # Bx8x24 (8 from-squares, 3x8 promotions)
             promotion_logits = promotion_logits / dk
-            # Bx64x64 (64 from-squares, 64 to-squares)
-            policy_attn_logits = matmul_qk / dk
 
             attn_wts.append(promotion_logits)
             attn_wts.append(policy_attn_logits)
@@ -2178,12 +2307,7 @@ class TFProcess:
             h_fc5 = None
 
         # attention weights added as optional output for analysis -- ignored by backend
-        if self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
-            if self.moves_left:
-                outputs = [h_fc1, h_fc3, h_fc5, attn_wts]
-            else:
-                outputs = [h_fc1, h_fc3, attn_wts]
-        elif self.moves_left:
+        if self.moves_left:
             outputs = [h_fc1, h_fc3, h_fc5]
         else:
             outputs = [h_fc1, h_fc3]
