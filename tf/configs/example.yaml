@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-name: 'policygate'
+name: 'reluintermediatetalking'
 gpu: 0
 dataset:
   num_chunks: 5_000_000
@@ -20,7 +20,7 @@ training:
     swa_steps: 100
     max_grad_norm: 1.0
     batch_size: 1024
-    num_batch_splits: 1
+    num_batch_splits: 2
     q_ratio: 0
     value_focus_min: 1.0
     value_focus_slope: 0.0
@@ -94,7 +94,11 @@ model:
     moves_left_embedding_size: 8
     encoder_layers: 5                   # number of intermediate attention layers in the policy head
     encoder_heads: 8                     # number of attention heads in encoder layers
-    encoder_d_model: 128                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    #kq_heads: 8
+    #inner_heads: 8
+    #v_heads: 8
+    qk_d_model: 128                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    v_d_model: 128
     encoder_dff: 512                    # size of the largest dense layer in encoder layer ffn
     policy_d_model: 128                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
@@ -103,12 +107,30 @@ model:
     moves_left: 'v1'
     input_type: "canonical_100"
 
+
+
+    # "It's big brain time" -- Markiplier
+    use_fullgen: false # Always recommended
+    fullgen_hidden_channels: 4
+    fullgen_hidden_sz: 128
+    fullgen_out_maps: 4
+    fullgen_history: 1
+    fullgen_relu: false
+    use_fullgen_scaling: false
+    use_antifullgen: false
+
+    # There's no way this works
+    use_policy_fullgen: false # Not recommended
+    policy_fullgen_hidden_channels: 64
+    policy_fullgen_hidden_sz: 1024
+
     # Monroe's magical menagerie
-    talking_heads: true
-    logit_gate: true
-    weight_gen: false
-    attention_transpose: false
+    talking_heads: true # Always recommended
+    logit_gate: true # Always recommended
+    weight_gen: false # Not recommended
+    attention_transpose: false # Not recommended
     gating_everywhere: false
+    split_talking_heads: false
 
     # Daniel's dynamic designs
     dydense_temp_start: 30 # should probably move to training
