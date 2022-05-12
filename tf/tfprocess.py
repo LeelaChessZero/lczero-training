@@ -602,16 +602,6 @@ class TFProcess:
             'moves_left_embedding_size', 8)
         self.encoder_layers = self.cfg['model'].get('encoder_layers', 1)
         self.encoder_heads = self.cfg['model'].get('encoder_heads', 4)
-        self.kq_heads = self.cfg['model'].get('kq_heads', self.encoder_heads)
-        self.inner_heads = self.cfg['model'].get(
-            'inner_heads', self.encoder_heads)
-        '''
-        self.v_heads = self.cfg['model'].get('v_heads', self.encoder_heads)
-        self.qk_d_model = self.cfg['model'].get(
-            'qk_d_model', self.RESIDUAL_FILTERS)
-        self.v_d_model = self.cfg['model'].get(
-            'v_d_model', self.RESIDUAL_FILTERS)
-        '''
         self.encoder_d_model = self.cfg['model'].get('encoder_d_model', 256)
         self.encoder_dff = self.cfg['model'].get(
             'encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
@@ -652,6 +642,8 @@ class TFProcess:
         self.fullgen_out_maps = self.cfg['model'].get('fullgen_out_maps')
         self.use_fullgen_scaling = self.cfg['model'].get(
             'use_fullgen_scaling', False)
+        self.fullgen_history = self.cfg['model'].get('fullgen_history', 1)
+
         self.use_antifullgen = self.cfg['model'].get('use_antifullgen', False)
 
         self.buckets = self.cfg['model'].get('buckets', None)
@@ -1791,10 +1783,13 @@ class TFProcess:
                 scaled_attention_logits, perm=[0, 2, 3, 1])
 
             if self.use_fullgen:
-                full_gen_weights = self.fullgen_weights(
+                fullgen_weights = self.fullgen_weights(
                     inputs, self.fullgen_hidden_channels, self.fullgen_hidden_sz, self.fullgen_out_maps, name=name+'/fullgen')
+                self.fullgen_past_weights.append(fullgen_weights)
+                num_take = min(len(self.fullgen_past_weights),
+                               self.fullgen_history)
                 scaled_attention_logits = tf.concat(
-                    [full_gen_weights, scaled_attention_logits], axis=-1)
+                    self.fullgen_past_weights[-num_take:] + [scaled_attention_logits], axis=-1)
 
             if self.use_split_talking_heads:
                 scaled_attention_logits = SplitTalkingHeads(
@@ -1812,7 +1807,7 @@ class TFProcess:
 
             if self.use_fullgen_scaling:
                 attention_weights = se_like_scale(
-                    full_gen_weights, attention_weights, name=name+'/fullgen_scale')
+                    fullgen_weights, attention_weights, name=name+'/fullgen_scale')
 
             if self.use_split_talking_heads:
                 attention_weights = SplitTalkingHeads(
@@ -2058,6 +2053,7 @@ class TFProcess:
             if self.encoder_layers > 0:
                 # if there are no residual blocks (pure transformer), do some input processing
                 if self.use_fullgen:
+                    self.fullgen_past_weights = []
                     self.full_weight_gen_dense = tf.keras.layers.Dense(
                         self.fullgen_out_maps * 64 * 64, name=name+'weight_gen')
                 if self.RESIDUAL_BLOCKS == 0:
