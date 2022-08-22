@@ -1,19 +1,18 @@
 %YAML 1.2
 ---
-name: 'reluintermediatetalking'
+name: 'example'
 gpu: 0
 dataset:
-  num_chunks: 5_000_000
-  allow_less_chunks: true
+  num_chunks: 6_000_000
+  allow_less_chunks: false
   train_ratio: 0.95
   sort_type: name
-  input: 'C:/Users/micro/leeladata/train/*/'
-  #input: 'C:/Users/micro/leeladata/train/training-run2-test77-20211201-0018/'
+  input: '/home/admin/daniel/leeladata/train/*/'
   experimental_v5_only_dataset: false
-  train_workers: 8
-  test_workers: 4
+  train_workers: 4
+  test_workers: 2
 training:
-    precision: half
+    precision: half # may not work with onnx
     swa: true
     swa_output: true    
     swa_max_n: 10
@@ -32,13 +31,12 @@ training:
     # validation_steps: 5000
     num_test_positions: 131_072
     train_avg_report_steps: 2500
-    total_steps: 500_000
-    checkpoint_steps: 10_000 
-    
-    shuffle_size: 250_000
+    total_steps: 2_000_000
+    checkpoint_steps: 500_000 
+    shuffle_size: 100_000
     warmup_steps: 4000
     mask_legal_moves: true
-    lr_values:
+    lr_values: # schedule is likely outdated
         - 0.2
         - 0.16
         - 0.128
@@ -83,63 +81,56 @@ training:
     value_loss_weight: 1.0
     reg_term_weight: 1.0
     moves_left_loss_weight: 1.0
-    path: 'C:/Users/micro/Documents/GitHub/lczero-attention/networks'
-model:
-    filters: 128                         # Number of filters
-    residual_blocks: 0                   # Number of blocks
-    se_ratio: 8   # Squeeze Excite structural network architecture.                 
-    embedding_size: 128
-    policy_embedding_size: 128
+    path: 'networks'
+model:              
+    embedding_size: 512
+    policy_embedding_size: 512
     value_embedding_size: 32
     moves_left_embedding_size: 8
-    encoder_layers: 5                   # number of intermediate attention layers in the policy head
-    encoder_heads: 8                     # number of attention heads in encoder layers
-    #kq_heads: 8
-    #inner_heads: 8
-    #v_heads: 8
-    qk_d_model: 128                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
-    v_d_model: 128
-    encoder_dff: 512                    # size of the largest dense layer in encoder layer ffn
-    policy_d_model: 128                  # size of the query and key vectors in final attention layer
+    encoder_layers: 10                   # number of intermediate attention layers in the policy head
+    encoder_heads: 8                     # number of attention heads in encoder layers, emb // (32 or 64) recommended
+                                         # with 64 memory is same as embedding, with 32 is double
+    encoder_d_model: 512                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    encoder_dff: 768                    # size of the expansion layer in encoder layer ffn
+    policy_d_model: 512                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
-    policy: 'attention'                  # new option: attention
+                                        # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
     value: 'wdl'
     moves_left: 'v1'
-    input_type: "canonical_100"
+    input_type: 'classic'
 
+    # apparently adds nothing with fullgen, but tests needed
+    arc_encoding: false
 
-
-    # "It's big brain time" -- Markiplier
-    use_fullgen: false # Always recommended
-    fullgen_hidden_channels: 4
-    fullgen_hidden_sz: 128
+    # fullgen is extremely strong, adds 1.2% pol acc to 10x 16h/256/1024dff model
+    use_fullgen: true
+    fullgen_hidden_channels: 32
+    fullgen_hidden_sz: 256
+    fullgen_big_hidden_sz: 256
     fullgen_out_maps: 4
-    fullgen_history: 1
-    fullgen_relu: false
-    use_fullgen_scaling: false
-    use_antifullgen: false
+    fullgen_history: 1 # 1 always recommended
+    fullgen_activation: 'swish' # adds 0.1% pol acc over relu 5x 8h/256/1024dff
 
-    # There's no way this works
-    use_policy_fullgen: false # Not recommended
-    policy_fullgen_hidden_channels: 64
-    policy_fullgen_hidden_sz: 1024
+    # necessary with fullgen, no tests without it yet but certainly very strong
+    talking_heads: true
 
-    # Monroe's magical menagerie
-    talking_heads: true # Always recommended
-    logit_gate: true # Always recommended
-    weight_gen: false # Not recommended
-    attention_transpose: false # Not recommended
-    gating_everywhere: false
-    split_talking_heads: false
+    # DCD with spec 's' is viable, adds 0.5% pol acc to a 5x 8h/256/1024dff
+    use_dcd: false
+    dcd_spec: ''
+    dcd_size: 32 # paper says sqrt(filters), 32 improves 0.2% pol acc against 16 on a 5x 8h/256/1024dff
 
-    # Daniel's dynamic designs
-    dydense_temp_start: 30 # should probably move to training
-    dydense_temp_anneal_steps: 100_000 #!!! slower?
+    # based on dyconv paper, not recommended since
+    # dcd likely better especially with memory ~ embedding_sz^2
+    dydense_temp_start: 30 # starting temperature for dydense
+    dydense_temp_anneal_steps: 200_000 # 200k works well, but maybe switch to exponential decay
     dydense_usage: '' # 'qkvo12' for query, key, value, out, dff1, dff2; must be string
-    dydense_kernels: 2 # if dydense use
+    dydense_kernels: 2 # Number of dydense kernels, params is times this number
     dydense_pc: false # channelwise: true or false
-    use_dyrelu: false # whether to use dyrelu at dff
-    dytalking_heads: false # !!! not implemented yet
 
-    # Buckets
-    buckets: 1
+    # two other dynamic techniques
+    use_dyrelu: false # too slow and improvements too small
+    dytalking_heads: false # no improvement observed, authors saw improvement
+                           # on pretraining task but not downstream tasks
+
+    # was useful but adds nothing with fullgen (maybe because fullgen has bias?)
+    logit_gate: 0 # 1 or 2 for +add/+mult gate for logit/attention, 0 for no gates
