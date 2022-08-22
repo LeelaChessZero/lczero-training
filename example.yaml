@@ -100,7 +100,7 @@ model:
     input_type: 'classic'
 
     # apparently adds nothing with fullgen, but tests needed
-    arc_encoding: False
+    arc_encoding: false
 
     # fullgen is extremely strong, adds 1.2% pol acc to 10x 16h/256/1024dff model
     use_fullgen: true
