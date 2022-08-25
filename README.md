@@ -14,7 +14,7 @@ Pure attention: The pipeline no longer contains any code from the original ResNe
 # Modules
 There are a few modules I've introduced. I only list the apparently useful ones here. For reference, doubling the computation size (i.e., 40% larger embeddings or 100% more layers) seems to add 1.2% policy accuracy at 16h/256/1024dff.
 
-Note that the large expansion ratios of 4x in the models I report here are not as useful in larger models. A 1536dff out performs a 4096dff at 10x 8h/1024.
+Note that the large expansion ratios of 4x in the models I report here are not as useful in larger models. A 1536dff outperforms a 4096dff at 10x 8h/1024.
 
 The main improvement is fullgen, which adds 1.2% policy accuracy to a 10x 16h/256/1024dff model. The other two are talking heads, which is necessary with fullgen but does not as of yet have a control condition to compare to, and DCD/dydense, which are dynamic kernel methods that both seem to add 0.5% ish policy acc at 16h/256/1024dff. However, DCD is faster and much more memory efficient with large embedding sizes.
 

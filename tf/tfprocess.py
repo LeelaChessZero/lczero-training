@@ -30,6 +30,25 @@ import operator
 from net import Net
 from math import sqrt
 
+
+class VariationalGen(tf.keras.layers.Layer):
+    def __init__(self, out_size: int, name: str = None):
+        super().__init__(name=name)
+        self.out_size = out_size
+        self.values_gen = tf.keras.layers.Dense(out_size)
+        self.eps_gen = tf.keras.layers.Dense(out_size)
+
+    def call(self, x, training=None):
+        values = self.values_gen(x)
+        if training:
+            eps = self.eps_gen(x)
+            offsets = eps * tf.random.normal(eps.shape, dtype=eps.dtype)
+            out = values + offsets
+        else:
+            out = values
+        return out
+
+
 def dcd(x, squeezed, out_channels: int, hidden_sz: int = 16, name: str = None, use_bias: bool = False, **kwargs):
     assert name is not None
     kernel = tf.keras.layers.Dense(
@@ -235,7 +254,7 @@ class TFProcess:
         self.embedding_size = self.cfg['model']['embedding_size']
         self.input_gate = self.cfg['model'].get('input_gate')
         self.pol_embedding_size = self.cfg['model'].get(
-            'policy_embedding_size', self.embedding_ize)
+            'policy_embedding_size', self.embedding_size)
         self.val_embedding_size = self.cfg['model'].get(
             'value_embedding_size', 32)
         self.mov_embedding_size = self.cfg['model'].get(
@@ -250,8 +269,8 @@ class TFProcess:
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
 
-        self.logit_gate = self.cfg['model']['logit_gate']
-        self.use_talking_heads = self.cfg['model']['talking_heads']
+        self.logit_gate = self.cfg['model'].get('logit_gate', 0)
+        self.use_talking_heads = self.cfg['model'].get('talking_heads', False)
         dydense_usage = self.cfg['model'].get('dydense_usage', '')
         assert isinstance(
             dydense_usage, str), f'dydense_usage must be a string but is {dydense_usage}'
@@ -264,11 +283,11 @@ class TFProcess:
             'dydense_temp_anneal_steps', 100_000)
         
         self.use_dyrelu = self.cfg['model'].get('use_dyrelu', False)
-        self.use_dcd = self.cfg['model']['use_dcd']
-        self.dcd_spec = self.cfg['model']['dcd_spec']
-        self.dcd_size = self.cfg['model']['dcd_size']
+        self.use_dcd = self.cfg['model'].get('use_dcd', False)
+        self.dcd_spec = self.cfg['model'].get('dcd_spec', '')
+        self.dcd_size = self.cfg['model'].get('dcd_size', 32)
 
-        self.dytalking_heads = self.cfg['model']['dytalking_heads']
+        self.dytalking_heads = self.cfg['model'].get('dytalking_heads', False)
 
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
@@ -1513,6 +1532,7 @@ class TFProcess:
             name=name+'/hidden1_ln')(hidden)
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+'/hidden2_dense', activation=activation)(hidden)
+
         hidden = tf.keras.layers.LayerNormalization(
             name=name+'/hidden2_ln')(hidden)
         weights = self.full_weight_gen_dense(hidden)
@@ -1528,13 +1548,14 @@ class TFProcess:
             self.fullgen_past_weights = []
             self.past_logits = []
             self.full_weight_gen_dense = tf.keras.layers.Dense(
-                self.fullgen_out_maps * 64 * 64, name=name+'weight_gen')
+                self.fullgen_out_maps * 64 * 64, name=name+'weight_gen', use_bias=False)
         
         flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
         flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
         # add positional encoding for each square to the input
         if self.arc_encoding:
-            positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=self.model_dtype),
+            self.POS_ENC = apm.make_pos_enc()
+            positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
                                                             [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
             flow = tf.concat([flow, positional_encoding], axis=2)
 
