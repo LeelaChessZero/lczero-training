@@ -115,7 +115,6 @@ model:
     talking_heads: true
 
     # DCD with spec 's' is viable, adds 0.5% pol acc to a 5x 8h/256/1024dff
-    use_dcd: false
     dcd_spec: ''
     dcd_size: 32 # paper says sqrt(filters), 32 improves 0.2% pol acc against 16 on a 5x 8h/256/1024dff
 

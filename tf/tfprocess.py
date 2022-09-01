@@ -55,9 +55,11 @@ def dcd(x, squeezed, out_channels: int, hidden_sz: int = 16, name: str = None, u
         hidden_sz ** 2, name=name+'/kernel_gen')(squeezed)
     kernel = tf.keras.layers.Reshape([hidden_sz, hidden_sz])(kernel)
     compressed = tf.keras.layers.Dense(
-        hidden_sz, name=name+'/compress_dense')(x)
+        hidden_sz, name=name+'/compress_dense', activation='swish')(x)
     processed = compressed @ kernel
+    processed = tf.keras.activations.get('swish')(processed)
     processed = tf.keras.layers.LayerNormalization(name=name+'/processed_ln')(processed)
+
     decompressed = tf.keras.layers.Dense(
         out_channels, name=name+'/decompress_dense')(processed)
     return decompressed
@@ -283,7 +285,6 @@ class TFProcess:
             'dydense_temp_anneal_steps', 100_000)
         
         self.use_dyrelu = self.cfg['model'].get('use_dyrelu', False)
-        self.use_dcd = self.cfg['model'].get('use_dcd', False)
         self.dcd_spec = self.cfg['model'].get('dcd_spec', '')
         self.dcd_size = self.cfg['model'].get('dcd_size', 32)
 
@@ -1096,28 +1097,40 @@ class TFProcess:
         if steps % self.cfg['training']['total_steps'] == 0 or (
                 'checkpoint_steps' in self.cfg['training']
                 and steps % self.cfg['training']['checkpoint_steps'] == 0):
-            if False:  # !!!
+            if True:  # !!! hack because protobuf is not working
+
+                # Checkpoint the model weights.
                 evaled_steps = steps.numpy()
                 self.manager.save(checkpoint_number=evaled_steps)
                 print("Model saved in file: {}".format(
                     self.manager.latest_checkpoint))
-                path = os.path.join(self.root_dir, self.cfg['name'])
-                leela_path = path + "-" + str(evaled_steps)
-                swa_path = path + "-swa-" + str(evaled_steps)
-                self.net.pb.training_params.training_steps = evaled_steps
-                self.save_leelaz_weights(leela_path)
-                if self.swa_enabled:
-                    self.save_swa_weights(swa_path)
-            else:
-
+                
+                # Save normal weights
+                tf.saved_model.save(self.model_to_save, os.path.join(
+                    self.root_dir, self.cfg['name']) + "-" + str(evaled_steps))
+                
+                # Save swa weights
                 backup = self.read_weights()
                 for (swa, w) in zip(self.swa_weights, self.model.weights):
                     w.assign(swa.read_value())
                 evaled_steps = steps.numpy()
                 tf.saved_model.save(self.model_to_save, os.path.join(
-                    self.root_dir, self.cfg['name']) + "-" + str(evaled_steps))
+                    self.root_dir, self.cfg['name']) + "-swa-" + str(evaled_steps))
                 for (old, w) in zip(backup, self.model.weights):
                     w.assign(old)
+
+
+                if False:
+                    #protobuf is dead
+                    path = os.path.join(self.root_dir, self.cfg['name'])
+                    leela_path = path + "-" + str(evaled_steps)
+                    swa_path = path + "-swa-" + str(evaled_steps)
+                    self.net.pb.training_params.training_steps = evaled_steps
+                    self.save_leelaz_weights(leela_path)
+                    if self.swa_enabled:
+                        self.save_swa_weights(swa_path)
+
+
 
         if self.profiling_start_step is not None and (
                 steps >= self.profiling_start_step +
@@ -1406,27 +1419,6 @@ class TFProcess:
     def dense_layer(self, inputs, sz: int, *, name: str, squeezed=None, use_dydense: bool = False, dydense_kernels: int = None,
                     dydense_per_channel: bool = None, gating: bool = None, **kwargs):
 
-        dyrelu = kwargs.get('activation') == 'dyrelu'
-        linear_scale = kwargs.get('activation') == 'linear_scale'
-        assert not linear_scale, 'linear_scale not implemented yet!'
-        if dyrelu or linear_scale:
-            kwargs['activation'] = None
-
-        if use_dydense or linear_scale or dyrelu:
-            assert squeezed is not None
-            '''
-            if squeezed is None:
-                print(
-                    f'Warning, squeezed needed but not provided in {name}, squeezing input')
-                squeezed = tf.reduce_mean(inputs, axis=1)
-                squeezed = tf.keras.layers.Dense(
-                    32, activation='relu')(squeezed)
-            '''
-
-        # !!! better work this out
-        if gating:
-            kwargs['use_bias'] = False
-
         if use_dydense:
             if dydense_kernels is None:
                 print(
@@ -1441,9 +1433,6 @@ class TFProcess:
         else:
             out = tf.keras.layers.Dense(sz, name=name, **kwargs)(inputs)
 
-        if gating:
-            out = ma_gating(out, name=name)
-
         return out
 
     # multi-head attention in encoder blocks
@@ -1453,7 +1442,7 @@ class TFProcess:
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
 
-        if 's' in self.dcd_spec and self.use_dcd:
+        if 's' in self.dcd_spec:
             inputs = inputs + dcd(inputs, squeezed, emb_size, self.dcd_size, name=name)
 
 
@@ -1481,7 +1470,7 @@ class TFProcess:
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str, squeezed=None):
         activation = 'dyrelu' if self.use_dyrelu else self.DEFAULT_ACTIVATION
-        if self.use_dcd and 'f' in self.dcd_spec:
+        if 'f' in self.dcd_spec:
             inputs = inputs + dcd(inputs, squeezed, emb_size, self.dcd_size, name=name)
         dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=activation,
                                   name=name + "/dense1", use_dydense='1' in self.dydense_usage, squeezed=squeezed)
@@ -1500,7 +1489,7 @@ class TFProcess:
         squeezed = tf.keras.layers.GlobalAveragePooling1D(
             name=name+'/avgpool')(inputs)
         squeezed = tf.keras.layers.Dense(
-            32, activation='relu', name=name+'/squeezed_dense')(squeezed)
+            64, activation='relu', name=name+'/squeezed_dense')(squeezed)
         squeezed = tf.keras.layers.LayerNormalization(
             name=name+'/squeezed_dense/ln')(squeezed)
 
