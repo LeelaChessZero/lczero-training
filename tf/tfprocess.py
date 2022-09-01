@@ -1322,9 +1322,7 @@ class TFProcess:
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v, name: str = None, logit_gate: int = 0, dytalking_heads: bool = False, talking_heads: bool = False, inputs=None, use_simple_gating=False, squeezed=None, X=None):
-        if use_simple_gating:
-            assert inputs is not None
+    def scaled_dot_product_attention(self, q, k, v, name: str = None, logit_gate: int = 0, dytalking_heads: bool = False, talking_heads: bool = False, inputs=None, squeezed=None, X=None):
 
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
@@ -1371,8 +1369,6 @@ class TFProcess:
                 scaled_attention_logits = Gating(
                     name=name+'/logit_gate')(scaled_attention_logits)
             attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-2)
-
-
 
             if logit_gate >= 2:
                 attention_weights = Gating(
@@ -1467,6 +1463,7 @@ class TFProcess:
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str, squeezed=None):
+        activation = self.DEFAULT_ACTIVATION
         if 'f' in self.dcd_spec:
             inputs = inputs + dcd(inputs, squeezed, emb_size, self.dcd_size, name=name)
         dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=activation,

@@ -126,9 +126,10 @@ model:
     dydense_kernels: 2 # Number of dydense kernels, params is times this number
     dydense_pc: false # channelwise: true or false
 
-    # two other dynamic techniques
+    # dynamic talking heads (projection weights based on input)
     dytalking_heads: false # no improvement observed, authors saw improvement
                            # on pretraining task but not downstream tasks
 
     # was useful but adds nothing with fullgen (maybe because fullgen has bias?)
-    logit_gate: 0 # 1 or 2 for +add/+mult gate for logit/attention, 0 for no gates
+    logit_gate: 0 # 1 or 2 or 3 for +add/+mult/+latemult gate for
+                  # logit/attention/projected attention, 0 for no gates
