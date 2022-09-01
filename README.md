@@ -2,6 +2,52 @@
 
 I've added a few features and modules to the training pipeline. Please direct any questions to the Leela Discord server.
 
+# Auxiliary losses (WIP)
+It would be expedient to follow the KataGo paper (https://arxiv.org/abs/1902.10565) to add some auxiliary losses. That paper found that training the model to predict the opponent's response and the final ownership of each piece of territory on the board roughly doubled training speed. In designing auxiliary losses for lc0 we should note several key points:
+
+(1) The self-attention architecture will inevitably and quickly supersede ResNets. This means that we should design our auxiliary losses for the self-attention architecture.
+
+(2) Auxiliary losses must capture information which is both rich and complicated enough that it is difficult to glean through backpropagation and useful to the task.
+
+(3) There are a few types of auxiliary losses to choose from: scalars, per-square information, and, given (1), between-square information.
+
+Because we are training large models, we shouoldn't have to worry about the time it takes to mask squares with no pieces. All of the below would require changes to the training data generation and parsing code.
+
+## Scalars
+What we have now is not very useful for (2).
+
+(a) Value
+
+(b) Moves left
+
+We could also work with one-hot encodings of the number of moves left or something similar, but I don't see a way to improve this. KataGo predicts a pdf over the final score, and this is the closest we have to that.
+
+## Per-square information
+Things get interesting here. With a per-square auxiliary loss we can pass a signal to each square and hopefully speed up training. I am considering the following losses for each square:
+
+(a) The next piece after the current one to occupy the square
+
+(b) The amount of time the piece on this square will stay on the board (it can only be removed on the opponent's turn)
+
+(c) The amount of time the piece on this square will stay on this square
+
+## Between-square information
+The benefit of this type of auxiliary loss is that it works well with the self-attention architecture. We already have
+
+(a) Policy
+
+calculated through self-attention. We could also consider the following: for each square,
+
+(b) The square to which the piece on this square will move to.
+
+(c) The square from which the piece will come that occupies this square next.
+
+These would allow the model to generate connections between squares which are useful in the self-attention step but which suffer a weak signal from the policy loss.
+
+
+
+
+
 # Quality of life
 There are three quality of life improvements: a progress bar, metrics for value and policy accuracy, and pure attention code
 

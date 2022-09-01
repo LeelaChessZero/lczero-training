@@ -537,6 +537,19 @@ class TFProcess:
                     tf.reduce_sum(tf.math.xlogy(softmaxed, softmaxed),
                                   axis=1)))
 
+        def search_loss(target, output, epsilon = 0.005):
+            # output and target both have shape (batch_size, num_outputs)
+            # time to search is roughly 1 / (epsilon + prediction at best move)
+            best_moves = tf.argmax(input=output, axis=1)
+            # output at the best_moves locations
+            output_at_best_moves = tf.gather_nd(output, tf.stack(
+                [tf.range(tf.shape(output)[0]), best_moves], axis=1))
+            
+            # estimated search time
+            search_time = 1.0 / (output_at_best_moves + epsilon)
+            return tf.reduce_mean(search_time)
+
+
         self.policy_entropy_fn = policy_entropy
 
         def policy_uniform_loss(target, output):
@@ -631,6 +644,15 @@ class TFProcess:
                 tf.cast(
                     tf.equal(tf.argmax(input=target, axis=1),
                              tf.argmax(input=output, axis=1)), tf.float32))
+        
+        def confident_accuracy(target, output, threshold=0.6):
+            # mean accuracy as above but over the locations where the output is > 0.5 (confident)
+            output = tf.cast(output, tf.float32)
+            correct_locs = tf.cast(
+                    tf.equal(tf.argmax(input=target, axis=1),
+                             tf.argmax(input=output, axis=1)), tf.float32)
+            confident_locs = tf.greater(tf.reduce_max(target, axis=1), threshold)
+            return tf.reduce_mean(tf.bool_mask(correct_locs, confident_locs))
 
         self.accuracy_fn = accuracy
 
@@ -1454,7 +1476,7 @@ class TFProcess:
         v = self.split_heads(v, batch_size, num_heads, depth)
 
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, logit_gate = self.logit_gate, talking_heads=self.use_talking_heads, inputs=inputs, use_simple_gating=False, dytalking_heads=self.dytalking_heads, squeezed=squeezed, X=inputs)
+            q, k, v, name=name, logit_gate = self.logit_gate, talking_heads=self.use_talking_heads, inputs=inputs, dytalking_heads=self.dytalking_heads, squeezed=squeezed, X=inputs)
 
         # final dense layer
         output = self.dense_layer(scaled_attention,
