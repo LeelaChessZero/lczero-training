@@ -12,7 +12,7 @@ dataset:
   train_workers: 4
   test_workers: 2
 training:
-    precision: half # may not work with onnx
+    precision: single 
     swa: true
     swa_output: true    
     swa_max_n: 10
@@ -127,7 +127,6 @@ model:
     dydense_pc: false # channelwise: true or false
 
     # two other dynamic techniques
-    use_dyrelu: false # too slow and improvements too small
     dytalking_heads: false # no improvement observed, authors saw improvement
                            # on pretraining task but not downstream tasks
 

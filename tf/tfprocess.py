@@ -284,10 +284,8 @@ class TFProcess:
         self.dydense_temp_anneal_steps = self.cfg['model'].get(
             'dydense_temp_anneal_steps', 100_000)
         
-        self.use_dyrelu = self.cfg['model'].get('use_dyrelu', False)
         self.dcd_spec = self.cfg['model'].get('dcd_spec', '')
         self.dcd_size = self.cfg['model'].get('dcd_size', 32)
-
         self.dytalking_heads = self.cfg['model'].get('dytalking_heads', False)
 
         precision = self.cfg['training'].get('precision', 'single')
@@ -1469,7 +1467,6 @@ class TFProcess:
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str, squeezed=None):
-        activation = 'dyrelu' if self.use_dyrelu else self.DEFAULT_ACTIVATION
         if 'f' in self.dcd_spec:
             inputs = inputs + dcd(inputs, squeezed, emb_size, self.dcd_size, name=name)
         dense1 = self.dense_layer(inputs, dff, kernel_initializer=initializer, activation=activation,
