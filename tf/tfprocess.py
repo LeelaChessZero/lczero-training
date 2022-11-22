@@ -1325,7 +1325,7 @@ class TFProcess:
             epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
-                              xavier_norm, name=name + "/ffn", gating=self.ffn_gating)
+                              xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
         out2 = tf.keras.layers.LayerNormalization(
