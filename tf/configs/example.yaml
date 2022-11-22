@@ -97,13 +97,10 @@ model:
     encoder_d_model: 384                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
     encoder_dff: 512                    # size of the expansion layer in encoder layer ffn
     glu: false
-    square_relu_ffn: false
+    square_relu_ffn: true # ALWAYS SUGGESTED
     policy_d_model: 384                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
-    ffn_gating: false
-    ffn_gating_init: 1.0
-
 
     value: 'wdl'
     moves_left: 'v1'
@@ -119,14 +116,5 @@ model:
     smolgen_gen_sz: 192
     smolgen_activation: 'swish'
 
-    # necessary with fullgen, no tests without it yet but certainly very strong
+    # bad considering latency bump
     talking_heads: false
-
- 
-
-    # two other dynamic techniques
-    dytalking_heads: false # no improvement observed, authors saw improvement
-                           # on pretraining task but not downstream tasks
-
-    # was useful but adds nothing with fullgen (maybe because fullgen has bias?)
-    logit_gate: 0 # 1 or 2 for +add/+mult gate for logit/attention, 0 for no gates
