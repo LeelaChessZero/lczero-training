@@ -203,7 +203,7 @@ def main(cmd):
                           tf.string))
         validation_dataset = validation_dataset.map(parse_function)
 
-    if tfprocess.strategy is None:  #Mirrored strategy appends prefetch itself with a value depending on number of replicas
+    if tfprocess.strategy is None:  # Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)
         test_dataset = test_dataset.prefetch(4)
         if validation_dataset is not None:
@@ -215,7 +215,8 @@ def main(cmd):
         test_dataset = test_dataset.with_options(options)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.with_options(options)
-    tfprocess.init(train_dataset, test_dataset, validation_dataset)  # None, None, None
+    tfprocess.init(train_dataset, test_dataset,
+                   validation_dataset)  # None, None, None
 
     tfprocess.restore()
 
@@ -244,8 +245,8 @@ def main(cmd):
 
 
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description=\
-    'Tensorflow pipeline for training Leela Chess.')
+    argparser = argparse.ArgumentParser(
+        description='Tensorflow pipeline for training Leela Chess.')
     argparser.add_argument('--cfg',
                            type=argparse.FileType('r'),
                            help='yaml configuration with training parameters')
@@ -253,6 +254,6 @@ if __name__ == "__main__":
                            type=str,
                            help='file to store weights in')
 
-    #mp.set_start_method('spawn')
+    # mp.set_start_method('spawn')
     main(argparser.parse_args())
     mp.freeze_support()

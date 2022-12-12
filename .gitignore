@@ -106,3 +106,8 @@ venv.bak/
 
 # protobuf stuff
 tf/proto/
+
+# runs
+*.v2
+leelalogs/
+networks/
