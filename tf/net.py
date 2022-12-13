@@ -426,7 +426,7 @@ class Net:
         elif base_layer == 'embedding':
             if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
                 if layers[2].split(':')[0] == 'gate':
-                    pb_name = layers[1]
+                    pb_name = 'ip_{}'.format(layers[1])
             elif layers[1].split(':')[0] == 'kernel':
                 pb_name = 'ip_emb_w'
             elif layers[1].split(':')[0] == 'bias':
