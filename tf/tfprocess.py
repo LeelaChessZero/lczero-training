@@ -165,7 +165,6 @@ class TFProcess:
         policy_head = self.cfg['model'].get('policy', 'attention')
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
-        net_body = self.cfg['model'].get('body', 'convolution')
         input_mode = self.cfg['model'].get('input_type', 'classic')
         default_activation = self.cfg['model'].get(
             'default_activation', 'relu')
