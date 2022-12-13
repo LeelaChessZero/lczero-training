@@ -72,17 +72,6 @@ class ApplyAttentionPolicyMap(tf.keras.layers.Layer):
         return tf.matmul(logits, tf.cast(self.fc1, logits.dtype))
 
 
-class ApplyAttentionPolicyMap(tf.keras.layers.Layer):
-    def __init__(self, **kwargs):
-        super(ApplyAttentionPolicyMap, self).__init__(**kwargs)
-        self.fc1 = tf.constant(apm.make_map())
-
-    def call(self, logits, pp_logits):
-        logits = tf.concat([tf.reshape(logits, [-1, 64 * 64]),
-                            tf.reshape(pp_logits, [-1, 8 * 24])],
-                           axis=1)
-        return tf.matmul(logits, tf.cast(self.fc1, logits.dtype))
-
 class Metric:
     def __init__(self, short_name, long_name, suffix='', **kwargs):
         self.short_name = short_name
