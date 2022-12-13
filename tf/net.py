@@ -424,9 +424,12 @@ class Net:
             else:
                 pb_name = encoder_to_bp(layers[1], weights_name)
         elif base_layer == 'embedding':
-            if layers[1].split(':')[0] == 'kernel':
+            if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
+                if layers[2].split(':')[0] == 'gate':
+                    pb_name = layers[1]
+            elif layers[1].split(':')[0] == 'kernel':
                 pb_name = 'ip_emb_w'
-            else:
+            elif layers[1].split(':')[0] == 'bias':
                 pb_name = 'ip_emb_b'
         elif base_layer == 'smol_weight_gen':
             if layers[1].split(':')[0] == 'kernel':
