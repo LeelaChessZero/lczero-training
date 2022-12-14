@@ -326,6 +326,22 @@ class Net:
 
             return d[w].format(s)
 
+        def mha_smolgen_to_bp(l, w):
+            s = {
+                'compress': 'compress',
+                'hidden1_dense': 'dense1_{}',
+                'hidden1_ln': 'ln1_{}',
+                'gen_from': 'dense2_{}',
+                'gen_from_ln': 'ln2_{}'
+            }
+            if s[l] is None:
+                raise ValueError(
+                    'Unable to decode mha smolgen weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {'kernel': 'w', 'bias': 'b', 'gamma': 'gammas', 'beta': 'betas'}
+
+            return s[l].format(d[w])
+
         def ffn_to_bp(l, w):
             w = w.split(':')[0]
             d = {'kernel': '{}_w', 'bias': '{}_b'}
@@ -399,16 +415,27 @@ class Net:
         elif base_layer.startswith('encoder'):
             encoder_block = int(base_layer.split('_')[1]) - 1
             if layers[1] == 'mha':
-                pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
+                if layers[2] == 'smolgen':
+                    pb_name = 'mha.smolgen.' + mha_smolgen_to_bp(layers[3], weights_name)
+                else:
+                    pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
             elif layers[1] == 'ffn':
                 pb_name = 'ffn.' + ffn_to_bp(layers[2], weights_name)
             else:
                 pb_name = encoder_to_bp(layers[1], weights_name)
         elif base_layer == 'embedding':
-            if layers[1].split(':')[0] == 'kernel':
+            if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
+                if layers[2].split(':')[0] == 'gate':
+                    pb_name = 'ip_{}'.format(layers[1])
+            elif layers[1].split(':')[0] == 'kernel':
                 pb_name = 'ip_emb_w'
-            else:
+            elif layers[1].split(':')[0] == 'bias':
                 pb_name = 'ip_emb_b'
+        elif base_layer == 'smol_weight_gen':
+            if layers[1].split(':')[0] == 'kernel':
+                pb_name = 'smolgen_w'
+            else:
+                pb_name = 'smolgen_b'
 
         return (pb_name, block, encoder_block)
 
@@ -572,9 +599,12 @@ class Net:
                     weights = np.square(weights) - 1e-5
                     name = name.replace('stddev', 'variance')
 
-            if name == 'input/conv2d/kernel:0' and self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                weights[:, 109, :, :] /= 99
+            if self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if name == 'input/conv2d/kernel:0':
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    weights[:, 109, :, :] /= 99
+                elif name == 'embedding/kernel:0':
+                    weights[:, 109] /= 99
 
             pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
 
