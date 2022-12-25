@@ -620,7 +620,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename: str, ignore_errors: False): # False to True is a hack to keep net to model working woth atnb
+    def replace_weights(self, proto_filename: str, ignore_errors: bool = False): # False to True is a hack to keep net to model working with atnb
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
