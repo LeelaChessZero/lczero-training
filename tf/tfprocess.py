@@ -20,6 +20,8 @@
 import numpy as np
 import os
 import tensorflow as tf
+import tensorflow_addons as tfa
+from tensorflow_addons.optimizers.weight_decay_optimizers import (extend_with_decoupled_weight_decay)
 import time
 import bisect
 import lc0_az_policy_map
@@ -142,6 +144,10 @@ class TFProcess:
 
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
+        self.weight_decay = self.cfg['training'].get('weight_decay', 0.0)  #added as part of Nadam needs added pr, code is near line 317
+        self.beta_1 = self.cfg['training'].get('beta_1', 0.9)     #Nadam beta1 default is 0.9
+        self.beta_2 = self.cfg['training'].get('beta_2', 0.999)   #Nadam beta2 default is 0.999
+        self.epsilon = self.cfg['training'].get('epsilon', 1e-07) #Nadam epsilon value
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
 
@@ -261,6 +267,15 @@ class TFProcess:
                 tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
+        elif "," in str(self.cfg['gpu']):
+             active_gpus=[]
+             gpus = tf.config.experimental.list_physical_devices('GPU')
+             for gpu in gpus:
+                 tf.config.experimental.set_memory_growth(gpu, True)
+             for i in self.cfg['gpu'].split(","):
+                 active_gpus.append("GPU:" + i)
+             self.strategy = tf.distribute.MirroredStrategy(active_gpus)
+             tf.distribute.experimental_set_strategy(self.strategy)
         else:
             gpus = tf.config.experimental.list_physical_devices('GPU')
             print(gpus)
@@ -333,8 +348,16 @@ class TFProcess:
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
                 self.optimizer)
+        if self.cfg['training'].get('rmsprop_optimizer'):
+             self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
+        if self.cfg['training'].get('Nadam_optimizer'):
+             self.optimizer = tf.keras.optimizers.Nadam(learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+             if self.weight_decay > 0:
+                 print("using DecoupledWeightDecayExtension")
+                 MyNadamW = extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
+                 self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         if self.cfg['training'].get('lookahead_optimizer'):
-            import tensorflow_addons as tfa
+#Not needed because imported at the top #           import tensorflow_addons as tfa
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
         def correct_policy(target, output):
@@ -597,7 +620,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename: str, ignore_errors: bool = False):
+    def replace_weights(self, proto_filename: str, ignore_errors: bool = False): # False to True is a hack to keep net to model working with atnb
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -993,7 +1016,7 @@ class TFProcess:
 
                 # Save normal weights
                 tf.saved_model.save(self.model_to_save, os.path.join(
-                    self.root_dir, self.cfg['name']) + "-" + str(evaled_steps))
+                    self.root_dir, self.cfg['name']) + "-onnx-" + str(evaled_steps))
 
                 # Save swa weights
                 backup = self.read_weights()
@@ -1001,7 +1024,7 @@ class TFProcess:
                     w.assign(swa.read_value())
                 evaled_steps = steps.numpy()
                 tf.saved_model.save(self.model_to_save, os.path.join(
-                    self.root_dir, self.cfg['name']) + "-swa-" + str(evaled_steps))
+                    self.root_dir, self.cfg['name']) + "-swa-onnx-" + str(evaled_steps))
                 for (old, w) in zip(backup, self.model.weights):
                     w.assign(old)
 
