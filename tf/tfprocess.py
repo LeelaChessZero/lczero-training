@@ -372,6 +372,16 @@ class TFProcess:
             # y_ still has -1 on illegal moves, flush them to 0
             target = tf.nn.relu(target)
             return target, output
+        
+        def reducible_policy_loss(target, output):
+            target, output = correct_policy(target, output)
+            policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.stop_gradient(target), logits=output)
+            target_entropy = tf.math.negative(tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
+            policy_cross_entropy -= target_entropy
+            return tf.reduce_mean(input_tensor=policy_cross_entropy)
+        
+        self.reducible_policy_loss_fn = reducible_policy_loss
 
         def policy_loss(target, output):
             target, output = correct_policy(target, output)
@@ -563,6 +573,8 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
+            Metric('P RL', 'Policy RL'),
+
         ]
         self.train_metrics.extend(accuracy_thresholded_metrics)
         self.time_start = None
@@ -582,6 +594,7 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
+            Metric('P RL', 'Policy RL'),
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
 
@@ -792,6 +805,7 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
+        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -815,6 +829,7 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
+            policy_rl,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -1066,6 +1081,7 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
+        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -1095,6 +1111,8 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
+            policy_rl,
+
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
 
