@@ -1581,8 +1581,8 @@ class TFProcess:
 
         # attention weights added as optional output for analysis -- ignored by backend
         if self.moves_left:
-            outputs = [h_fc1, h_fc3, h_fc5]
+            outputs = [h_fc1, h_fc3, h_fc5, attn_wts]
         else:
-            outputs = [h_fc1, h_fc3]
+            outputs = [h_fc1, h_fc3, attn_wts]
 
         return outputs
