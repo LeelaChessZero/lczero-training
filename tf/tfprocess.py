@@ -140,7 +140,6 @@ class TFProcess:
         self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
         self.glu = self.cfg['model'].get('glu', False)
         self.square_relu_ffn = self.cfg['model'].get('square_relu_ffn', False)
-        self.use_talking_heads = self.cfg['model'].get('talking_heads', False)
 
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
@@ -1115,7 +1114,6 @@ class TFProcess:
 
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
-
         return metrics
 
     @tf.function()
@@ -1255,7 +1253,7 @@ class TFProcess:
         # (batch_size, num_heads, 64, depth)
         return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v, name: str = None, talking_heads: bool = False, inputs=None):
+    def scaled_dot_product_attention(self, q, k, v, name: str = None, inputs=None):
 
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
@@ -1270,20 +1268,7 @@ class TFProcess:
             scaled_attention_logits = scaled_attention_logits + smolgen_weights
 
         # 0 h 64 64
-        if talking_heads:
-            scaled_attention_logits = tf.transpose(
-                scaled_attention_logits, perm=[0, 2, 3, 1])
-
-            scaled_attention_logits = tf.keras.layers.Dense(
-                heads, name=name+'/talking_heads1', use_bias=False, kernel_initializer='glorot_normal')(scaled_attention_logits)
-            attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-2)
-            attention_weights = tf.keras.layers.Dense(
-                heads, name=name+'/talking_heads2', use_bias=False, kernel_initializer='glorot_normal')(attention_weights)
-            attention_weights = tf.transpose(attention_weights, [0, 3, 1, 2])
-
-        else:
-            attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
-
+        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
         output = tf.matmul(attention_weights, v)
 
         # output shape = (b, h, 64, d)
@@ -1318,7 +1303,7 @@ class TFProcess:
         v = self.split_heads(v, batch_size, num_heads, depth)
 
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
-            q, k, v, name=name, talking_heads=self.use_talking_heads, inputs=inputs)
+            q, k, v, name=name, inputs=inputs)
 
         # final dense layer
         output = tf.keras.layers.Dense(
@@ -1335,11 +1320,6 @@ class TFProcess:
         activation = square_relu if self.square_relu_ffn else tf.keras.activations.get(
             self.DEFAULT_ACTIVATION)
         dense1 = activation(dense1)
-
-        if self.glu:
-            dense_glu = tf.keras.layers.Dense(
-                dff, name=name + "/dense_glu", kernel_initializer='xavier')(inputs)
-            dense1 = dense1 * dense_glu
 
         out = tf.keras.layers.Dense(
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)

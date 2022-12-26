@@ -96,7 +96,6 @@ model:
                                          # with 64 memory is same as embedding, with 32 is double
     encoder_d_model: 384                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
     encoder_dff: 512                    # size of the expansion layer in encoder layer ffn
-    glu: false
     square_relu_ffn: true # ALWAYS SUGGESTED
     policy_d_model: 384                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
@@ -114,7 +113,3 @@ model:
     smolgen_hidden_channels: 16
     smolgen_hidden_sz: 192
     smolgen_gen_sz: 192
-    smolgen_activation: 'swish'
-
-    # bad considering latency bump
-    talking_heads: false
