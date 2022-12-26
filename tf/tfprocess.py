@@ -35,6 +35,62 @@ from net import Net
 def square_relu(x):
     return tf.nn.relu(x) ** 2
 
+    
+def make_fast_depthwise_indices(c):
+    # kernel [c, 225]
+    # indices [c, 8, 8, 8, 8]
+    indices = np.zeros([1, 8, 8, 8, 8], dtype=np.int32)
+    for i in range(8):
+        for j in range(8):
+            for k in range(8):
+                for l in range(8):
+                    indices[0, i, j, k, l] = (i - k + 7) * 15 + (j - l + 7)
+    indices = np.tile(indices, [c, 1, 1, 1, 1])
+    indices = np.reshape(indices, [c, 64, 64])
+    indices = tf.constant(indices, dtype=tf.int32)
+    return indices
+
+# constrains fast depthwise to act as if a kxk kernel rather than full 15x15
+class FastDepthwiseConstraint(tf.keras.constraints.Constraint):
+    def __init__(self, kernel_size, **kwargs):
+        super().__init__(**kwargs)
+        self.kernel_size = kernel_size
+
+        # make mask
+        mask = np.ones([kernel_size, kernel_size], dtype=np.float32)
+        padding = (15 - kernel_size) // 2
+        mask = np.pad(mask, ((padding, padding), (padding, padding)))
+        self.mask = np.reshape(mask, [1, 225])
+        self.mask = tf.constant(self.mask, dtype=tf.float32)
+    
+    def __call__(self, w):
+        return w * self.mask
+
+
+class FastDepthwise(tf.keras.layers.Layer):
+    def __init__(self, kernel_size: int, name=None, **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.kernel_size = kernel_size
+    
+    def build(self, input_shape):
+        self.depth = input_shape[-1]
+        init = np.ones([self.depth, 1, 1], dtype=np.float32)
+        init = np.pad(init, ((0, 0), (7, 7), (7, 7)))
+        init = np.reshape(init, [self.depth, 225])
+        self.weight = self.add_weight(name='weight',
+                                        shape=[self.depth, 225],
+                                        initializer=tf.constant_initializer(init),
+                                        constraint=FastDepthwiseConstraint(self.kernel_size),
+                                        trainable=True)
+        self.gather_indices = make_fast_depthwise_indices(input_shape[-1])
+    
+    def call(self, inputs):
+        # inputs [b, 64, c]
+        kernel = tf.gather(self.weight, self.gather_indices, batch_dims = 1)
+
+        #kernel [c, 64, 64]
+        return tf.einsum('bic, cio->boc', inputs, kernel)
+
 
 class Gating(tf.keras.layers.Layer):
     def __init__(self, name=None, additive=True, init_value=None, **kwargs):
@@ -138,7 +194,6 @@ class TFProcess:
             'policy_d_model', self.embedding_size)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
-        self.glu = self.cfg['model'].get('glu', False)
         self.square_relu_ffn = self.cfg['model'].get('square_relu_ffn', False)
 
         precision = self.cfg['training'].get('precision', 'single')
@@ -156,6 +211,10 @@ class TFProcess:
         self.smolgen_hidden_sz = self.cfg['model'].get('smolgen_hidden_sz')
         self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz')
         self.smolgen_activation = self.cfg['model'].get('smolgen_activation')
+
+        # fast depthwise convolution and sqrrelu linear layer before qkv
+        self.use_depthwise_process = self.cfg['model'].get('use_depthwise_process', False)
+
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -1287,6 +1346,15 @@ class TFProcess:
         depth = d_model // num_heads
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
+
+        if self.use_depthwise_process:
+            inputs = tf.keras.layers.Dense(emb_size, name=name+'/process',
+                                        kernel_initializer='glorot_normal', activation=square_relu)(inputs)
+            inputs = tf.keras.layers.LayerNormalization(name=name+'/process_norm')(inputs)
+            
+            # fast depthwise convolution (kernel size 15 is full)
+            depthwise_kernel_size = 9
+            inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
 
         q = tf.keras.layers.Dense(
             d_model, name=name+'/wq', kernel_initializer='glorot_normal')(inputs)
