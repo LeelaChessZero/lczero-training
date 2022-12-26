@@ -415,7 +415,6 @@ class TFProcess:
                  MyNadamW = extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
                  self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         if self.cfg['training'].get('lookahead_optimizer'):
-#Not needed because imported at the top #           import tensorflow_addons as tfa
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
         def correct_policy(target, output):
