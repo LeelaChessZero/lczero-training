@@ -12,6 +12,7 @@ LC0_MINOR_WITH_INPUT_TYPE_3 = 25
 LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_MINOR_WITH_MISH = 29
+LC0_MINOR_WITH_ATTN_BODY = 30
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -51,9 +52,13 @@ class Net:
         self.set_valueformat(value)
         self.set_movesleftformat(moves_left)
         self.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+        # self.set_smolgen_activation(pb.Weights.Activation.SWISH)
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
+        if net == pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT \
+                and self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
 
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
@@ -84,10 +89,43 @@ class Net:
             self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_3
 
     def set_defaultactivation(self, activation):
+        # @todo Figure out how to migrate default activation
         self.pb.format.network_format.default_activation = activation
         if activation == pb.NetworkFormat.DEFAULT_ACTIVATION_MISH:
             if self.pb.min_version.minor < LC0_MINOR_WITH_MISH:
                 self.pb.min_version.minor = LC0_MINOR_WITH_MISH
+
+    def set_smolgen_activation(self, activation):
+        self.pb.weights.smolgen_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def set_ffn_activation(self, activation):
+        self.pb.weights.ffn_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def activation(self, name):
+        if name == "relu":
+            return pb.Weights.Activation.RELU
+        elif name == "tanh":
+            return pb.Weights.Activation.TANH
+        elif name == "sigmoid":
+            return pb.Weights.Activation.SIGMOID
+        elif name == "softmax":
+            return pb.Weights.Activation.SOFTMAX
+        elif name == "selu":
+            return pb.Weights.Activation.SELU
+        elif name == "mish":
+            return pb.Weights.Activation.MISH
+        elif name == "swish":
+            return pb.Weights.Activation.SWISH
+        elif name == "relu_2" or name == "sqrelu":
+            return pb.Weights.Activation.RELU_2
+        else:
+            return pb.Weights.Activation.NONE
 
     def get_weight_amounts(self):
         value_weights = 8

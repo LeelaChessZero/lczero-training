@@ -15,8 +15,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
-
-
+import numpy
 import numpy as np
 import os
 import tensorflow as tf
@@ -243,6 +242,14 @@ class TFProcess:
         else:
             raise ValueError(
                 "Unknown default activation type: {}".format(default_activation))
+
+        if self.encoder_layers > 0:
+            self.net.set_networkformat(
+                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)
+
+        self.net.set_smolgen_activation(self.net.activation(self.smolgen_activation))
+        self.net.set_ffn_activation(self.net.activation(
+            'sqrelu' if self.square_relu_ffn else default_activation))
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -1332,11 +1339,33 @@ class TFProcess:
             epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
         return out2, attn_wts
 
+    def mask(self, x):
+        shape = (1, x.shape[1])
+        # ones = tf.ones_like(x)
+        # zeros = tf.zeros_like(x)
+        # # lower = K.exp(inputs)
+        # # higher = K.exp(1 - inputs)
+        #
+        # outputs = tf.switch(tf.greater(inputs, 1), higher, ones)
+        # outputs = K.switch(K.less_equal(inputs, 0), lower, outputs)
+        # # print(x.numpy())
+        v = numpy.ones(shape)
+        # v = numpy.ones_like(x.shape)
+        # v[0, 0, 0:64] = 1.0
+        # v[0, 0, 0] = 1.0
+        # x[0, 0, 1:] = 0
+        # x[1:, 1:, :] = 0
+        # return v
+        # return tf.multiply(tf.convert_to_tensor(v, np.float32), x)
+        return tf.convert_to_tensor(v, np.float32)
+
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
+        # inputs = tf.keras.layers.Lambda(lambda x: self.mask(x), name=name+'/custom_mask')(inputs)
         compressed = tf.keras.layers.Dense(
             hidden_channels, name=name+'/compress', use_bias=False)(inputs)
         compressed = tf.reshape(compressed, [-1, 64 * hidden_channels])
 
+        # compressed = tf.keras.layers.Lambda(lambda x: self.mask(x), name=name+'/custom_mask')(compressed)
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+'/hidden1_dense', activation=activation)(compressed)
         hidden = tf.keras.layers.LayerNormalization(
@@ -1380,7 +1409,7 @@ class TFProcess:
         for i in range(self.encoder_layers):
             flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
                                                   self.encoder_heads, self.encoder_dff,
-                                                  name=name+'encoder_{}'.format(i + 1), training=True)
+                                                  name=name+'encoder_{}'.format(i + 1), training=False)
             attn_wts.append(attn_wts_l)
 
         flow_ = flow
@@ -1492,8 +1521,8 @@ class TFProcess:
 
         # attention weights added as optional output for analysis -- ignored by backend
         if self.moves_left:
-            outputs = [h_fc1, h_fc3, h_fc5]
+            outputs = [h_fc1, h_fc3, h_fc5, attn_wts]
         else:
-            outputs = [h_fc1, h_fc3]
+            outputs = [h_fc1, h_fc3, attn_wts]
 
         return outputs
