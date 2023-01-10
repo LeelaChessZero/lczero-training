@@ -29,11 +29,15 @@ import attention_policy_map as apm
 import proto.net_pb2 as pb
 from functools import reduce
 import operator
+import functools
 from net import Net
 
 
 def square_relu(x):
     return tf.nn.relu(x) ** 2
+
+def clipped_square_relu(x):
+    return tf.clip_by_value(tf.nn.relu(x), 0, 4) ** 2
 
     
 def make_fast_depthwise_indices(c):
@@ -49,6 +53,44 @@ def make_fast_depthwise_indices(c):
     indices = np.reshape(indices, [c, 64, 64])
     indices = tf.constant(indices, dtype=tf.int32)
     return indices
+
+class ACON(tf.keras.layers.Layer):
+    def __init__(self, name=None, **kwargs):
+        super().__init__(name=name, **kwargs)
+    
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        self.p1s = self.add_weight(name='p1s', shape=[1, 1, channels], initializer=tf.constant_initializer(1), trainable=True)
+        self.p2s = self.add_weight(name='p2s', shape=[1, 1, channels], initializer=tf.constant_initializer(0), trainable=True)
+        self.betas = self.add_weight(name='betas', shape=[1, 1, channels], initializer=tf.constant_initializer(1), trainable=True)
+    
+    def call(self, inputs):
+        a1 = self.p2s * inputs
+        a2 = (self.p1s - self.p2s) * inputs * tf.nn.sigmoid((self.betas * (self.p1s - self.p2s)) * inputs)
+        return a1 + a2
+
+class FastLayerNormalization(tf.keras.layers.Layer):
+    def __init__(self, name=None, center=False, scale=True, **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.center = center
+        self.scale = scale
+    
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        shape = [1] *  (len(input_shape) - 1) + [channels]
+        if self.scale:
+            self.gamma = self.add_weight(name='gamma', shape=shape, initializer=tf.constant_initializer(1), trainable=True)
+        if self.center:
+            self.beta = self.add_weight(name='beta', shape=shape, initializer=tf.constant_initializer(0), trainable=True)
+        
+    def call(self, inputs):
+        inputs = inputs - tf.reduce_mean(inputs)
+        scale_factor = tf.sqrt(tf.reduce_mean(self.gamma ** 2))
+        inputs = inputs * (self.gamma / tf.sqrt(tf.reduce_mean(inputs ** 2) + 1e-5))
+        if self.center:
+            inputs = inputs + self.beta
+        return inputs
+
 
 # constrains fast depthwise to act as if a kxk kernel rather than full 15x15
 class FastDepthwiseConstraint(tf.keras.constraints.Constraint):
@@ -68,11 +110,19 @@ class FastDepthwiseConstraint(tf.keras.constraints.Constraint):
 
 
 class FastDepthwise(tf.keras.layers.Layer):
-    def __init__(self, kernel_size: int, name=None, **kwargs):
+    def __init__(self, kernel_size: int, name=None, use_bias=False, **kwargs):
         super().__init__(name=name, **kwargs)
         self.kernel_size = kernel_size
+        self.use_bias = use_bias
     
     def build(self, input_shape):
+        if len(input_shape) == 4:
+            self.split = True
+        elif len(input_shape) == 3:
+            self.split = False
+        else:
+            raise ValueError('input_shape must have 3 or 4 dims')
+        
         self.depth = input_shape[-1]
         init = np.ones([self.depth, 1, 1], dtype=np.float32)
         init = np.pad(init, ((0, 0), (7, 7), (7, 7)))
@@ -82,15 +132,25 @@ class FastDepthwise(tf.keras.layers.Layer):
                                         initializer=tf.constant_initializer(init),
                                         constraint=FastDepthwiseConstraint(self.kernel_size),
                                         trainable=True)
+        if self.use_bias:
+            self.bias = self.add_weight(name='bias',
+                                        shape=[1, 1, self.depth],
+                                        initializer=tf.constant_initializer(0),
+                                        trainable=True)
         self.gather_indices = make_fast_depthwise_indices(input_shape[-1])
     
     def call(self, inputs):
         # inputs [b, 64, c]
         kernel = tf.gather(self.weight, self.gather_indices, batch_dims = 1)
+        # kernel [c, 64, 64]
 
-        #kernel [c, 64, 64]
-        return tf.einsum('bic, cio->boc', inputs, kernel)
-
+        if self.split:
+            out = tf.einsum('bikc, cio->bokc', inputs, kernel)
+        else:
+            out = tf.einsum('bic, cio->boc', inputs, kernel)
+        if self.use_bias:
+            out += self.bias
+        return out
 
 class Gating(tf.keras.layers.Layer):
     def __init__(self, name=None, additive=True, init_value=None, **kwargs):
@@ -211,6 +271,22 @@ class TFProcess:
         self.smolgen_hidden_sz = self.cfg['model'].get('smolgen_hidden_sz')
         self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz')
         self.smolgen_activation = self.cfg['model'].get('smolgen_activation')
+
+        self.encoder_norm_type = self.cfg['model'].get('encoder_norm_type', 'layer')
+        if self.encoder_norm_type == 'layer':
+            self.encoder_norm = tf.keras.layers.LayerNormalization
+        elif self.encoder_norm_type == 'fastlayer':
+            self.encoder_norm = FastLayerNormalization
+        else:
+            raise ValueError("Unknown encoder norm type: {}. Only 'layer' and 'fastlayer' are supported.".format(self.encoder_norm_type))
+        
+        self.smolgen_norm_type = self.cfg['model'].get('smolgen_norm_type', 'layer')
+        if self.smolgen_norm_type == 'layer':
+            self.smolgen_norm = tf.keras.layers.LayerNormalization
+        elif self.smolgen_norm_type == 'fastlayer':
+            self.smolgen_norm = FastLayerNormalization
+        else:
+            raise ValueError("Unknown smolgen norm type: {}. Only 'layer' and 'fastlayer' are supported.".format(self.smolgen_norm_type))
 
         # fast depthwise convolution and sqrrelu linear layer before qkv
         self.use_depthwise_process = self.cfg['model'].get('use_depthwise_process', False)
@@ -408,10 +484,11 @@ class TFProcess:
                 self.optimizer)
         if self.cfg['training'].get('rmsprop_optimizer'):
              self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
-        if self.cfg['training'].get('Nadam_optimizer'):
+        if self.cfg['training'].get('Nadam_optimizer') or self.cfg['training'].get('nadam_optimizer') or self.cfg['training'].get('nadam') or self.cfg['training'].get('Nadam'):
              self.optimizer = tf.keras.optimizers.Nadam(learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
              if self.weight_decay > 0:
                  print("using DecoupledWeightDecayExtension")
+
                  MyNadamW = extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
                  self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         if self.cfg['training'].get('lookahead_optimizer'):
@@ -1325,6 +1402,7 @@ class TFProcess:
                                                    self.smolgen_gen_sz, name=name+'/smolgen', activation=self.smolgen_activation)
             scaled_attention_logits = scaled_attention_logits + smolgen_weights
 
+
         # 0 h 64 64
         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
         output = tf.matmul(attention_weights, v)
@@ -1348,12 +1426,19 @@ class TFProcess:
 
         if self.use_depthwise_process:
             inputs = tf.keras.layers.Dense(emb_size, name=name+'/process',
-                                        kernel_initializer='glorot_normal', activation=square_relu)(inputs)
-            inputs = tf.keras.layers.LayerNormalization(name=name+'/process_norm')(inputs)
+                                        kernel_initializer='glorot_normal')(inputs)
+            depthwise_kernel_size = 9
+
+            inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
+            inputs = square_relu(inputs)
+
+            inputs = FastLayerNormalization(name=name+'/process_norm')(inputs)
             
             # fast depthwise convolution (kernel size 15 is full)
-            depthwise_kernel_size = 9
-            inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
+            #inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
+
+            
+            # fast depthwise convolution (kernel size 15 is full)
 
         q = tf.keras.layers.Dense(
             d_model, name=name+'/wq', kernel_initializer='glorot_normal')(inputs)
@@ -1386,6 +1471,7 @@ class TFProcess:
 
         activation = square_relu if self.square_relu_ffn else tf.keras.activations.get(
             self.DEFAULT_ACTIVATION)
+        activation = tfa.activations.mish
         dense1 = activation(dense1)
 
         out = tf.keras.layers.Dense(
@@ -1395,7 +1481,7 @@ class TFProcess:
     def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
-            2. * self.encoder_layers, 0.25), self.model_dtype)
+            2. * self.encoder_layers, -0.25), self.model_dtype)
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
@@ -1409,15 +1495,13 @@ class TFProcess:
         attn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = tf.keras.layers.LayerNormalization(
-            epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
+        out1 = self.encoder_norm(name=name+"/norm1", center=False)(inputs + attn_output * alpha)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
                               xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = tf.keras.layers.LayerNormalization(
-            epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
+        out2 = self.encoder_norm(name=name+"/norm2", center=False)(out1 + ffn_output * alpha)
         return out2, attn_wts
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
@@ -1427,14 +1511,13 @@ class TFProcess:
 
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+'/hidden1_dense', activation=activation)(compressed)
-        hidden = tf.keras.layers.LayerNormalization(
-            name=name+'/hidden1_ln')(hidden)
-
+        
+        hidden = self.smolgen_norm(name=name+'/hidden1_norm')(hidden)
         gen_from = tf.keras.layers.Dense(
             heads * gen_sz, name=name+'/gen_from', activation=activation)(hidden)
-        gen_from = tf.keras.layers.LayerNormalization(
-            name=name+'/gen_from_ln')(gen_from)
+        gen_from = self.smolgen_norm(name=name+'/gen_from_norm', center=True)(gen_from)
         gen_from = tf.reshape(gen_from, [-1, heads, gen_sz])
+
         out = self.smol_weight_gen_dense(gen_from)
         return tf.reshape(out, [-1, heads, 64, 64])
 
@@ -1462,9 +1545,9 @@ class TFProcess:
                                      kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                      name=name+'embedding')(flow)
 
-        # !!! input gate
+        
         flow = ma_gating(flow, name=name+'embedding')
-
+    
         for i in range(self.encoder_layers):
             flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
                                                   self.encoder_heads, self.encoder_dff,

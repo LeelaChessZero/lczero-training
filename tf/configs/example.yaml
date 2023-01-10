@@ -108,7 +108,10 @@ model:
     policy_d_model: 384                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
-
+    
+    smolgen_norm_type: 'layer' # OPTIMAL VALUE
+    encoder_norm_type: 'fastlayer' # OPTIMAL VALUE
+    
     value: 'wdl'
     moves_left: 'v1'
     input_type: 'classic'
