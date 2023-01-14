@@ -89,43 +89,42 @@ class Net:
             self.pb.min_version.minor = LC0_MINOR_WITH_INPUT_TYPE_3
 
     def set_defaultactivation(self, activation):
-        # @todo Figure out how to migrate default activation
         self.pb.format.network_format.default_activation = activation
         if activation == pb.NetworkFormat.DEFAULT_ACTIVATION_MISH:
             if self.pb.min_version.minor < LC0_MINOR_WITH_MISH:
                 self.pb.min_version.minor = LC0_MINOR_WITH_MISH
 
     def set_smolgen_activation(self, activation):
-        self.pb.weights.smolgen_activation = activation
+        self.pb.format.network_format.smolgen_activation = activation
         if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
             self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
         return None
 
     def set_ffn_activation(self, activation):
-        self.pb.weights.ffn_activation = activation
+        self.pb.format.network_format.ffn_activation = activation
         if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
             self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
         return None
 
     def activation(self, name):
         if name == "relu":
-            return pb.Weights.Activation.RELU
+            return pb.NetworkFormat.RELU
         elif name == "tanh":
-            return pb.Weights.Activation.TANH
+            return pb.NetworkFormat.TANH
         elif name == "sigmoid":
-            return pb.Weights.Activation.SIGMOID
+            return pb.NetworkFormat.SIGMOID
         elif name == "softmax":
-            return pb.Weights.Activation.SOFTMAX
+            return pb.NetworkFormat.SOFTMAX
         elif name == "selu":
-            return pb.Weights.Activation.SELU
+            return pb.NetworkFormat.SELU
         elif name == "mish":
-            return pb.Weights.Activation.MISH
+            return pb.NetworkFormat.MISH
         elif name == "swish":
-            return pb.Weights.Activation.SWISH
+            return pb.NetworkFormat.SWISH
         elif name == "relu_2" or name == "sqrelu":
-            return pb.Weights.Activation.RELU_2
+            return pb.NetworkFormat.RELU_2
         else:
-            return pb.Weights.Activation.NONE
+            return pb.NetworkFormat.NONE
 
     def get_weight_amounts(self):
         value_weights = 8
