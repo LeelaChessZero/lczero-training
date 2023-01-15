@@ -121,7 +121,7 @@ class Net:
             return pb.NetworkFormat.MISH
         elif name == "swish":
             return pb.NetworkFormat.SWISH
-        elif name == "relu_2" or name == "sqrelu":
+        elif name == "relu_2" or name == "sqrrelu":
             return pb.NetworkFormat.RELU_2
         else:
             return pb.NetworkFormat.NONE
