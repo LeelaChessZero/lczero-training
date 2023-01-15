@@ -147,6 +147,8 @@ class TFProcess:
         self.accuracy_thresholds = self.cfg['training'].get(
             'accuracy_thresholds', [1, 2, 5, 10])
 
+        self.sparse = self.cfg['training'].get('sparse', False)
+
         # Network structure
         self.embedding_size = self.cfg['model']['embedding_size']
         self.input_gate = self.cfg['model'].get('input_gate')
@@ -1027,6 +1029,12 @@ class TFProcess:
             self.last_steps = steps
             for metric in self.train_metrics:
                 metric.reset()
+
+        if self.sparse or steps >= 500_000:  # !!!
+            if not hasattr(self, 'sparsity_patterns'):
+                self.set_sparsity_patterns()
+            self.apply_sparsity()
+
         return steps
 
     def process(self, batch_size: int, test_batches: int, batch_splits: int):
@@ -1595,3 +1603,38 @@ class TFProcess:
             outputs = [h_fc1, h_fc3, attn_wts]
 
         return outputs
+
+    def set_sparsity_patterns(self):
+        sparsity_patterns = {}
+        for layer in self.model.layers:
+            if isinstance(layer, tf.keras.layers.Dense) and 'encoder' in layer.name and "smolgen" not in layer.name:
+                kernel = layer.kernel
+                # 2 out of 4 sparsity pattern
+                in_channels = kernel.shape[0]
+                out_channels = kernel.shape[1]
+
+                kernel_abs = tf.abs(kernel)
+                kernel_abs = tf.reshape(kernel_abs, [-1, 4])
+
+                top_2 = tf.math.top_k(kernel_abs, k=2, sorted=True)
+                second_largest = top_2.values[:, 1:2]
+                comparison = tf.math.greater_equal(kernel_abs, second_largest)
+                comparison = tf.cast(comparison, tf.float32)
+                comparison = tf.reshape(
+                    comparison, [in_channels, out_channels])
+
+                sparsity_patterns[layer.name] = comparison
+
+            # !!! include this?
+            if False and isinstance(layer, RegularizedBatchNormalization):
+                layer.bn.moving_variance.assign(1)
+                layer.bn.moving_mean.assign(0)
+
+        self.sparsity_patterns = sparsity_patterns
+
+    def apply_sparsity(self):
+        assert hasattr(self, 'sparsity_patterns'), 'Sparsity patterns not set'
+        for layer in self.model.layers:
+            if layer.name in self.sparsity_patterns:
+                kernel = layer.kernel
+                kernel.assign(kernel * self.sparsity_patterns[layer.name])
