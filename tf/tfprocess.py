@@ -21,7 +21,8 @@ import numpy as np
 import os
 import tensorflow as tf
 import tensorflow_addons as tfa
-from tensorflow_addons.optimizers.weight_decay_optimizers import (extend_with_decoupled_weight_decay)
+from tensorflow_addons.optimizers.weight_decay_optimizers import (
+    extend_with_decoupled_weight_decay)
 import time
 import bisect
 import lc0_az_policy_map
@@ -33,124 +34,35 @@ import functools
 from net import Net
 
 
+class RegularizedBatchNormalization(tf.keras.layers.Layer):
+    def __init__(self, name=None, mu_loss_factor=.1, sigma_loss_factor=0, **kwargs):
+        self.bn_kwargs = kwargs
+        self.mu_loss_factor = mu_loss_factor
+        self.sigma_loss_factor = sigma_loss_factor
+        super().__init__(name=name)
+
+    def build(self, input_shape):
+        self.bn = tf.keras.layers.BatchNormalization(
+            name=self.name+'/bn', **self.bn_kwargs)
+
+    def call(self, inputs, training=None):
+        epsilon = 1e-5
+        if training:
+            # regularize mean and variance to batch norm values
+            mu, sigma = tf.nn.moments(inputs, axes=[0, 1])
+            mu_error = tf.sqrt(tf.reduce_sum(tf.square(
+                mu - self.bn.moving_mean)) / tf.reduce_sum(self.bn.moving_variance + epsilon))
+
+            #sigma_error = tf.reduce_mean(tf.square(sigma - self.bn.moving_variance)) / tf.reduce_mean(self.bn.moving_variance + epsilon)
+            self.add_loss(mu_error * self.mu_loss_factor)
+            #self.add_loss(sigma_error * self.sigma_loss_factor)
+
+        return self.bn(inputs)
+
+
 def square_relu(x):
     return tf.nn.relu(x) ** 2
 
-def clipped_square_relu(x):
-    return tf.clip_by_value(tf.nn.relu(x), 0, 4) ** 2
-
-    
-def make_fast_depthwise_indices(c):
-    # kernel [c, 225]
-    # indices [c, 8, 8, 8, 8]
-    indices = np.zeros([1, 8, 8, 8, 8], dtype=np.int32)
-    for i in range(8):
-        for j in range(8):
-            for k in range(8):
-                for l in range(8):
-                    indices[0, i, j, k, l] = (i - k + 7) * 15 + (j - l + 7)
-    indices = np.tile(indices, [c, 1, 1, 1, 1])
-    indices = np.reshape(indices, [c, 64, 64])
-    indices = tf.constant(indices, dtype=tf.int32)
-    return indices
-
-class ACON(tf.keras.layers.Layer):
-    def __init__(self, name=None, **kwargs):
-        super().__init__(name=name, **kwargs)
-    
-    def build(self, input_shape):
-        channels = input_shape[-1]
-        self.p1s = self.add_weight(name='p1s', shape=[1, 1, channels], initializer=tf.constant_initializer(1), trainable=True)
-        self.p2s = self.add_weight(name='p2s', shape=[1, 1, channels], initializer=tf.constant_initializer(0), trainable=True)
-        self.betas = self.add_weight(name='betas', shape=[1, 1, channels], initializer=tf.constant_initializer(1), trainable=True)
-    
-    def call(self, inputs):
-        a1 = self.p2s * inputs
-        a2 = (self.p1s - self.p2s) * inputs * tf.nn.sigmoid((self.betas * (self.p1s - self.p2s)) * inputs)
-        return a1 + a2
-
-class FastLayerNormalization(tf.keras.layers.Layer):
-    def __init__(self, name=None, center=False, scale=True, **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.center = center
-        self.scale = scale
-    
-    def build(self, input_shape):
-        channels = input_shape[-1]
-        shape = [1] *  (len(input_shape) - 1) + [channels]
-        if self.scale:
-            self.gamma = self.add_weight(name='gamma', shape=shape, initializer=tf.constant_initializer(1), trainable=True)
-        if self.center:
-            self.beta = self.add_weight(name='beta', shape=shape, initializer=tf.constant_initializer(0), trainable=True)
-        
-    def call(self, inputs):
-        inputs = inputs - tf.reduce_mean(inputs)
-        scale_factor = tf.sqrt(tf.reduce_mean(self.gamma ** 2))
-        inputs = inputs * (self.gamma / tf.sqrt(tf.reduce_mean(inputs ** 2) + 1e-5))
-        if self.center:
-            inputs = inputs + self.beta
-        return inputs
-
-
-# constrains fast depthwise to act as if a kxk kernel rather than full 15x15
-class FastDepthwiseConstraint(tf.keras.constraints.Constraint):
-    def __init__(self, kernel_size, **kwargs):
-        super().__init__(**kwargs)
-        self.kernel_size = kernel_size
-
-        # make mask
-        mask = np.ones([kernel_size, kernel_size], dtype=np.float32)
-        padding = (15 - kernel_size) // 2
-        mask = np.pad(mask, ((padding, padding), (padding, padding)))
-        self.mask = np.reshape(mask, [1, 225])
-        self.mask = tf.constant(self.mask, dtype=tf.float32)
-    
-    def __call__(self, w):
-        return w * self.mask
-
-
-class FastDepthwise(tf.keras.layers.Layer):
-    def __init__(self, kernel_size: int, name=None, use_bias=False, **kwargs):
-        super().__init__(name=name, **kwargs)
-        self.kernel_size = kernel_size
-        self.use_bias = use_bias
-    
-    def build(self, input_shape):
-        if len(input_shape) == 4:
-            self.split = True
-        elif len(input_shape) == 3:
-            self.split = False
-        else:
-            raise ValueError('input_shape must have 3 or 4 dims')
-        
-        self.depth = input_shape[-1]
-        init = np.ones([self.depth, 1, 1], dtype=np.float32)
-        init = np.pad(init, ((0, 0), (7, 7), (7, 7)))
-        init = np.reshape(init, [self.depth, 225])
-        self.weight = self.add_weight(name='weight',
-                                        shape=[self.depth, 225],
-                                        initializer=tf.constant_initializer(init),
-                                        constraint=FastDepthwiseConstraint(self.kernel_size),
-                                        trainable=True)
-        if self.use_bias:
-            self.bias = self.add_weight(name='bias',
-                                        shape=[1, 1, self.depth],
-                                        initializer=tf.constant_initializer(0),
-                                        trainable=True)
-        self.gather_indices = make_fast_depthwise_indices(input_shape[-1])
-    
-    def call(self, inputs):
-        # inputs [b, 64, c]
-        kernel = tf.gather(self.weight, self.gather_indices, batch_dims = 1)
-        # kernel [c, 64, 64]
-
-        if self.split:
-            out = tf.einsum('bikc, cio->bokc', inputs, kernel)
-        else:
-            out = tf.einsum('bic, cio->boc', inputs, kernel)
-        if self.use_bias:
-            out += self.bias
-        return out
 
 class Gating(tf.keras.layers.Layer):
     def __init__(self, name=None, additive=True, init_value=None, **kwargs):
@@ -258,10 +170,14 @@ class TFProcess:
 
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
-        self.weight_decay = self.cfg['training'].get('weight_decay', 0.0)  #added as part of Nadam needs added pr, code is near line 317
-        self.beta_1 = self.cfg['training'].get('beta_1', 0.9)     #Nadam beta1 default is 0.9
-        self.beta_2 = self.cfg['training'].get('beta_2', 0.999)   #Nadam beta2 default is 0.999
-        self.epsilon = self.cfg['training'].get('epsilon', 1e-07) #Nadam epsilon value
+        # added as part of Nadam needs added pr, code is near line 317
+        self.weight_decay = self.cfg['training'].get('weight_decay', 0.0)
+        self.beta_1 = self.cfg['training'].get(
+            'beta_1', 0.9)  # Nadam beta1 default is 0.9
+        self.beta_2 = self.cfg['training'].get(
+            'beta_2', 0.999)  # Nadam beta2 default is 0.999
+        self.epsilon = self.cfg['training'].get(
+            'epsilon', 1e-07)  # Nadam epsilon value
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
 
@@ -272,25 +188,36 @@ class TFProcess:
         self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz')
         self.smolgen_activation = self.cfg['model'].get('smolgen_activation')
 
-        self.encoder_norm_type = self.cfg['model'].get('encoder_norm_type', 'layer')
+        self.encoder_norm_type = self.cfg['model'].get(
+            'encoder_norm_type', 'layer')
         if self.encoder_norm_type == 'layer':
             self.encoder_norm = tf.keras.layers.LayerNormalization
         elif self.encoder_norm_type == 'fastlayer':
             self.encoder_norm = FastLayerNormalization
+        elif self.encoder_norm_type == 'batch':
+            self.encoder_norm = tf.keras.layers.BatchNormalization
+        elif self.encoder_norm_type == 'regbatch':
+            self.encoder_norm = RegularizedBatchNormalization
         else:
-            raise ValueError("Unknown encoder norm type: {}. Only 'layer' and 'fastlayer' are supported.".format(self.encoder_norm_type))
-        
-        self.smolgen_norm_type = self.cfg['model'].get('smolgen_norm_type', 'layer')
+            raise ValueError("Unknown encoder norm type: {}. Only 'layer' and 'fastlayer' and 'batch' and 'regbatch' are supported.".format(
+                self.encoder_norm_type))
+
+        self.smolgen_norm_type = self.cfg['model'].get(
+            'smolgen_norm_type', 'layer')
         if self.smolgen_norm_type == 'layer':
             self.smolgen_norm = tf.keras.layers.LayerNormalization
         elif self.smolgen_norm_type == 'fastlayer':
             self.smolgen_norm = FastLayerNormalization
+        elif self.smolgen_norm_type == 'batch':
+            self.smolgen_norm = tf.keras.layers.BatchNormalization
+        elif self.encoder_norm_type == 'regbatch':
+            self.encoder_norm = RegularizedBatchNormalization
         else:
-            raise ValueError("Unknown smolgen norm type: {}. Only 'layer' and 'fastlayer' are supported.".format(self.smolgen_norm_type))
+            raise ValueError("Unknown smolgen norm type: {}. Only 'layer' and 'fastlayer' and 'batch' and 'regbatch' are supported.".format(
+                self.smolgen_norm_type))
 
-        # fast depthwise convolution and sqrrelu linear layer before qkv
-        self.use_depthwise_process = self.cfg['model'].get('use_depthwise_process', False)
-
+        self.use_sqrrelu_process = self.cfg['model'].get(
+            'use_sqrrelu_process', False)
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -402,14 +329,14 @@ class TFProcess:
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
         elif "," in str(self.cfg['gpu']):
-             active_gpus=[]
-             gpus = tf.config.experimental.list_physical_devices('GPU')
-             for gpu in gpus:
-                 tf.config.experimental.set_memory_growth(gpu, True)
-             for i in self.cfg['gpu'].split(","):
-                 active_gpus.append("GPU:" + i)
-             self.strategy = tf.distribute.MirroredStrategy(active_gpus)
-             tf.distribute.experimental_set_strategy(self.strategy)
+            active_gpus = []
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            for i in self.cfg['gpu'].split(","):
+                active_gpus.append("GPU:" + i)
+            self.strategy = tf.distribute.MirroredStrategy(active_gpus)
+            tf.distribute.experimental_set_strategy(self.strategy)
         else:
             gpus = tf.config.experimental.list_physical_devices('GPU')
             print(gpus)
@@ -483,14 +410,18 @@ class TFProcess:
             self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
                 self.optimizer)
         if self.cfg['training'].get('rmsprop_optimizer'):
-             self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
+            self.optimizer = tf.keras.optimizers.RMSprop(
+                learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
         if self.cfg['training'].get('Nadam_optimizer') or self.cfg['training'].get('nadam_optimizer') or self.cfg['training'].get('nadam') or self.cfg['training'].get('Nadam'):
-             self.optimizer = tf.keras.optimizers.Nadam(learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
-             if self.weight_decay > 0:
-                 print("using DecoupledWeightDecayExtension")
+            self.optimizer = tf.keras.optimizers.Nadam(
+                learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+            if self.weight_decay > 0:
+                print("using DecoupledWeightDecayExtension")
 
-                 MyNadamW = extend_with_decoupled_weight_decay(tf.keras.optimizers.Nadam)
-                 self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+                MyNadamW = extend_with_decoupled_weight_decay(
+                    tf.keras.optimizers.Nadam)
+                self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
+                                          beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
@@ -506,15 +437,16 @@ class TFProcess:
             # y_ still has -1 on illegal moves, flush them to 0
             target = tf.nn.relu(target)
             return target, output
-        
+
         def reducible_policy_loss(target, output):
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
-            target_entropy = tf.math.negative(tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
+            target_entropy = tf.math.negative(
+                tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
             policy_cross_entropy -= target_entropy
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
-        
+
         self.reducible_policy_loss_fn = reducible_policy_loss
 
         def policy_loss(target, output):
@@ -767,7 +699,8 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename: str, ignore_errors: bool = False): # False to True is a hack to keep net to model working with atnb
+    # False to True is a hack to keep net to model working with atnb
+    def replace_weights(self, proto_filename: str, ignore_errors: bool = False):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -1402,7 +1335,6 @@ class TFProcess:
                                                    self.smolgen_gen_sz, name=name+'/smolgen', activation=self.smolgen_activation)
             scaled_attention_logits = scaled_attention_logits + smolgen_weights
 
-
         # 0 h 64 64
         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
         output = tf.matmul(attention_weights, v)
@@ -1424,21 +1356,14 @@ class TFProcess:
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
 
-        if self.use_depthwise_process:
+        #inputs = FastLayerNormalization(name=name+'/norm')(inputs + cool_process(inputs, name=name+'/cool_process'))
+
+        if self.use_sqrrelu_process:
             inputs = tf.keras.layers.Dense(emb_size, name=name+'/process',
-                                        kernel_initializer='glorot_normal')(inputs)
-            depthwise_kernel_size = 9
-
-            inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
+                                           kernel_initializer='glorot_normal')(inputs)
             inputs = square_relu(inputs)
-
-            inputs = FastLayerNormalization(name=name+'/process_norm')(inputs)
-            
-            # fast depthwise convolution (kernel size 15 is full)
-            #inputs = FastDepthwise(depthwise_kernel_size, name=name+'/process_conv')(inputs)
-
-            
-            # fast depthwise convolution (kernel size 15 is full)
+            inputs = tf.keras.layers.BatchNormalization(
+                name=name+'/process_norm')(inputs)
 
         q = tf.keras.layers.Dense(
             d_model, name=name+'/wq', kernel_initializer='glorot_normal')(inputs)
@@ -1495,13 +1420,15 @@ class TFProcess:
         attn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = self.encoder_norm(name=name+"/norm1", center=False)(inputs + attn_output * alpha)
+        out1 = self.encoder_norm(
+            name=name+"/norm1", center=False)(inputs + attn_output * alpha)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
                               xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = self.encoder_norm(name=name+"/norm2", center=False)(out1 + ffn_output * alpha)
+        out2 = self.encoder_norm(
+            name=name+"/norm2", center=False)(out1 + ffn_output * alpha)
         return out2, attn_wts
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
@@ -1511,11 +1438,12 @@ class TFProcess:
 
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+'/hidden1_dense', activation=activation)(compressed)
-        
+
         hidden = self.smolgen_norm(name=name+'/hidden1_norm')(hidden)
         gen_from = tf.keras.layers.Dense(
             heads * gen_sz, name=name+'/gen_from', activation=activation)(hidden)
-        gen_from = self.smolgen_norm(name=name+'/gen_from_norm', center=True)(gen_from)
+        gen_from = self.smolgen_norm(
+            name=name+'/gen_from_norm', center=True)(gen_from)
         gen_from = tf.reshape(gen_from, [-1, heads, gen_sz])
 
         out = self.smol_weight_gen_dense(gen_from)
@@ -1545,9 +1473,8 @@ class TFProcess:
                                      kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                      name=name+'embedding')(flow)
 
-        
         flow = ma_gating(flow, name=name+'embedding')
-    
+
         for i in range(self.encoder_layers):
             flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
                                                   self.encoder_heads, self.encoder_dff,
