@@ -25,16 +25,14 @@ There are a few architectural improvements I've introduced. I only list the appa
 
 Note that the large expansion ratios of 4x in the models I report here are not as useful in larger models. A 1536dff outperforms a 4096dff at 10x 8h/1024.
 
-The main improvement is smolgen, which adds 2% policy accuracy to a 10x 8h/384/512dff model. The other two are the square relu activation function and the depthwise process. Altogether, these improvements should allow a model to play as if 4 times larger than the baseline.
+The main improvement is smolgen, which adds 2% policy accuracy to a 10x 8h/384/512dff model. The other is the sqrrelu process. Altogether, these improvements should allow a model to play as if 4 times larger than the baseline.
+
+I've also allowed for the model to train with sparsity so that we can increase throughput on the Ada and Hopper generations of Nvidia GPUs.
 
 
-## Square relu
+## Sqrrelu process
 
-The square relu activation (max(0, x)^2) has achieved great success in NLP and adds 0.5% pol acc to a 10x 8h/384/512dff model at negligible latency increase.
-
-## Depthwise process
-
-The depthwise process layer is a dense layer followed by what is functionally a depthwise convolution. It adds around 1% pol acc to a 10x 8h/384/512dff with smolgen/sqrrelu for ~20% latency. This should be well worth the latency cost.
+The sqrrelu process layer applies a dense layer then a square relu nonlinearity. It adds around 0.6% pol acc to a 10x 8h/384/512dff with smolgen/sqrrelu for ~10% latency. This should be well worth the latency cost.
 
 ## Smolgen
 
