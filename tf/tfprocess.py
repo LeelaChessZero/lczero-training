@@ -1030,7 +1030,7 @@ class TFProcess:
             for metric in self.train_metrics:
                 metric.reset()
 
-        if self.sparse or steps >= 500_000:  # !!!
+        if self.sparse:  # !!!
             if not hasattr(self, 'sparsity_patterns'):
                 self.set_sparsity_patterns()
             self.apply_sparsity()
