@@ -189,35 +189,6 @@ class TFProcess:
         self.smolgen_hidden_sz = self.cfg['model'].get('smolgen_hidden_sz')
         self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz')
         self.smolgen_activation = self.cfg['model'].get('smolgen_activation')
-
-        self.encoder_norm_type = self.cfg['model'].get(
-            'encoder_norm_type', 'layer')
-        if self.encoder_norm_type == 'layer':
-            self.encoder_norm = tf.keras.layers.LayerNormalization
-        elif self.encoder_norm_type == 'fastlayer':
-            self.encoder_norm = FastLayerNormalization
-        elif self.encoder_norm_type == 'batch':
-            self.encoder_norm = tf.keras.layers.BatchNormalization
-        elif self.encoder_norm_type == 'regbatch':
-            self.encoder_norm = RegularizedBatchNormalization
-        else:
-            raise ValueError("Unknown encoder norm type: {}. Only 'layer' and 'fastlayer' and 'batch' and 'regbatch' are supported.".format(
-                self.encoder_norm_type))
-
-        self.smolgen_norm_type = self.cfg['model'].get(
-            'smolgen_norm_type', 'layer')
-        if self.smolgen_norm_type == 'layer':
-            self.smolgen_norm = tf.keras.layers.LayerNormalization
-        elif self.smolgen_norm_type == 'fastlayer':
-            self.smolgen_norm = FastLayerNormalization
-        elif self.smolgen_norm_type == 'batch':
-            self.smolgen_norm = tf.keras.layers.BatchNormalization
-        elif self.encoder_norm_type == 'regbatch':
-            self.encoder_norm = RegularizedBatchNormalization
-        else:
-            raise ValueError("Unknown smolgen norm type: {}. Only 'layer' and 'fastlayer' and 'batch' and 'regbatch' are supported.".format(
-                self.smolgen_norm_type))
-
         self.use_sqrrelu_process = self.cfg['model'].get(
             'use_sqrrelu_process', False)
 
@@ -440,21 +411,14 @@ class TFProcess:
             target = tf.nn.relu(target)
             return target, output
 
-        def reducible_policy_loss(target, output):
-            target, output = correct_policy(target, output)
-            policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
-                labels=tf.stop_gradient(target), logits=output)
-            target_entropy = tf.math.negative(
-                tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
-            policy_cross_entropy -= target_entropy
-            return tf.reduce_mean(input_tensor=policy_cross_entropy)
-
-        self.reducible_policy_loss_fn = reducible_policy_loss
-
         def policy_loss(target, output):
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
+            # Subtract minimum possible loss (entropy of target)
+            target_entropy = tf.math.negative(
+                tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
+            policy_cross_entropy -= target_entropy
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
 
         self.policy_loss_fn = policy_loss
@@ -641,7 +605,6 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
-            Metric('P RL', 'Policy RL'),
 
         ]
         self.train_metrics.extend(accuracy_thresholded_metrics)
@@ -662,7 +625,6 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
-            Metric('P RL', 'Policy RL'),
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
 
@@ -874,7 +836,6 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
-        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -898,7 +859,6 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
-            policy_rl,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -1156,7 +1116,6 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
-        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -1186,7 +1145,6 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
-            policy_rl,
 
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
@@ -1428,15 +1386,15 @@ class TFProcess:
         attn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = self.encoder_norm(
-            name=name+"/norm1", center=False)(inputs + attn_output * alpha)
+        out1 = tf.keras.layers.LayerNormalization(
+            name=name+"/ln1", center=False)(inputs + attn_output * alpha)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
                               xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = self.encoder_norm(
-            name=name+"/norm2", center=False)(out1 + ffn_output * alpha)
+        out2 = tf.keras.layers.LayerNormalization(
+            name=name+"/ln2", center=False)(out1 + ffn_output * alpha)
         return out2, attn_wts
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
@@ -1447,11 +1405,12 @@ class TFProcess:
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+'/hidden1_dense', activation=activation)(compressed)
 
-        hidden = self.smolgen_norm(name=name+'/hidden1_norm')(hidden)
+        hidden = tf.keras.layers.LayerNormalization(
+            name=name+'/hidden1_ln')(hidden)
         gen_from = tf.keras.layers.Dense(
             heads * gen_sz, name=name+'/gen_from', activation=activation)(hidden)
-        gen_from = self.smolgen_norm(
-            name=name+'/gen_from_norm', center=True)(gen_from)
+        gen_from = tf.keras.layers.LayerNormalization(
+            name=name+'/gen_from_ln', center=True)(gen_from)
         gen_from = tf.reshape(gen_from, [-1, heads, gen_sz])
 
         out = self.smol_weight_gen_dense(gen_from)
