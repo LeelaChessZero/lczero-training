@@ -33,6 +33,8 @@ import operator
 import functools
 from net import Net
 
+# Not used
+
 
 class RegularizedBatchNormalization(tf.keras.layers.Layer):
     def __init__(self, name=None, mu_loss_factor=.1, sigma_loss_factor=0, **kwargs):
@@ -168,8 +170,6 @@ class TFProcess:
             'policy_d_model', self.embedding_size)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
-        self.square_relu_ffn = self.cfg['model'].get('square_relu_ffn', False)
-
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         # added as part of Nadam needs added pr, code is near line 317
@@ -1328,7 +1328,7 @@ class TFProcess:
             inputs = tf.keras.layers.Dense(emb_size, name=name+'/process',
                                            kernel_initializer='glorot_normal')(inputs)
             inputs = square_relu(inputs)
-            inputs = tf.keras.layers.BatchNormalization(
+            inputs = tf.keras.layers.LayerNormalization(
                 name=name+'/process_norm')(inputs)
 
         q = tf.keras.layers.Dense(
@@ -1360,9 +1360,8 @@ class TFProcess:
         dense1 = tf.keras.layers.Dense(
             dff, name=name + "/dense1", kernel_initializer=initializer)(inputs)
 
-        activation = square_relu if self.square_relu_ffn else tf.keras.activations.get(
+        activation = tf.keras.activations.get(
             self.DEFAULT_ACTIVATION)
-        activation = tfa.activations.mish
         dense1 = activation(dense1)
 
         out = tf.keras.layers.Dense(
@@ -1583,11 +1582,6 @@ class TFProcess:
                     comparison, [in_channels, out_channels])
 
                 sparsity_patterns[layer.name] = comparison
-
-            # !!! include this?
-            if False and isinstance(layer, RegularizedBatchNormalization):
-                layer.bn.moving_variance.assign(1)
-                layer.bn.moving_mean.assign(0)
 
         self.sparsity_patterns = sparsity_patterns
 
