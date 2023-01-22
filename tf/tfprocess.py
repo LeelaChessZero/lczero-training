@@ -249,8 +249,8 @@ class TFProcess:
                 pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)
 
         self.net.set_smolgen_activation(self.net.activation(self.smolgen_activation))
-        self.net.set_ffn_activation(self.net.activation(
-            'sqrelu' if self.square_relu_ffn else default_activation))
+        self.net.set_ffn_activation(
+            self.net.activation('sqrrelu' if self.square_relu_ffn else 'default'))
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 

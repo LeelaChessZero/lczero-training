@@ -123,6 +123,8 @@ class Net:
             return pb.NetworkFormat.SWISH
         elif name == "relu_2" or name == "sqrrelu":
             return pb.NetworkFormat.RELU_2
+        elif name == "default":
+            return pb.NetworkFormat.DEFAULT
         else:
             return pb.NetworkFormat.NONE
 
