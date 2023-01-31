@@ -105,13 +105,10 @@ model:
                                          # with 64 memory is same as embedding, with 32 is double
     encoder_d_model: 384                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
     encoder_dff: 512                    # size of the expansion layer in encoder layer ffn
-    square_relu_ffn: true # ALWAYS SUGGESTED
+    ffn_activation: 'mish'
     policy_d_model: 384                  # size of the query and key vectors in final attention layer
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
-    
-    smolgen_norm_type: 'layer' # OPTIMAL VALUE
-    encoder_norm_type: 'fastlayer' # OPTIMAL VALUE
     
     value: 'wdl'
     moves_left: 'v1'
@@ -126,5 +123,5 @@ model:
     smolgen_hidden_sz: 192
     smolgen_gen_sz: 192
 
-    # performance gains unclear, probably worthwhile (no backend yet)
-    use_depthwise_process: true
+    
+    use_sqrrelu_process: true # worthwhile

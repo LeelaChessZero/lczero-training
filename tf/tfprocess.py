@@ -33,34 +33,6 @@ import operator
 import functools
 from net import Net
 
-# Not used
-
-
-class RegularizedBatchNormalization(tf.keras.layers.Layer):
-    def __init__(self, name=None, mu_loss_factor=.1, sigma_loss_factor=0, **kwargs):
-        self.bn_kwargs = kwargs
-        self.mu_loss_factor = mu_loss_factor
-        self.sigma_loss_factor = sigma_loss_factor
-        super().__init__(name=name)
-
-    def build(self, input_shape):
-        self.bn = tf.keras.layers.BatchNormalization(
-            name=self.name+'/bn', **self.bn_kwargs)
-
-    def call(self, inputs, training=None):
-        epsilon = 1e-5
-        if training:
-            # regularize mean and variance to batch norm values
-            mu, sigma = tf.nn.moments(inputs, axes=[0, 1])
-            mu_error = tf.sqrt(tf.reduce_sum(tf.square(
-                mu - self.bn.moving_mean)) / tf.reduce_sum(self.bn.moving_variance + epsilon))
-
-            #sigma_error = tf.reduce_mean(tf.square(sigma - self.bn.moving_variance)) / tf.reduce_mean(self.bn.moving_variance + epsilon)
-            self.add_loss(mu_error * self.mu_loss_factor)
-            #self.add_loss(sigma_error * self.sigma_loss_factor)
-
-        return self.bn(inputs)
-
 
 def square_relu(x):
     return tf.nn.relu(x) ** 2
@@ -149,7 +121,25 @@ class TFProcess:
         self.accuracy_thresholds = self.cfg['training'].get(
             'accuracy_thresholds', [1, 2, 5, 10])
 
+        # Sparse training
         self.sparse = self.cfg['training'].get('sparse', False)
+
+        default_activation = self.cfg['model'].get(
+            'default_activation', 'relu')
+        if default_activation == "relu":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+            self.DEFAULT_ACTIVATION = 'relu'
+        elif default_activation == "mish":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
+            import tensorflow_addons as tfa
+            self.DEFAULT_ACTIVATION = tfa.activations.mish
+        elif default_activation == "gelu":
+            self.DEFAULT_ACTIVATION = 'gelu'
+        else:
+            raise ValueError(
+                "Unknown default activation type: {}".format(default_activation))
 
         # Network structure
         self.embedding_size = self.cfg['model']['embedding_size']
@@ -170,6 +160,10 @@ class TFProcess:
             'policy_d_model', self.embedding_size)
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
+
+        self.ffn_activation = self.cfg['model'].get(
+            'ffn_activation', self.DEFAULT_ACTIVATION)
+
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         # added as part of Nadam needs added pr, code is near line 317
@@ -192,6 +186,9 @@ class TFProcess:
         self.use_sqrrelu_process = self.cfg['model'].get(
             'use_sqrrelu_process', False)
 
+        # experiments with changing have failed
+        self.encoder_norm = tf.keras.layers.LayerNormalization
+
         if precision == 'single':
             self.model_dtype = tf.float32
         elif precision == 'half':
@@ -206,8 +203,6 @@ class TFProcess:
         value_head = self.cfg['model'].get('value', 'wdl')
         moves_left_head = self.cfg['model'].get('moves_left', 'v1')
         input_mode = self.cfg['model'].get('input_type', 'classic')
-        default_activation = self.cfg['model'].get(
-            'default_activation', 'relu')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
@@ -268,21 +263,6 @@ class TFProcess:
                 "Unknown input mode format: {}".format(input_mode))
 
         self.net.set_input(self.INPUT_MODE)
-
-        if default_activation == "relu":
-            self.net.set_defaultactivation(
-                pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
-            self.DEFAULT_ACTIVATION = 'relu'
-        elif default_activation == "mish":
-            self.net.set_defaultactivation(
-                pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            import tensorflow_addons as tfa
-            self.DEFAULT_ACTIVATION = tfa.activations.mish
-        elif default_activation == "gelu":
-            self.DEFAULT_ACTIVATION = 'gelu'
-        else:
-            raise ValueError(
-                "Unknown default activation type: {}".format(default_activation))
 
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
@@ -411,14 +391,21 @@ class TFProcess:
             target = tf.nn.relu(target)
             return target, output
 
+        def reducible_policy_loss(target, output):
+            target, output = correct_policy(target, output)
+            policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.stop_gradient(target), logits=output)
+            target_entropy = tf.math.negative(
+                tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
+            policy_cross_entropy -= target_entropy
+            return tf.reduce_mean(input_tensor=policy_cross_entropy)
+
+        self.reducible_policy_loss_fn = reducible_policy_loss
+
         def policy_loss(target, output):
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
-            # Subtract minimum possible loss (entropy of target)
-            target_entropy = tf.math.negative(
-                tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
-            policy_cross_entropy -= target_entropy
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
 
         self.policy_loss_fn = policy_loss
@@ -605,6 +592,7 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
+            Metric('P RL', 'Policy RL'),
 
         ]
         self.train_metrics.extend(accuracy_thresholded_metrics)
@@ -625,6 +613,7 @@ class TFProcess:
             Metric('P Entropy', 'Policy Entropy'),
             Metric('P UL', 'Policy UL'),
             Metric('P SL', 'Policy SL'),
+            Metric('P RL', 'Policy RL'),
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
 
@@ -836,6 +825,7 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
+        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -859,6 +849,7 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
+            policy_rl,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -954,6 +945,11 @@ class TFProcess:
         # Update steps.
         self.global_step.assign_add(1)
         steps = self.global_step.read_value()
+
+        if steps == 1_000_000:
+            for layer in self.model.layers:
+                if isinstance(layer, SmolgenEater):
+                    layer.eat_factor.assign(1.0)
 
         if steps % self.cfg['training'][
                 'train_avg_report_steps'] == 0 or steps % self.cfg['training'][
@@ -1116,6 +1112,7 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
+        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -1145,6 +1142,7 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
+            policy_rl,
 
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
@@ -1299,6 +1297,7 @@ class TFProcess:
         if self.use_smolgen:
             smolgen_weights = self.smolgen_weights(inputs, heads, self.smolgen_hidden_channels, self.smolgen_hidden_sz,
                                                    self.smolgen_gen_sz, name=name+'/smolgen', activation=self.smolgen_activation)
+            # smolgen_weights = SmolgenEater(name=name+'/smolgen_eater')(smolgen_weights)
             scaled_attention_logits = scaled_attention_logits + smolgen_weights
 
         # 0 h 64 64
@@ -1322,11 +1321,10 @@ class TFProcess:
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
 
-        #inputs = FastLayerNormalization(name=name+'/norm')(inputs + cool_process(inputs, name=name+'/cool_process'))
-
         if self.use_sqrrelu_process:
             inputs = tf.keras.layers.Dense(emb_size, name=name+'/process',
                                            kernel_initializer='glorot_normal')(inputs)
+
             inputs = square_relu(inputs)
             inputs = tf.keras.layers.LayerNormalization(
                 name=name+'/process_norm')(inputs)
@@ -1357,12 +1355,22 @@ class TFProcess:
     # 2-layer dense feed-forward network in encoder blocks
 
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str):
+
         dense1 = tf.keras.layers.Dense(
             dff, name=name + "/dense1", kernel_initializer=initializer)(inputs)
 
-        activation = tf.keras.activations.get(
-            self.DEFAULT_ACTIVATION)
+        if self.ffn_activation == "sqrrelu":
+            activation = square_relu
+        elif self.ffn_activation == "mish":
+            activation = tfa.activations.mish
+        elif isinstance(self.ffn_activation, str):
+            activation = tf.keras.activations.get(self.ffn_activation)
+        else:
+            activation = self.ffn_activation
+
         dense1 = activation(dense1)
+        dense1 = tf.keras.layers.LayerNormalization(
+            name=name+'/ffnpost')(dense1) / 3.
 
         out = tf.keras.layers.Dense(
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
@@ -1385,15 +1393,15 @@ class TFProcess:
         attn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = tf.keras.layers.LayerNormalization(
-            name=name+"/ln1", center=False)(inputs + attn_output * alpha)
+        out1 = self.encoder_norm(
+            name=name+"/norm1")(inputs + attn_output * alpha)
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
                               xavier_norm, name=name + "/ffn")
         ffn_output = tf.keras.layers.Dropout(
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = tf.keras.layers.LayerNormalization(
-            name=name+"/ln2", center=False)(out1 + ffn_output * alpha)
+        out2 = self.encoder_norm(
+            name=name+"/norm2")(out1 + ffn_output * alpha)
         return out2, attn_wts
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
