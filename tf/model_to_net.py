@@ -4,10 +4,10 @@ import os
 import yaml
 import tfprocess
 
-argparser = argparse.ArgumentParser(description='Convert model to net.')
-argparser.add_argument('--cfg',
-                       type=argparse.FileType('r'),
-                       help='yaml configuration with training parameters')
+argparser = argparse.ArgumentParser(description="Convert model to net.")
+argparser.add_argument("--cfg",
+                       type=argparse.FileType("r"),
+                       help="yaml configuration with training parameters")
 args = argparser.parse_args()
 cfg = yaml.safe_load(args.cfg.read())
 print(yaml.dump(cfg, default_flow_style=False))
@@ -17,10 +17,10 @@ tfp.init_net()
 
 tfp.restore()
 
-root_dir = os.path.join(cfg['training']['path'], cfg['name'])
+root_dir = os.path.join(cfg["training"]["path"], cfg["name"])
 if not os.path.exists(root_dir):
     os.makedirs(root_dir)
-path = os.path.join(tfp.root_dir, tfp.cfg['name'])
+path = os.path.join(tfp.root_dir, tfp.cfg["name"])
 steps = tfp.global_step.read_value().numpy()
 leela_path = path + "-" + str(steps)
 swa_path = path + "-swa-" + str(steps)

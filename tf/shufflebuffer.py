@@ -25,8 +25,8 @@ class ShuffleBuffer:
         """
             A shuffle buffer for fixed sized elements.
 
-            Manages 'elem_count' items in a fixed buffer, each item being exactly
-            'elem_size' bytes.
+            Manages "elem_count" items in a fixed buffer, each item being exactly
+            "elem_size" bytes.
         """
         assert elem_size > 0, elem_size
         assert elem_count > 0, elem_count
@@ -55,7 +55,7 @@ class ShuffleBuffer:
 
     def insert_or_replace(self, item):
         """
-            Inserts 'item' into the shuffle buffer, returning
+            Inserts "item" into the shuffle buffer, returning
             a random item.
 
             If the buffer is not yet full, returns None
@@ -65,12 +65,12 @@ class ShuffleBuffer:
         # the displaced item to the end of the buffer achieves a full
         # random shuffle (Fisher-Yates)
         if self.used > 0:
-            # swap 'item' with random item in buffer.
+            # swap "item" with random item in buffer.
             i = random.randint(0, self.used - 1)
             old_item = self.buffer[i * self.elem_size:(i + 1) * self.elem_size]
             self.buffer[i * self.elem_size:(i + 1) * self.elem_size] = item
             item = old_item
-        # If the buffer isn't yet full, append 'item' to the end of the buffer.
+        # If the buffer isn't yet full, append "item" to the end of the buffer.
         if self.used < self.elem_count:
             # Not yet full, so place the returned item at the end of the buffer.
             i = self.used
@@ -85,17 +85,17 @@ class ShuffleBufferTest(unittest.TestCase):
         sb = ShuffleBuffer(3, 1)
         r = sb.extract()
         assert r == None, r  # empty buffer => None
-        r = sb.insert_or_replace(b'111')
+        r = sb.insert_or_replace(b"111")
         assert r == None, r  # buffer not yet full => None
         r = sb.extract()
-        assert r == b'111', r  # one item in buffer => item
+        assert r == b"111", r  # one item in buffer => item
         r = sb.extract()
         assert r == None, r  # buffer empty => None
 
     def test_wrong_size(self):
         sb = ShuffleBuffer(3, 1)
         try:
-            sb.insert_or_replace(b'1')  # wrong length, so should throw.
+            sb.insert_or_replace(b"1")  # wrong length, so should throw.
             assert False  # Should not be reached.
         except:
             pass
@@ -120,5 +120,5 @@ class ShuffleBufferTest(unittest.TestCase):
         assert r is None, r
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -41,7 +41,7 @@ from collections import defaultdict
 #     1 - Text, oldflip
 #     2 - Binary, oldflip
 #     3 - Binary, newflip
-#     b'\1\0\0\0' - Invalid, see issue #119
+#     b"\1\0\0\0" - Invalid, see issue #119
 #
 # Note: VERSION1 does not include a version in the header, it starts with
 # text hex characters. This means any VERSION that is also a valid ASCII
@@ -49,7 +49,7 @@ from collections import defaultdict
 # will be "00ff", but maybe games could get split and then there are more
 # "00??" possibilities.
 #
-# Also note "0002" is actually b'\0x30\0x30\0x30\0x32' (or maybe reversed?)
+# Also note "0002" is actually b"\0x30\0x30\0x30\0x32" (or maybe reversed?)
 # so it doesn't collide with VERSION2.
 #
 VERSION3 = chunkparser.V3_VERSION
@@ -295,7 +295,7 @@ class Board:
 class TrainingStep:
     def __init__(self, version):
         self.version = version
-        # Construct a fake parser just to get access to it's variables
+        # Construct a fake parser just to get access to its variables
         self.parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([]),
                                               workers=1)
         self.NUM_HIST = 8
@@ -443,11 +443,11 @@ class TrainingStep:
                     int.from_bytes(planes[start:end], byteorder="big"))
             if planes[hist * self.NUM_PLANES * 8 +
                       12 * 8:hist * self.NUM_PLANES * 8 + 12 * 8 +
-                      8] != struct.pack('II', 0, 0):
+                      8] != struct.pack("II", 0, 0):
                 self.history[hist].reps = 1
                 assert planes[hist * self.NUM_PLANES * 8 +
                               12 * 8:hist * self.NUM_PLANES * 8 + 12 * 8 +
-                              8] == struct.pack('II', 0xffffffff, 0xffffffff)
+                              8] == struct.pack("II", 0xffffffff, 0xffffffff)
         self.us_ooo = us_ooo
         self.us_oo = us_oo
         self.them_ooo = them_ooo
@@ -467,7 +467,7 @@ class TrainingStep:
 def main(args):
     for filename in args.files:
         #print("Parsing {}".format(filename))
-        with gzip.open(filename, 'rb') as f:
+        with gzip.open(filename, "rb") as f:
             chunkdata = f.read()
             version = chunkdata[0:4]
             if version in {VERSION4, VERSION3}:
@@ -479,13 +479,13 @@ def main(args):
                     ts = TrainingStep(4 if version == VERSION4 else 3)
                     record = chunkdata[i:i + record_size]
                     if chunkdata[0:4] == VERSION3:
-                        record += 16 * b'\x00'
+                        record += 16 * b"\x00"
                     ts.display_v4(i // record_size, record)
             else:
                 print("Invalid version")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     usage_str = """
 Parse training files and display them."""
 
