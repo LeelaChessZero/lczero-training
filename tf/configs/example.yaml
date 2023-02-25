@@ -114,8 +114,8 @@ model:
     moves_left: "v1"
     input_type: "classic"
 
-    # apparently adds nothing with fullgen, but tests needed
-    arc_encoding: true
+    # degrades performance, not recommended
+    arc_encoding: false
     
     # smolgen: more efficient version of fullgen, adds a lot of params
     use_smolgen: true
