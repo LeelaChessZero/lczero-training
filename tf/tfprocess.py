@@ -64,6 +64,13 @@ def ma_gating(inputs, name):
     return out
 
 
+def make_value_buckets(value_wdl, num_buckets=100):
+    value = tf.einsum("bi, i-> b", value_wdl, tf.constant([1, 0.5, 0]))
+    buckets = tf.cast(value * num_buckets, tf.int64)
+    buckets = tf.clip_by_value(buckets, 0, num_buckets - 1)
+    return buckets
+
+
 class ApplyAttentionPolicyMap(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super(ApplyAttentionPolicyMap, self).__init__(**kwargs)
@@ -183,8 +190,8 @@ class TFProcess:
         self.smolgen_hidden_sz = self.cfg["model"].get("smolgen_hidden_sz")
         self.smolgen_gen_sz = self.cfg["model"].get("smolgen_gen_sz")
         self.smolgen_activation = self.cfg["model"].get("smolgen_activation")
-        self.use_sqrrelu_process = self.cfg["model"].get(
-            "use_sqrrelu_process", False)
+
+        self.value_buckets = self.cfg["model"].get("value_buckets", 100)
 
         # experiments with changing have failed
         self.encoder_norm = tf.keras.layers.LayerNormalization
@@ -410,6 +417,24 @@ class TFProcess:
 
         self.policy_loss_fn = policy_loss
 
+        def value_categorical_loss(target, output):
+            # Calculate loss on value head
+            # target is size B of indices
+            weights = tf.nn.softmax(output, axis=1)
+            weights = tf.gather(weights, target, batch_dims=1)
+            losses = -tf.math.log(weights)
+            return tf.reduce_mean(input_tensor=losses)
+
+        self.value_categorical_loss_fn = value_categorical_loss
+
+        def value_categorical_accuracy(target, output):
+            return tf.reduce_mean(
+                tf.cast(
+                    tf.equal(target,
+                             tf.argmax(input=output, axis=1)), tf.float32))
+
+        self.value_categorical_accuracy_fn = value_categorical_accuracy
+
         def policy_accuracy(target, output):
             target, output = correct_policy(target, output)
             return tf.reduce_mean(
@@ -593,6 +618,8 @@ class TFProcess:
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
             Metric("P RL", "Policy RL"),
+            Metric("V CL", "Value CL"),
+            Metric("V C Acc", "Value C Acc", suffix="%"),
 
         ]
         self.train_metrics.extend(accuracy_thresholded_metrics)
@@ -614,6 +641,8 @@ class TFProcess:
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
             Metric("P RL", "Policy RL"),
+            Metric("V CL", "Value CL"),
+            Metric("V C Acc", "Value C Acc", suffix="%"),
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
 
@@ -802,6 +831,7 @@ class TFProcess:
             outputs = self.model(x, training=True)
             policy = outputs[0]
             value = outputs[1]
+            value_cat = outputs[-2]
             policy_loss = self.policy_loss_fn(y, policy)
             reg_term = sum(self.model.losses)
             if self.wdl:
@@ -817,7 +847,10 @@ class TFProcess:
                 moves_left_loss = tf.constant(0.)
             total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
                                       reg_term)
-
+            value_buckets = make_value_buckets(self.qMix(z, q))
+            value_catl = self.value_categorical_loss_fn(
+                value_buckets, value_cat)
+            total_loss = total_loss + 0.01 * value_catl
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
 
@@ -828,6 +861,9 @@ class TFProcess:
         policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
+
+        value_cat_accuracy = self.value_categorical_accuracy_fn(
+            value_buckets, value_cat)
 
         if self.wdl:
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
@@ -850,6 +886,8 @@ class TFProcess:
             policy_ul,
             policy_sl,
             policy_rl,
+            value_catl,
+            value_cat_accuracy * 100,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -945,11 +983,6 @@ class TFProcess:
         # Update steps.
         self.global_step.assign_add(1)
         steps = self.global_step.read_value()
-
-        if steps == 1_000_000:
-            for layer in self.model.layers:
-                if isinstance(layer, SmolgenEater):
-                    layer.eat_factor.assign(1.0)
 
         if steps % self.cfg["training"][
                 "train_avg_report_steps"] == 0 or steps % self.cfg["training"][
@@ -1107,6 +1140,7 @@ class TFProcess:
         outputs = self.model(x, training=False)
         policy = outputs[0]
         value = outputs[1]
+        value_cat = outputs[-2]
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.policy_accuracy_fn(y, policy)
         policy_entropy = self.policy_entropy_fn(y, policy)
@@ -1115,6 +1149,12 @@ class TFProcess:
         policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
+
+        value_buckets = make_value_buckets(self.qMix(z, q))
+        value_catl = self.value_categorical_loss_fn(
+            value_buckets, value_cat)
+        value_cat_accuracy = self.value_categorical_accuracy_fn(
+            value_buckets, value_cat)
 
         if self.wdl:
             value_loss = self.value_loss_fn(self.qMix(z, q), value)
@@ -1143,6 +1183,8 @@ class TFProcess:
             policy_ul,
             policy_sl,
             policy_rl,
+            value_catl,
+            value_cat_accuracy * 100,
 
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
@@ -1321,14 +1363,6 @@ class TFProcess:
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
 
-        if self.use_sqrrelu_process:
-            inputs = tf.keras.layers.Dense(emb_size, name=name+"/process",
-                                           kernel_initializer="glorot_normal")(inputs)
-
-            inputs = square_relu(inputs)
-            inputs = tf.keras.layers.LayerNormalization(
-                name=name+"/process_norm")(inputs)
-
         q = tf.keras.layers.Dense(
             d_model, name=name+"/wq", kernel_initializer="glorot_normal")(inputs)
         k = tf.keras.layers.Dense(
@@ -1352,13 +1386,7 @@ class TFProcess:
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
-    # 2-layer dense feed-forward network in encoder blocks
-
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str):
-
-        dense1 = tf.keras.layers.Dense(
-            dff, name=name + "/dense1", kernel_initializer=initializer)(inputs)
-
         if self.ffn_activation == "sqrrelu":
             activation = square_relu
         elif self.ffn_activation == "mish":
@@ -1368,10 +1396,8 @@ class TFProcess:
         else:
             activation = self.ffn_activation
 
-        dense1 = activation(dense1)
-        dense1 = tf.keras.layers.LayerNormalization(
-            name=name+"/ffnpost")(dense1) / 3.
-
+        dense1 = tf.keras.layers.Dense(
+            dff, name=name + "/dense1", kernel_initializer=initializer, activation=activation)(inputs)
         out = tf.keras.layers.Dense(
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
         return out
@@ -1540,6 +1566,9 @@ class TFProcess:
                                           activation="tanh",
                                           name=name+"value/dense2")(h_fc2)
 
+        value_logits = tf.keras.layers.Dense(
+            self.value_buckets, kernel_initializer="glorot_normal", name=name+"value_categorical")(h_fc2)
+
         # Moves left head
         if self.moves_left:
             embedded_mov = tf.keras.layers.Dense(self.mov_embedding_size, kernel_initializer="glorot_normal",
@@ -1564,9 +1593,9 @@ class TFProcess:
 
         # attention weights added as optional output for analysis -- ignored by backend
         if self.moves_left:
-            outputs = [h_fc1, h_fc3, h_fc5, attn_wts]
+            outputs = [h_fc1, h_fc3, h_fc5, value_logits, attn_wts]
         else:
-            outputs = [h_fc1, h_fc3, attn_wts]
+            outputs = [h_fc1, h_fc3, value_logits, attn_wts]
 
         return outputs
 
