@@ -122,6 +122,3 @@ model:
     smolgen_hidden_channels: 16
     smolgen_hidden_sz: 192
     smolgen_gen_sz: 192
-
-    
-    use_sqrrelu_process: true # worthwhile
