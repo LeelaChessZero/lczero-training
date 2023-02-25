@@ -576,6 +576,7 @@ class TFProcess:
 
         pol_loss_w = self.cfg["training"]["policy_loss_weight"]
         val_loss_w = self.cfg["training"]["value_loss_weight"]
+        val_cat_loss_w = self.cfg["training"]["value_cat_loss_weight"]
 
         if self.moves_left:
             moves_loss_w = self.cfg["training"]["moves_left_loss_weight"]
@@ -583,8 +584,8 @@ class TFProcess:
             moves_loss_w = tf.constant(0.0, dtype=tf.float32)
         reg_term_w = self.cfg["training"].get("reg_term_weight", 1.0)
 
-        def _lossMix(policy, value, moves_left, reg_term):
-            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left + reg_term_w * reg_term
+        def _lossMix(policy, value, moves_left, reg_term, value_cat):
+            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left + reg_term_w * reg_term + val_cat_loss_w * value_cat
 
         self.lossMix = _lossMix
 
@@ -845,12 +846,12 @@ class TFProcess:
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             else:
                 moves_left_loss = tf.constant(0.)
-            total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
-                                      reg_term)
+
             value_buckets = make_value_buckets(self.qMix(z, q))
             value_catl = self.value_categorical_loss_fn(
                 value_buckets, value_cat)
-            total_loss = total_loss + 0.01 * value_catl
+            total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
+                                      reg_term, value_catl)
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
 
