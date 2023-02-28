@@ -418,8 +418,7 @@ class TFProcess:
         self.policy_loss_fn = policy_loss
 
         def value_categorical_loss(target, output):
-            # Calculate loss on value head
-            # target is size B of indices
+            # gather indices from value then do classification loss
             weights = tf.nn.softmax(output, axis=1)
             weights = tf.gather(weights, target, batch_dims=1)
             losses = -tf.math.log(weights)
