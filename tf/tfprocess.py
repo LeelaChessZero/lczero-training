@@ -847,7 +847,8 @@ class TFProcess:
             else:
                 moves_left_loss = tf.constant(0.)
 
-            value_buckets = make_value_buckets(self.qMix(z, q))
+            value_buckets = make_value_buckets(
+                self.qMix(z, q), num_buckets=self.value_buckets)
             value_catl = self.value_categorical_loss_fn(
                 value_buckets, value_cat)
             total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
@@ -1151,7 +1152,8 @@ class TFProcess:
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
-        value_buckets = make_value_buckets(self.qMix(z, q))
+        value_buckets = make_value_buckets(
+            self.qMix(z, q), num_buckets=self.value_buckets)
         value_catl = self.value_categorical_loss_fn(
             value_buckets, value_cat)
         value_cat_accuracy = self.value_categorical_accuracy_fn(
