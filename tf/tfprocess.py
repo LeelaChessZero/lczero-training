@@ -399,6 +399,7 @@ class TFProcess:
             return target, output
 
         def reducible_policy_loss(target, output):
+            # This is equivalently the KL divergence between the target and output
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
