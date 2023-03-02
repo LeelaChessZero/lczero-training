@@ -151,9 +151,6 @@ class TFProcess:
         self.dropout_rate = self.cfg["model"].get("dropout_rate", 0.0)
         self.arc_encoding = self.cfg["model"].get("arc_encoding", False)
 
-        self.ffn_activation = self.cfg["model"].get(
-            "ffn_activation", self.DEFAULT_ACTIVATION)
-
         precision = self.cfg["training"].get("precision", "single")
         loss_scale = self.cfg["training"].get("loss_scale", 128)
         # added as part of Nadam needs added pr, code is near line 317
@@ -216,6 +213,9 @@ class TFProcess:
         else:
             raise ValueError(
                 "Unknown default activation type: {}".format(default_activation))
+
+        self.ffn_activation = self.cfg["model"].get(
+            "ffn_activation", self.DEFAULT_ACTIVATION)
 
         if policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
