@@ -131,23 +131,6 @@ class TFProcess:
         # Sparse training
         self.sparse = self.cfg["training"].get("sparse", False)
 
-        default_activation = self.cfg["model"].get(
-            "default_activation", "relu")
-        if default_activation == "relu":
-            self.net.set_defaultactivation(
-                pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
-            self.DEFAULT_ACTIVATION = "relu"
-        elif default_activation == "mish":
-            self.net.set_defaultactivation(
-                pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            import tensorflow_addons as tfa
-            self.DEFAULT_ACTIVATION = tfa.activations.mish
-        elif default_activation == "gelu":
-            self.DEFAULT_ACTIVATION = "gelu"
-        else:
-            raise ValueError(
-                "Unknown default activation type: {}".format(default_activation))
-
         # Network structure
         self.embedding_size = self.cfg["model"]["embedding_size"]
         self.input_gate = self.cfg["model"].get("input_gate")
@@ -210,12 +193,29 @@ class TFProcess:
         value_head = self.cfg["model"].get("value", "wdl")
         moves_left_head = self.cfg["model"].get("moves_left", "v1")
         input_mode = self.cfg["model"].get("input_type", "classic")
+        default_activation = self.cfg["model"].get(
+            "default_activation", "relu")
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
         self.MOVES_LEFT_HEAD = None
         self.INPUT_MODE = None
         self.DEFAULT_ACTIVATION = None
+
+        if default_activation == "relu":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+            self.DEFAULT_ACTIVATION = "relu"
+        elif default_activation == "mish":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
+            import tensorflow_addons as tfa
+            self.DEFAULT_ACTIVATION = tfa.activations.mish
+        elif default_activation == "gelu":
+            self.DEFAULT_ACTIVATION = "gelu"
+        else:
+            raise ValueError(
+                "Unknown default activation type: {}".format(default_activation))
 
         if policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
