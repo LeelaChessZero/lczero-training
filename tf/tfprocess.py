@@ -32,6 +32,35 @@ import operator
 from net import Net
 
 
+def square_relu(x):
+    return tf.nn.relu(x) ** 2
+
+
+class Gating(tf.keras.layers.Layer):
+    def __init__(self, name=None, additive=True, init_value=None, **kwargs):
+        self.additive = additive
+        if init_value is None:
+            init_value = 0 if self.additive else 1
+        self.init_value = init_value
+        super().__init__(name=name, **kwargs)
+
+    def build(self, input_shape):
+        self.gate = self.add_weight(name='gate',
+                                    shape=input_shape[1:],
+                                    constraint=tf.keras.constraints.NonNeg() if not self.additive else None,
+                                    initializer=tf.constant_initializer(
+                                        self.init_value),
+                                    trainable=True)
+
+    def call(self, inputs):
+        return tf.add(inputs, self.gate) if self.additive else tf.multiply(inputs, self.gate)
+
+
+def ma_gating(inputs, name):
+    out = Gating(name=name+'/mult_gate', additive=False)(inputs)
+    out = Gating(name=name+'/add_gate', additive=True)(out)
+    return out
+
 class ApplySqueezeExcitation(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super(ApplySqueezeExcitation, self).__init__(**kwargs)
@@ -104,7 +133,7 @@ class Metric:
         self.value = 0.0
         self.count = 0
 
-
+#'''
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -113,16 +142,44 @@ class TFProcess:
                                      self.cfg['name'])
 
         # Network structure
-        self.RESIDUAL_FILTERS = self.cfg['model']['filters']
-        self.RESIDUAL_BLOCKS = self.cfg['model']['residual_blocks']
-        self.SE_ratio = self.cfg['model']['se_ratio']
+        self.RESIDUAL_FILTERS = self.cfg['model'].get('filters', 0)
+        self.RESIDUAL_BLOCKS = self.cfg['model'].get('residual_blocks', 0)
+        self.SE_ratio = self.cfg['model'].get('se_ratio', 0)
+        self.encoder_layers = self.cfg['model'].get('encoder_layers', 0)
+        self.encoder_heads = self.cfg['model'].get('encoder_heads', 2)
+        assert(bool(self.RESIDUAL_BLOCKS > 0) != bool(self.encoder_layers > 0),
+                "Nets with both encoder layers and residual blocks are not supported")
+        if self.encoder_layers > 0:
+            self.RESIDUAL_FILTERS = self.cfg['model']['embedding_size']
+            self.embedding_size = self.RESIDUAL_FILTERS
+            
         self.policy_channels = self.cfg['model'].get('policy_channels', 32)
         self.pol_embedding_size = self.cfg['model'].get('pol_embedding_size', self.RESIDUAL_FILTERS)
+        self.val_embedding_size = self.cfg['model'].get('value_embedding_size', 32)
+        self.mov_embedding_size = self.cfg['model'].get('moves_left_embedding_size', 8)
+        #policy head
         self.pol_encoder_layers = self.cfg['model'].get('pol_encoder_layers', 1)
-        self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
+        self.pol_encoder_heads = self.encoder_heads
         self.pol_encoder_d_model = self.cfg['model'].get('pol_encoder_d_model', self.RESIDUAL_FILTERS)
         self.pol_encoder_dff = self.cfg['model'].get('pol_encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
         self.policy_d_model = self.cfg['model'].get('policy_d_model', self.RESIDUAL_FILTERS)
+        
+        #encoder body
+        self.use_talking_heads = self.cfg['model'].get('talking_heads', False)
+        self.glu = self.cfg['model'].get('glu', False)
+        self.input_gate = self.cfg['model'].get('input_gate')
+        self.encoder_d_model = self.cfg['model'].get('encoder_d_model')
+        self.encoder_dff = self.cfg['model'].get('encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
+        self.policy_d_model = self.cfg['model'].get('policy_d_model', self.RESIDUAL_FILTERS)
+        self.arc_encoding = self.cfg['model'].get('arc_encoding', True)
+        self.square_relu_ffn = self.cfg['model'].get('square_relu_ffn', False)
+        
+        self.use_smolgen = self.cfg['model'].get('use_smolgen', False)
+        self.smolgen_hidden_channels = self.cfg['model'].get('smolgen_hidden_channels', 16)
+        self.smolgen_hidden_sz = self.cfg['model'].get('smolgen_hidden_sz', 128)
+        self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz', 128)
+        self.smolgen_activation = self.cfg['model'].get('smolgen_activation', 'swish')
+         
         self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
         precision = self.cfg['training'].get('precision', 'single')
         loss_scale = self.cfg['training'].get('loss_scale', 128)
@@ -157,8 +214,8 @@ class TFProcess:
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_CONVOLUTION
         elif policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
-            if self.pol_encoder_layers > 0:
-                self.net.set_pol_headcount(self.pol_encoder_heads)
+            if self.encoder_layers > 0:
+                self.net.set_headcount(self.encoder_heads)
         else:
             raise ValueError(
                 "Unknown policy head format: {}".format(policy_head))
@@ -219,7 +276,15 @@ class TFProcess:
         else:
             raise ValueError(
                 "Unknown default activation type: {}".format(default_activation))
-
+                
+        if self.encoder_layers > 0:
+            self.net.set_networkformat(
+                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)        
+                
+        self.net.set_smolgen_activation(self.net.activation(self.smolgen_activation))
+        self.net.set_ffn_activation(
+            self.net.activation('sqrrelu' if self.square_relu_ffn else 'default'))
+            
         self.swa_enabled = self.cfg['training'].get('swa', False)
 
         # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
@@ -252,7 +317,189 @@ class TFProcess:
                                        name='global_step',
                                        trainable=False,
                                        dtype=tf.int64)
+    '''
 
+class TFProcess:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.net = Net()
+        self.root_dir = os.path.join(self.cfg['training']['path'],
+                                     self.cfg['name'])
+
+        # Thresholds for policy_threshold_accuracy
+        self.accuracy_thresholds = self.cfg['training'].get(
+            'accuracy_thresholds', [1, 2, 5, 10])
+
+        # Network structure
+        self.embedding_size = self.cfg['model']['embedding_size']
+        self.input_gate = self.cfg['model'].get('input_gate')
+        self.pol_embedding_size = self.cfg['model'].get(
+            'policy_embedding_size', self.embedding_size)
+        self.val_embedding_size = self.cfg['model'].get(
+            'value_embedding_size', 32)
+        self.mov_embedding_size = self.cfg['model'].get(
+            'moves_left_embedding_size', 8)
+        self.encoder_layers = self.cfg['model']['encoder_layers']
+        self.encoder_heads = self.cfg['model']['encoder_heads']
+        self.encoder_d_model = self.cfg['model'].get('encoder_d_model')
+
+        self.encoder_dff = self.cfg['model'].get(
+            'encoder_dff', (self.embedding_size*1.5)//1)
+        self.policy_d_model = self.cfg['model'].get(
+            'policy_d_model', self.embedding_size)
+        self.dropout_rate = self.cfg['model'].get('dropout_rate', 0.0)
+        self.arc_encoding = self.cfg['model'].get('arc_encoding', False)
+        self.glu = self.cfg['model'].get('glu', False)
+        self.square_relu_ffn = self.cfg['model'].get('square_relu_ffn', False)
+        self.use_talking_heads = self.cfg['model'].get('talking_heads', False)
+
+        precision = self.cfg['training'].get('precision', 'single')
+        loss_scale = self.cfg['training'].get('loss_scale', 128)
+        self.virtual_batch_size = self.cfg['model'].get(
+            'virtual_batch_size', None)
+
+        self.use_smolgen = self.cfg['model'].get('use_smolgen', False)
+        self.smolgen_hidden_channels = self.cfg['model'].get(
+            'smolgen_hidden_channels')
+        self.smolgen_hidden_sz = self.cfg['model'].get('smolgen_hidden_sz')
+        self.smolgen_gen_sz = self.cfg['model'].get('smolgen_gen_sz')
+        self.smolgen_activation = self.cfg['model'].get('smolgen_activation')
+
+        if precision == 'single':
+            self.model_dtype = tf.float32
+        elif precision == 'half':
+            self.model_dtype = tf.float16
+        else:
+            raise ValueError("Unknown precision: {}".format(precision))
+
+        # Scale the loss to prevent gradient underflow
+        self.loss_scale = 1 if self.model_dtype == tf.float32 else loss_scale
+
+        policy_head = self.cfg['model'].get('policy', 'attention')
+        value_head = self.cfg['model'].get('value', 'wdl')
+        moves_left_head = self.cfg['model'].get('moves_left', 'v1')
+        input_mode = self.cfg['model'].get('input_type', 'classic')
+        default_activation = self.cfg['model'].get(
+            'default_activation', 'relu')
+
+        self.POLICY_HEAD = None
+        self.VALUE_HEAD = None
+        self.MOVES_LEFT_HEAD = None
+        self.INPUT_MODE = None
+        self.DEFAULT_ACTIVATION = None
+
+        if policy_head == "attention":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
+            if self.encoder_layers > 0:
+                self.net.set_headcount(self.encoder_heads)
+        else:
+            raise ValueError(
+                "Unknown policy head format: {}".format(policy_head))
+
+        self.net.set_policyformat(self.POLICY_HEAD)
+
+        if value_head == "classical":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_CLASSICAL
+            self.wdl = False
+        elif value_head == "wdl":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_WDL
+            self.wdl = True
+        else:
+            raise ValueError(
+                "Unknown value head format: {}".format(value_head))
+
+        self.net.set_valueformat(self.VALUE_HEAD)
+
+        if moves_left_head == "none":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_NONE
+            self.moves_left = False
+        elif moves_left_head == "v1":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_V1
+            self.moves_left = True
+        else:
+            raise ValueError(
+                "Unknown moves left head format: {}".format(moves_left_head))
+
+        self.net.set_movesleftformat(self.MOVES_LEFT_HEAD)
+
+        if input_mode == "classic":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+        elif input_mode == "frc_castling":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
+        elif input_mode == "canonical":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
+        elif input_mode == "canonical_100":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
+        elif input_mode == "canonical_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
+        elif input_mode == "canonical_v2":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2
+        elif input_mode == "canonical_v2_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON
+        else:
+            raise ValueError(
+                "Unknown input mode format: {}".format(input_mode))
+
+        self.net.set_input(self.INPUT_MODE)
+
+        if default_activation == "relu":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
+            self.DEFAULT_ACTIVATION = 'relu'
+        elif default_activation == "mish":
+            self.net.set_defaultactivation(
+                pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
+            import tensorflow_addons as tfa
+            self.DEFAULT_ACTIVATION = tfa.activations.mish
+        elif default_activation == "gelu":
+            self.DEFAULT_ACTIVATION = 'gelu'
+        else:
+            raise ValueError(
+                "Unknown default activation type: {}".format(default_activation))
+
+        if self.encoder_layers > 0:
+            self.net.set_networkformat(
+                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)
+
+        self.net.set_smolgen_activation(self.net.activation(self.smolgen_activation))
+        self.net.set_ffn_activation(
+            self.net.activation('sqrrelu' if self.square_relu_ffn else 'default'))
+
+        self.swa_enabled = self.cfg['training'].get('swa', False)
+
+        # Limit momentum of SWA exponential average to 1 - 1/(swa_max_n + 1)
+        self.swa_max_n = self.cfg['training'].get('swa_max_n', 0)
+
+        self.renorm_enabled = self.cfg['training'].get('renorm', False)
+        self.renorm_max_r = self.cfg['training'].get('renorm_max_r', 1)
+        self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
+        self.renorm_momentum = self.cfg['training'].get(
+            'renorm_momentum', 0.99)
+
+        if self.cfg['gpu'] == 'all':
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            self.strategy = tf.distribute.MirroredStrategy()
+            tf.distribute.experimental_set_strategy(self.strategy)
+        else:
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            print(gpus)
+            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
+                                                       'GPU')
+            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
+                                                     True)
+            self.strategy = None
+
+        if self.model_dtype == tf.float16:
+            tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
+
+        self.global_step = tf.Variable(0,
+                                       name='global_step',
+                                       trainable=False,
+                                       dtype=tf.int64)
+  
+    #'''  
     def init(self, train_dataset, test_dataset, validation_dataset=None):
         if self.strategy is not None:
             self.train_dataset = self.strategy.experimental_distribute_dataset(
@@ -1135,71 +1382,207 @@ class TFProcess:
             [inputs, out2]))
 
     @staticmethod
-    def split_heads(inputs, batch_size, num_heads, depth):
+    def split_heads(inputs, batch_size: int, num_heads: int, depth: int):
         if num_heads < 2:
             return inputs
         reshaped = tf.reshape(inputs, (batch_size, 64, num_heads, depth))
-        return tf.transpose(reshaped, perm=[0, 2, 1, 3])  # (batch_size, num_heads, 64, depth)
+        # (batch_size, num_heads, 64, depth)
+        return tf.transpose(reshaped, perm=[0, 2, 1, 3])
 
-    def scaled_dot_product_attention(self, q, k, v):
+    def scaled_dot_product_attention(self, q, k, v, name: str = None, inputs=None):
+
+        # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
+        batch_size = tf.shape(q)[0]
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+        heads = scaled_attention_logits.shape[1]
+
+        if self.use_smolgen:
+            smolgen_weights = self.smolgen_weights(inputs, heads, self.smolgen_hidden_channels, self.smolgen_hidden_sz,
+                                                   self.smolgen_gen_sz, name=name+'/smolgen', activation=self.smolgen_activation)
+            scaled_attention_logits = scaled_attention_logits + smolgen_weights
+
         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
         output = tf.matmul(attention_weights, v)
-        return output, scaled_attention_logits
 
+        # output shape = (b, h, 64, d)
+        if heads > 1:
+            output = tf.transpose(output, perm=[0, 2, 1, 3])
+            output = tf.keras.layers.Reshape((64, -1))(output)
+        return output, scaled_attention_logits
     # multi-head attention in encoder blocks
-    def mha(self, inputs, emb_size, d_model, num_heads, name):
+    
+    def mha(self, inputs, emb_size: int, d_model: int, num_heads: int, initializer, name: str):
         assert d_model % num_heads == 0
         depth = d_model // num_heads
         # query, key, and value vectors for self-attention
-        q = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wq')(inputs)
-        k = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wk')(inputs)
-        v = tf.keras.layers.Dense(d_model, kernel_initializer='glorot_normal', name=name + '/wv')(inputs)
+        # inputs b, 64, sz
+
+        q = tf.keras.layers.Dense(
+            d_model, name=name+'/wq', kernel_initializer='glorot_normal')(inputs)
+        k = tf.keras.layers.Dense(
+            d_model, name=name+'/wk', kernel_initializer='glorot_normal')(inputs)
+        v = tf.keras.layers.Dense(
+            d_model, name=name+'/wv', kernel_initializer=initializer)(inputs)
+
         # split q, k and v into smaller vectors of size 'depth' -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
+
         q = self.split_heads(q, batch_size, num_heads, depth)
         k = self.split_heads(k, batch_size, num_heads, depth)
         v = self.split_heads(v, batch_size, num_heads, depth)
-        scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v)
-        if num_heads > 1:
-            scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
-            scaled_attention = tf.reshape(scaled_attention, (batch_size, -1, d_model))  # concatenate heads
+
+        scaled_attention, attention_weights = self.scaled_dot_product_attention(
+            q, k, v, name=name, inputs=inputs)
+
         # final dense layer
-        output = tf.keras.layers.Dense(emb_size, kernel_initializer='glorot_normal',
-                                       name=name + "/dense")(scaled_attention)
+        output = tf.keras.layers.Dense(
+            emb_size, name=name + "/dense_fin", kernel_initializer=initializer)(scaled_attention)
         return output, attention_weights
-
+        
     # 2-layer dense feed-forward network in encoder blocks
-    def ffn(self, inputs, emb_size, dff, name):
-        dense1 = tf.keras.layers.Dense(dff, kernel_initializer='glorot_normal', activation='selu',
-                                       name=name + "/dense1")(inputs)
-        return tf.keras.layers.Dense(emb_size, kernel_initializer='glorot_normal', name=name + "/dense2")(dense1)
+    def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str):
+        dense1 = tf.keras.layers.Dense(
+            dff, name=name + "/dense1", kernel_initializer=initializer)(inputs)
 
-    def encoder_layer(self, inputs, emb_size, d_model, num_heads, dff, name, training):
-        attn_output, attn_wts = self.mha(inputs, emb_size, d_model, num_heads, name=name + "/mha")
+        activation = square_relu if self.square_relu_ffn else tf.keras.activations.get(self.DEFAULT_ACTIVATION)
+        dense1 = activation(dense1)
+
+        out = tf.keras.layers.Dense(emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
+        return out
+
+    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
+        # DeepNorm
+        alpha = tf.cast(tf.math.pow(
+            2. * self.encoder_layers, 0.25), self.model_dtype)
+        beta = tf.cast(tf.math.pow(
+            8. * self.encoder_layers, -0.25), self.model_dtype)
+        xavier_norm = tf.keras.initializers.VarianceScaling(
+            scale=beta, mode='fan_avg', distribution='truncated_normal')
+
+        # multihead attention
+        attn_output, attn_wts = self.mha(
+            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
+
         # dropout for weight regularization
-        attn_output = tf.keras.layers.Dropout(self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
+        attn_output = tf.keras.layers.Dropout(
+            self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
         # skip connection + layernorm
-        out1 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln1")(inputs + attn_output)
+        out1 = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6, name=name + "/ln1")(inputs * alpha + attn_output)
         # feed-forward network
-        ffn_output = self.ffn(out1, emb_size, dff, name=name + "/ffn")
-        ffn_output = tf.keras.layers.Dropout(self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-        out2 = tf.keras.layers.LayerNormalization(epsilon=1e-6, name=name + "/ln2")(out1 + ffn_output)
+        ffn_output = self.ffn(out1, emb_size, dff,
+                              xavier_norm, name=name + "/ffn")
+        ffn_output = tf.keras.layers.Dropout(
+            self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
+        out2 = tf.keras.layers.LayerNormalization(
+            epsilon=1e-6, name=name + "/ln2")(out1 * alpha + ffn_output)
         return out2, attn_wts
 
-    def construct_net(self, inputs):
+    def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation='swish'):
+        compressed = tf.keras.layers.Dense(
+            hidden_channels, name=name+'/compress', use_bias=False)(inputs)
+        compressed = tf.reshape(compressed, [-1, 64 * hidden_channels])
+
+        hidden = tf.keras.layers.Dense(
+            hidden_sz, name=name+'/hidden1_dense', activation=activation)(compressed)
+        hidden = tf.keras.layers.LayerNormalization(
+            name=name+'/hidden1_ln')(hidden)
+
+        gen_from = tf.keras.layers.Dense(
+            heads * gen_sz, name=name+'/gen_from', activation=activation)(hidden)
+        gen_from = tf.keras.layers.LayerNormalization(
+            name=name+'/gen_from_ln')(gen_from)
+        gen_from = tf.reshape(gen_from, [-1, heads, gen_sz])
+        out = self.smol_weight_gen_dense(gen_from)
+        return tf.reshape(out, [-1, heads, 64, 64])
+
+    def create_residual_body(self, inputs):
         flow = self.conv_block(inputs,
-                               filter_size=3,
-                               output_channels=self.RESIDUAL_FILTERS,
-                               name='input',
-                               bn_scale=True)
+                                   filter_size=3,
+                                   output_channels=self.RESIDUAL_FILTERS,
+                                   name='input',
+                                   bn_scale=True)
         for i in range(self.RESIDUAL_BLOCKS):
             flow = self.residual_block(flow,
                                        self.RESIDUAL_FILTERS,
                                        name='residual_{}'.format(i + 1))
+        return flow
+    
+    def create_encoder_body(self, inputs, embedding_size):
+        # Policy head
+        assert self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION
+        
+        # TODO: re-add support for policy encoder blocks
+        # do some input processing
+        if self.use_smolgen:
+            self.smol_weight_gen_dense = tf.keras.layers.Dense(
+                64 * 64, name='smol_weight_gen', use_bias=False)
 
+        flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
+        flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
+        # add positional encoding for each square to the input
+        if self.arc_encoding:
+            self.POS_ENC = apm.make_pos_enc()
+            positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                                                  [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+            flow = tf.concat([flow, positional_encoding], axis=2)
+
+        # square embedding
+        flow = tf.keras.layers.Dense(embedding_size, kernel_initializer='glorot_normal',
+                                     kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                     name='embedding')(flow)
+
+        # !!! input gate
+        flow = ma_gating(flow, name='embedding')
+
+        for i in range(self.encoder_layers):
+            flow, attn_wts_l = self.encoder_layer(flow, embedding_size, self.encoder_d_model,
+                                                  self.encoder_heads, self.encoder_dff,
+                                                  name='encoder_{}'.format(i + 1), training=True)
+        return flow, attn_wts_l
+    
+    def apply_promotion_logits(self, queries, keys, attn_wts):
+        # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
+        dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))  # constant for scaling
+        promotion_keys = keys[:, -8:, :]
+        # queen, rook, bishop, knight order
+        promotion_offsets = tf.keras.layers.Dense(4, kernel_initializer='glorot_normal',
+                                                  name='policy/attention/ppo', use_bias=False)(promotion_keys)
+        promotion_offsets = tf.transpose(promotion_offsets, perm=[0, 2, 1]) * dk  # Bx4x8
+        # knight offset is added to the other three
+        promotion_offsets = promotion_offsets[:, :3, :] + promotion_offsets[:, 3:4, :]
+
+        # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
+        matmul_qk = tf.matmul(queries, keys, transpose_b=True)  # Bx64x64 (from 64 queries, 64 keys)
+
+        # q, r, and b promotions are offset from the default promotion logit (knight)
+        n_promo_logits = matmul_qk[:, -16:-8, -8:]  # default traversals from penultimate rank to promotion rank
+        q_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 0:1, :], axis=3)  # Bx8x8x1
+        r_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 1:2, :], axis=3)
+        b_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 2:3, :], axis=3)
+        promotion_logits = tf.concat([q_promo_logits, r_promo_logits, b_promo_logits], axis=3)  # Bx8x8x3
+        promotion_logits = tf.reshape(promotion_logits, [-1, 8, 24])  # logits now alternate a7a8q,a7a8r,a7a8b,...,
+
+        # scale the logits by dividing them by sqrt(d_model) to stabilize gradients
+        promotion_logits = promotion_logits / dk  # Bx8x24 (8 from-squares, 3x8 promotions)
+        policy_attn_logits = matmul_qk / dk       # Bx64x64 (64 from-squares, 64 to-squares)
+
+        attn_wts.append(promotion_logits)
+        attn_wts.append(policy_attn_logits)
+
+        # APPLY POLICY MAP: output becomes Bx1856
+        h_fc1 = ApplyAttentionPolicyMap()(policy_attn_logits, promotion_logits)
+        return h_fc1
+
+    def construct_net(self, inputs, name=''):
+    
+        if self.encoder_layers > 0:
+            flow, attn_wts_l = self.create_encoder_body(inputs, self.RESIDUAL_FILTERS)
+        else:
+            flow = self.create_residual_body(inputs)
+        
         # Policy head
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_CONVOLUTION:
             conv_pol = self.conv_block(flow,
@@ -1229,23 +1612,25 @@ class TFProcess:
                                           bias_regularizer=self.l2reg,
                                           name='policy/dense')(h_conv_pol_flat)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
-            # transpose and reshape
-            tokens = tf.transpose(flow, perm=[0, 2, 3, 1])
-            tokens = tf.reshape(tokens, [-1, 64, self.RESIDUAL_FILTERS])
-
+            attn_wts = []
+            if self.RESIDUAL_BLOCKS > 0:
+                # transpose and reshape
+                tokens = tf.transpose(flow, perm=[0, 2, 3, 1])
+                tokens = tf.reshape(tokens, [-1, 64, self.RESIDUAL_FILTERS])
+            else:
+                tokens = flow
             # SQUARE EMBEDDING: found to increase attention head performance
             tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer='glorot_normal',
                                            kernel_regularizer=self.l2reg, activation='selu',
                                            name='policy/embedding')(tokens)
-
-            # ENCODER LAYERS: intermediate layers of self-attention with residual connections
-            attn_wts = []
-            for i in range(self.pol_encoder_layers):
-                tokens, attn_wts_l = self.encoder_layer(tokens, self.pol_embedding_size, self.pol_encoder_d_model,
-                                                        self.pol_encoder_heads, self.pol_encoder_dff,
-                                                        name='policy/enc_layer_{}'.format(i + 1), training=True
-                                                        )
-                attn_wts.append(attn_wts_l)
+            if self.RESIDUAL_BLOCKS > 0:
+                # ENCODER LAYERS: intermediate layers of self-attention with residual connections
+                for i in range(self.pol_encoder_layers):
+                    tokens, attn_wts_l = self.encoder_layer(tokens, self.pol_embedding_size, self.pol_encoder_d_model,
+                                                            self.pol_encoder_heads, self.pol_encoder_dff,
+                                                            name='policy/enc_layer_{}'.format(i + 1), training=True
+                                                            )
+                    attn_wts.append(attn_wts_l)
 
             # create queries and keys for policy self-attention
             queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
@@ -1253,45 +1638,22 @@ class TFProcess:
             keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer='glorot_normal',
                                          name='policy/attention/wk')(tokens)
 
-            # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
-            dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))  # constant for scaling
-            promotion_keys = keys[:, -8:, :]
-            # queen, rook, bishop, knight order
-            promotion_offsets = tf.keras.layers.Dense(4, kernel_initializer='glorot_normal',
-                                                      name='policy/attention/ppo', use_bias=False)(promotion_keys)
-            promotion_offsets = tf.transpose(promotion_offsets, perm=[0, 2, 1]) * dk  # Bx4x8
-            # knight offset is added to the other three
-            promotion_offsets = promotion_offsets[:, :3, :] + promotion_offsets[:, 3:4, :]
-
-            # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
-            matmul_qk = tf.matmul(queries, keys, transpose_b=True)  # Bx64x64 (from 64 queries, 64 keys)
-
-            # q, r, and b promotions are offset from the default promotion logit (knight)
-            n_promo_logits = matmul_qk[:, -16:-8, -8:]  # default traversals from penultimate rank to promotion rank
-            q_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 0:1, :], axis=3)  # Bx8x8x1
-            r_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 1:2, :], axis=3)
-            b_promo_logits = tf.expand_dims(n_promo_logits + promotion_offsets[:, 2:3, :], axis=3)
-            promotion_logits = tf.concat([q_promo_logits, r_promo_logits, b_promo_logits], axis=3)  # Bx8x8x3
-            promotion_logits = tf.reshape(promotion_logits, [-1, 8, 24])  # logits now alternate a7a8q,a7a8r,a7a8b,...,
-
-            # scale the logits by dividing them by sqrt(d_model) to stabilize gradients
-            promotion_logits = promotion_logits / dk  # Bx8x24 (8 from-squares, 3x8 promotions)
-            policy_attn_logits = matmul_qk / dk       # Bx64x64 (64 from-squares, 64 to-squares)
-
-            attn_wts.append(promotion_logits)
-            attn_wts.append(policy_attn_logits)
-
-            # APPLY POLICY MAP: output becomes Bx1856
-            h_fc1 = ApplyAttentionPolicyMap()(policy_attn_logits, promotion_logits)
+            h_fc1 = self.apply_promotion_logits(queries, keys, attn_wts)
+            
         else:
-            raise ValueError("Unknown policy head type {}".format(
-                self.POLICY_HEAD))
+            raise ValueError("Unknown policy head type {}".format(self.POLICY_HEAD))
 
         # Value head
-        conv_val = self.conv_block(flow,
-                                   filter_size=1,
-                                   output_channels=32,
-                                   name='value')
+        if self.encoder_layers > 0:
+            conv_val = tf.keras.layers.Dense(self.val_embedding_size, kernel_initializer='glorot_normal',
+                                             kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                             name='value/embedding')(flow)    
+        else:
+            conv_val = self.conv_block(flow,
+                                       filter_size=1,
+                                       output_channels=32,
+                                       name='value')
+                                   
         h_conv_val_flat = tf.keras.layers.Flatten()(conv_val)
         h_fc2 = tf.keras.layers.Dense(128,
                                       kernel_initializer='glorot_normal',
@@ -1313,10 +1675,15 @@ class TFProcess:
 
         # Moves left head
         if self.moves_left:
-            conv_mov = self.conv_block(flow,
-                                       filter_size=1,
-                                       output_channels=8,
-                                       name='moves_left')
+            if self.encoder_layers > 0:
+                conv_mov = tf.keras.layers.Dense(self.mov_embedding_size, kernel_initializer='glorot_normal',
+                                                 kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                                 name='moves_left/embedding')(flow)
+            else:
+                conv_mov = self.conv_block(flow,
+                                           filter_size=1,
+                                           output_channels=8,
+                                           name='moves_left')
             h_conv_mov_flat = tf.keras.layers.Flatten()(conv_mov)
             h_fc4 = tf.keras.layers.Dense(
                 128,
