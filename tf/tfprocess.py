@@ -165,8 +165,6 @@ class TFProcess:
         self.policy_d_model = self.cfg['model'].get('policy_d_model', self.RESIDUAL_FILTERS)
         
         #encoder body
-        self.use_talking_heads = self.cfg['model'].get('talking_heads', False)
-        self.glu = self.cfg['model'].get('glu', False)
         self.input_gate = self.cfg['model'].get('input_gate')
         self.encoder_d_model = self.cfg['model'].get('encoder_d_model')
         self.encoder_dff = self.cfg['model'].get('encoder_dff', (self.RESIDUAL_FILTERS*1.5)//1)
@@ -1211,7 +1209,6 @@ class TFProcess:
 
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
-        batch_size = tf.shape(q)[0]
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
         heads = scaled_attention_logits.shape[1]
