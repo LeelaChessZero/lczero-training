@@ -108,25 +108,25 @@ class Net:
 
     def activation(self, name):
         if name == "relu":
-            return pb.NetworkFormat.RELU
+            return pb.NetworkFormat.ACTIVATION_RELU
         elif name == "tanh":
-            return pb.NetworkFormat.TANH
+            return pb.NetworkFormat.ACTIVATION_TANH
         elif name == "sigmoid":
-            return pb.NetworkFormat.SIGMOID
+            return pb.NetworkFormat.ACTIVATION_SIGMOID
         elif name == "softmax":
-            return pb.NetworkFormat.SOFTMAX
+            return pb.NetworkFormat.ACTIVATION_SOFTMAX
         elif name == "selu":
-            return pb.NetworkFormat.SELU
+            return pb.NetworkFormat.ACTIVATION_SELU
         elif name == "mish":
-            return pb.NetworkFormat.MISH
+            return pb.NetworkFormat.ACTIVATION_MISH
         elif name == "swish":
-            return pb.NetworkFormat.SWISH
+            return pb.NetworkFormat.ACTIVATION_SWISH
         elif name == "relu_2" or name == "sqrrelu":
-            return pb.NetworkFormat.RELU_2
+            return pb.NetworkFormat.ACTIVATION_RELU_2
         elif name == "default":
-            return pb.NetworkFormat.DEFAULT
+            return pb.NetworkFormat.ACTIVATION_DEFAULT
         else:
-            return pb.NetworkFormat.NONE
+            return pb.NetworkFormat.ACTIVATION_NONE
 
     def get_weight_amounts(self):
         value_weights = 8
