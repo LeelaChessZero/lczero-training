@@ -133,7 +133,6 @@ class Metric:
         self.value = 0.0
         self.count = 0
 
-#'''
 class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
