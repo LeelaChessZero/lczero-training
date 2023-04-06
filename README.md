@@ -2,11 +2,38 @@
 
 I've added a few features and modules to the training pipeline. Please direct any questions to the Leela Discord server.
 
+# A Roadmap of Improvements
+As a reference to anyone interested in improving the engine I have added a roadmap of potential improvements to the engine. Each is given a subjective rating of [a]/[b] where [a] is the potential strength improvement and b is the difficulty of implementing them. These can be interpreted as a fraction describing how worthwhile it would be to work on the improvement. If all but INT4 quantization are implemented the engine is fairly likely to outperform the current version at half time odds.
+
+## Confidence-based Search
+8/5
+If the network predicts a distribution of values instead of a single value, then we can extract the variance to estimate how confident the network is on that position. Keeping a running average of these variances and factoring this into the PUCT formula should allow search to focus on more promising lines.
+
+## A Search Heuristic to Improve Efficiency on Questionable Lines
+2/3
+After a player makes what the network interprets as a mistake, we are not interested in finding the best possible continuation, but any continuation at all that defends. If at any node the difference from the eval of a position to the eval at root is at least some threshold, then we might add a term equal to ~0.1 times the difference to the value of the child node with the most visits in the PUCT formula. We might also like this factor to decay with visit counts. 
+
+
+## INT8 Quantization
+10/6
+There are quantization schemes that can speed up our dense layers by a factor of two at minimal accuracy loss. How much of this speed gain is realized depends on the network size since the dense layers tend to dominate in larger networks.
+
+## INT4 Quantization
+4/8
+Quantizing to INT4 is much more difficult, and to prevent major accuracy loss it is necessary to train the network twice with a fairly difficult training scheme. The speed gains won't be nearly as large except at huge network sizes.
+
+
+
+
+
+
 # Categorical Value Head
+
+NOTE: AN APPROACH WHICH ONLY STORES THE VARIANCE OF THE PREDICTED VALUE DISTRIBUTION SHOULD RETAIN MOST OF THE STRENGTH GAINS
 
 The categorical value head should improve search by allowing it to better understand which lines are promising. It is similar to keeping track of the variance of the value for nodes and solves most of the problems of PUCT. Consider for simplicity the original PUCB for multi-armed bandits with bounded rewards. The regret for a play is the difference between the reward we get and the largest reward possible. If instead of a single scalar with an error, an arm outputs a distribution over rewards, we could get a better idea of the regret. The original PUCB algorithm assumes that the rewards for each arm follow a normal distribution, so that after $n$ plays of an arm our observed average return is within $O(\frac{1}{\sqrt{n}})$ of the expected reward with high probability. This gives an estimated regret of $O(\frac{1}{\sqrt{n}})$ per roll. However, we can do better than this if each arm outputs a predicted distribution of rewards. If we average these for each arm, we can get a much better idea of the regret. Consider an arm which has been played once with a 95% chance of reward 0 and a 5% chance of a reward of 1. The original PUCB algorithm would see a reward of 0.05 and starve the arm of plays. However, given that detailed distribution an algorithm would know to treat that distribution and a distribution concentrated on a reward of 0.05 differently, and give the former enough nodes to actually reduce the regret.
 
-Returning to the PUCT formula, we would like to replace the policy term, the one that attempts to minimize the regret, with one that ignores the policy after a suitable number of node visits. For each node, instead of a single value, we can approximate a distribution of values by a categorical distribution on reward with b buckets, and we can keep a running average of those categorical distributions as a richer source of information on the potential value of a line. Instead of a regret based on the assumption that the errors in the rewards follow a normal distribution, we can approximate the regret for a single child node by the integral $$R(s,a) = \int \max(v - Q(s,a), 0) d \mu,$$ where $\mu$ is the probability measure, and v is the reward from the averaged categorical distribution from the child node.
+Returning to the PUCT formula, we would like to replace the policy term, the one that attempts to minimize the regret, with one that ignores the policy after a suitable number of node visits. For each node, instead of a single value, we can approximate a distribution of values by a categorical distribution on reward with b buckets, and we can keep a running average of those categorical distributions as a richer source of information on the potential value of a line. Instead of a regret based on the assumption that the errors in the rewards follow a normal distribution, we can approximate the regret for a single child node by the integral $$R(s,a) = \int \max(v - Q(s,a), 0) d \mu,$$ where $\mu$ is the probability measure, and v is the reward from the averaged categorical distribution from the child node. Note that this approach by itself may have a major flaw: if for the sake of exploration an obviously poor move is made by, say, white, then ancestors of that node will count the path leading up to that node as too promising. One simple way to rectify this is to to only accumulate the distribution into the average of an ancestor node if the value at the child node is worse than that at the ancestor node.
 
 If our goal is only exploration rather than exploitation, then we should always sample the highest value of R(s,a). However, we of course run into dminishing returns, so that if a child node has $N(s,a)$ visits, we might expect only to reduce the stddev by around $$\frac{1}{\sqrt{N(s,a)}} - \frac{1}{\sqrt{N(s,a) + 1}} = O(N(s,a)^{-3/2}),$$ so a better strategy for exploration might be to sample the highest value among $$N(s,a)^{-3/2}R(s,a)$$ Returning the the general case of joint exploration and exploration, we may want to consider sampling the highest value of $$Q(s,a) + CN(s)N(s,a)^{-3/2}R(s,a)$$ for a suitable constant C. However, this is of course probably too aggressive. I propose: $$Q(s,a) + CN(s)^{\tau}N(s,a)^{-1}R(s,a)$$ Because $R(s,a)$, unlike $P(s,a)$, should shrink over the long run, we can pick $\tau$ larger than the 1/2 used by CPUCT. Nodes which need exploration can thus expect a much larger $\Theta(N(s)^{\tau})$ over $\Theta(N(s)^{1/2})$ visits asymptotically, while those which don't need it can more safely be ignored. Adding back the policy-based exploration term to accomdate nodes with fewer visits gives
 $$Q(s,a) + CN(s)^{\tau}N(s,a)^{-1}R(s,a) + DN^{1/2}N(s,a)^{-1}P(s,a)$$
