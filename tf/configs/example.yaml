@@ -112,6 +112,11 @@ model:
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
     
+    embedding_dense_sz: 128           # number of params added is 50k times this number so care is needed
+    n_value_buckets: 64
+    skip_first_ln: true               # apparently actually improves performance
+
+    
     value: "wdl"
     moves_left: "v1"
     input_type: "classic"
