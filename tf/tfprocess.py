@@ -1544,7 +1544,7 @@ class TFProcess:
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_in", distribution="truncated_normal")
+            scale=beta, mode="fan_avg", distribution="truncated_normal")
 
         # multihead attention
         attn_output, attn_wts = self.mha(
@@ -1584,7 +1584,7 @@ class TFProcess:
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_in", distribution="truncated_normal")
+            scale=beta, mode="fan_avg", distribution="truncated_normal")
 
         # multihead attention
         attn_output, attn_wts = self.mha(
