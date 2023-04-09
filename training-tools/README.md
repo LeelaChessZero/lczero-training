@@ -1,5 +1,5 @@
 # lczero-training-tools
-Some tools to assist you in getting data for Leela Chess Zero\
+Some tools to assist you in getting data for Leela Chess Zero
 
 # HOW TO USE
 ## Prepare your data
