@@ -1352,12 +1352,13 @@ class TFProcess:
 
         # !!! input gate
         flow = ma_gating(flow, name='embedding')
-
+        attn_wts = []
         for i in range(self.encoder_layers):
             flow, attn_wts_l = self.encoder_layer(flow, embedding_size, self.encoder_d_model,
                                                   self.encoder_heads, self.encoder_dff,
                                                   name='encoder_{}'.format(i + 1))
-        return flow, attn_wts_l
+            attn_wts.append(attn_wts_l)
+        return flow, attn_wts
 
     def apply_promotion_logits(self, queries, keys, attn_wts):
         # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
@@ -1395,7 +1396,7 @@ class TFProcess:
     def construct_net(self, inputs, name=''):
 
         if self.encoder_layers > 0:
-            flow, attn_wts_l = self.create_encoder_body(inputs, self.embedding_size)
+            flow, attn_wts = self.create_encoder_body(inputs, self.embedding_size)
         else:
             flow = self.create_residual_body(inputs)
 
@@ -1428,7 +1429,8 @@ class TFProcess:
                                           bias_regularizer=self.l2reg,
                                           name='policy/dense')(h_conv_pol_flat)
         elif self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
-            attn_wts = []
+            if self.encoder_layers == 0:
+                attn_wts = []
             if self.RESIDUAL_BLOCKS > 0:
                 # transpose and reshape
                 tokens = tf.transpose(flow, perm=[0, 2, 3, 1])
