@@ -66,6 +66,9 @@ class Net:
     def set_headcount(self, headcount):
         self.pb.weights.headcount = headcount
 
+    def set_pol_headcount(self, headcount):
+        self.pb.weights.pol_headcount = headcount
+
     def set_valueformat(self, value):
         self.pb.format.network_format.value = value
 
@@ -408,6 +411,7 @@ class Net:
         pb_name = None
         block = None
         encoder_block = None
+        pol_encoder_block = None
 
         if base_layer == 'input':
             pb_name = 'input.' + convblock_to_bp(weights_name)
@@ -424,7 +428,7 @@ class Net:
             elif layers[1] == 'attention':
                 pb_name = attn_pol_to_bp(layers[2], weights_name)
             elif layers[1].startswith('enc_layer_'):
-                encoder_block = int(layers[1].split('_')[2]) - 1
+                pol_encoder_block = int(layers[1].split('_')[2]) - 1
                 if layers[2] == 'mha':
                     pb_name = 'mha.' + mha_to_bp(layers[3], weights_name)
                 elif layers[2] == 'ffn':
@@ -476,7 +480,7 @@ class Net:
             else:
                 pb_name = 'smolgen_b'
 
-        return (pb_name, block, encoder_block)
+        return (pb_name, block, pol_encoder_block, encoder_block)
 
     def get_weights_v2(self, names):
         # `names` is a list of Tensorflow tensor names to get from the protobuf.
@@ -495,7 +499,7 @@ class Net:
                 # headcount is set with set_headcount()
                 continue
 
-            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
@@ -503,10 +507,16 @@ class Net:
                         name))
 
             if block is None:
-                if encoder_block is None:
-                    pb_weights = self.pb.weights
+                if name.startswith("policy"):
+                    if pol_encoder_block is None:
+                        pb_weights = self.pb.weights
+                    else:
+                        pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
                 else:
-                    pb_weights = self.pb.weights.encoder[encoder_block]
+                    if encoder_block is None:
+                        pb_weights = self.pb.weights
+                    else:
+                        pb_weights = self.pb.weights.encoder[encoder_block]
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -645,7 +655,7 @@ class Net:
                 elif name == 'embedding/kernel:0':
                     weights[:, 109] /= 99
 
-            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(name)
 
             if pb_name is None:
                 raise ValueError(
@@ -653,13 +663,22 @@ class Net:
                         name))
 
             if block is None:
-                if encoder_block is None:
-                    pb_weights = self.pb.weights
+                if name.startswith("policy"):
+                    if pol_encoder_block is None:
+                        pb_weights = self.pb.weights
+                    else:
+                        assert pol_encoder_block >= 0
+                        while pol_encoder_block >= len(self.pb.weights.pol_encoder):
+                            self.pb.weights.pol_encoder.add()
+                        pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
                 else:
-                    assert encoder_block >= 0
-                    while encoder_block >= len(self.pb.weights.encoder):
-                        self.pb.weights.encoder.add()
-                    pb_weights = self.pb.weights.encoder[encoder_block]
+                    if encoder_block is None:
+                        pb_weights = self.pb.weights
+                    else:
+                        assert encoder_block >= 0
+                        while encoder_block >= len(self.pb.weights.encoder):
+                            self.pb.weights.encoder.add()
+                        pb_weights = self.pb.weights.encoder[encoder_block]
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):
