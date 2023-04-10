@@ -12,6 +12,7 @@ LC0_MINOR_WITH_INPUT_TYPE_3 = 25
 LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_MINOR_WITH_MISH = 29
+LC0_MINOR_WITH_ATTN_BODY = 30
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -24,6 +25,7 @@ def nested_getattr(obj, attr):
 
 
 class Net:
+
     def __init__(self,
                  net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
                  input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
@@ -54,9 +56,15 @@ class Net:
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
+        if net == pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT \
+                and self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
 
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
+
+    def set_headcount(self, headcount):
+        self.pb.weights.headcount = headcount
 
     def set_pol_headcount(self, headcount):
         self.pb.weights.pol_headcount = headcount
@@ -88,6 +96,40 @@ class Net:
         if activation == pb.NetworkFormat.DEFAULT_ACTIVATION_MISH:
             if self.pb.min_version.minor < LC0_MINOR_WITH_MISH:
                 self.pb.min_version.minor = LC0_MINOR_WITH_MISH
+
+    def set_smolgen_activation(self, activation):
+        self.pb.format.network_format.smolgen_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def set_ffn_activation(self, activation):
+        self.pb.format.network_format.ffn_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def activation(self, name):
+        if name == "relu":
+            return pb.NetworkFormat.ACTIVATION_RELU
+        elif name == "tanh":
+            return pb.NetworkFormat.ACTIVATION_TANH
+        elif name == "sigmoid":
+            return pb.NetworkFormat.ACTIVATION_SIGMOID
+        elif name == "softmax":
+            return pb.NetworkFormat.ACTIVATION_SOFTMAX
+        elif name == "selu":
+            return pb.NetworkFormat.ACTIVATION_SELU
+        elif name == "mish":
+            return pb.NetworkFormat.ACTIVATION_MISH
+        elif name == "swish":
+            return pb.NetworkFormat.ACTIVATION_SWISH
+        elif name == "relu_2" or name == "sqrrelu":
+            return pb.NetworkFormat.ACTIVATION_RELU_2
+        elif name == "default":
+            return pb.NetworkFormat.ACTIVATION_DEFAULT
+        else:
+            return pb.NetworkFormat.ACTIVATION_NONE
 
     def get_weight_amounts(self):
         value_weights = 8
@@ -237,6 +279,7 @@ class Net:
     def tf_name_to_pb_name(self, name):
         """Given Tensorflow variable name returns the protobuf name and index
         of residual block if weight belong in a residual block."""
+
         def convblock_to_bp(w):
             w = w.split(':')[0]
             d = {
@@ -264,7 +307,9 @@ class Net:
             return d[w] + str(n)
 
         def value_to_bp(l, w):
-            if l == 'dense1':
+            if l == 'embedding':
+                n = ''
+            elif l == 'dense1':
                 n = 1
             elif l == 'dense2':
                 n = 2
@@ -317,12 +362,33 @@ class Net:
             elif l.startswith('w'):
                 s = l[1]
             else:
-                raise ValueError(
-                    'Unable to decode mha weight {}/{}'.format(l, w))
+                raise ValueError('Unable to decode mha weight {}/{}'.format(
+                    l, w))
             w = w.split(':')[0]
             d = {'kernel': '{}_w', 'bias': '{}_b'}
 
             return d[w].format(s)
+
+        def mha_smolgen_to_bp(l, w):
+            s = {
+                'compress': 'compress',
+                'hidden1_dense': 'dense1_{}',
+                'hidden1_ln': 'ln1_{}',
+                'gen_from': 'dense2_{}',
+                'gen_from_ln': 'ln2_{}'
+            }
+            if s[l] is None:
+                raise ValueError(
+                    'Unable to decode mha smolgen weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {
+                'kernel': 'w',
+                'bias': 'b',
+                'gamma': 'gammas',
+                'beta': 'betas'
+            }
+
+            return s[l].format(d[w])
 
         def ffn_to_bp(l, w):
             w = w.split(':')[0]
@@ -331,7 +397,9 @@ class Net:
             return d[w].format(l)
 
         def moves_left_to_bp(l, w):
-            if l == 'dense1':
+            if l == 'embedding':
+                n = ''
+            elif l == 'dense1':
                 n = 1
             elif l == 'dense2':
                 n = 2
@@ -348,6 +416,7 @@ class Net:
         weights_name = layers[-1]
         pb_name = None
         block = None
+        encoder_block = None
         pol_encoder_block = None
 
         if base_layer == 'input':
@@ -375,12 +444,12 @@ class Net:
             else:
                 pb_name = 'policy.' + convblock_to_bp(weights_name)
         elif base_layer == 'value':
-            if 'dense' in layers[1]:
+            if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = value_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'value.' + convblock_to_bp(weights_name)
         elif base_layer == 'moves_left':
-            if 'dense' in layers[1]:
+            if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = moves_left_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'moves_left.' + convblock_to_bp(weights_name)
@@ -392,8 +461,33 @@ class Net:
                 pb_name = 'conv2.' + convblock_to_bp(weights_name)
             elif layers[1] == 'se':
                 pb_name = 'se.' + se_to_bp(layers[-2], weights_name)
+        elif base_layer.startswith('encoder'):
+            encoder_block = int(base_layer.split('_')[1]) - 1
+            if layers[1] == 'mha':
+                if layers[2] == 'smolgen':
+                    pb_name = 'mha.smolgen.' + mha_smolgen_to_bp(
+                        layers[3], weights_name)
+                else:
+                    pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn':
+                pb_name = 'ffn.' + ffn_to_bp(layers[2], weights_name)
+            else:
+                pb_name = encoder_to_bp(layers[1], weights_name)
+        elif base_layer == 'embedding':
+            if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
+                if layers[2].split(':')[0] == 'gate':
+                    pb_name = 'ip_{}'.format(layers[1])
+            elif layers[1].split(':')[0] == 'kernel':
+                pb_name = 'ip_emb_w'
+            elif layers[1].split(':')[0] == 'bias':
+                pb_name = 'ip_emb_b'
+        elif base_layer == 'smol_weight_gen':
+            if layers[1].split(':')[0] == 'kernel':
+                pb_name = 'smolgen_w'
+            else:
+                pb_name = 'smolgen_b'
 
-        return (pb_name, block, pol_encoder_block)
+        return (pb_name, block, pol_encoder_block, encoder_block)
 
     def get_weights_v2(self, names):
         # `names` is a list of Tensorflow tensor names to get from the protobuf.
@@ -412,7 +506,8 @@ class Net:
                 # headcount is set with set_headcount()
                 continue
 
-            pb_name, block, pol_encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -420,10 +515,12 @@ class Net:
                         name))
 
             if block is None:
-                if pol_encoder_block is None:
-                    pb_weights = self.pb.weights
-                else:
+                if pol_encoder_block is not None:
                     pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
+                    pb_weights = self.pb.weights.encoder[encoder_block]
+                else:
+                    pb_weights = self.pb.weights
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -555,11 +652,15 @@ class Net:
                     weights = np.square(weights) - 1e-5
                     name = name.replace('stddev', 'variance')
 
-            if name == 'input/conv2d/kernel:0' and self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                weights[:, 109, :, :] /= 99
+            if self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if name == 'input/conv2d/kernel:0':
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    weights[:, 109, :, :] /= 99
+                elif name == 'embedding/kernel:0':
+                    weights[:, 109] /= 99
 
-            pb_name, block, pol_encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -567,13 +668,19 @@ class Net:
                         name))
 
             if block is None:
-                if pol_encoder_block is None:
-                    pb_weights = self.pb.weights
-                else:
+                if pol_encoder_block is not None:
                     assert pol_encoder_block >= 0
-                    while pol_encoder_block >= len(self.pb.weights.pol_encoder):
+                    while pol_encoder_block >= len(
+                            self.pb.weights.pol_encoder):
                         self.pb.weights.pol_encoder.add()
                     pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
+                    assert encoder_block >= 0
+                    while encoder_block >= len(self.pb.weights.encoder):
+                        self.pb.weights.encoder.add()
+                    pb_weights = self.pb.weights.encoder[encoder_block]
+                else:
+                    pb_weights = self.pb.weights
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):

@@ -92,3 +92,37 @@ def make_map():
                 j += 1
 
     return z
+
+def make_pos_enc():
+    traversable = []
+    for i in range(8):
+        for j in range(8):
+            sq = (8*i + j)
+            traversable.append(
+                sq +
+                np.sort(
+                    np.int32(
+                        np.concatenate((
+                            orthog[0][:7-j], orthog[2][:j], orthog[1][:i], orthog[3][:7-i],
+                            diag[0][:np.min((7-i, 7-j))], diag[3][:np.min((7-i, j))],
+                            diag[1][:np.min((i, 7-j))], diag[2][:np.min((i, j))],
+                            knight[0] if i < 7 and j < 6 else [], knight[1] if i > 0 and j < 6 else [],
+                            knight[2] if i > 1 and j < 7 else [], knight[3] if i > 1 and j > 0 else [],
+                            knight[4] if i > 0 and j > 1 else [], knight[5] if i < 7 and j > 1 else [],
+                            knight[6] if i < 6 and j > 0 else [], knight[7] if i < 6 and j < 7 else [],
+                            # pawn_promotion[0] if i == 6 and j > 0 else [],
+                            # pawn_promotion[1] if i == 6           else [],
+                            # pawn_promotion[2] if i == 6 and j < 7 else [],
+                        ))
+                    )
+                )
+            )
+
+    # pos_enc = np.zeros((1, 64, 88), dtype=np.float32)
+    pos_enc = np.zeros((1, 64, 64), dtype=np.float32)
+    for i, k in enumerate(traversable):
+        pos_enc[0][i][i] = -1.
+        for j in k:
+            pos_enc[0][i][j] = 1.
+
+    return pos_enc
