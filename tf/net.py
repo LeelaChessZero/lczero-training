@@ -25,6 +25,7 @@ def nested_getattr(obj, attr):
 
 
 class Net:
+
     def __init__(self,
                  net=pb.NetworkFormat.NETWORK_SE_WITH_HEADFORMAT,
                  input=pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE,
@@ -52,7 +53,6 @@ class Net:
         self.set_valueformat(value)
         self.set_movesleftformat(moves_left)
         self.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
-        # self.set_smolgen_activation(pb.Weights.Activation.SWISH)
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
@@ -279,6 +279,7 @@ class Net:
     def tf_name_to_pb_name(self, name):
         """Given Tensorflow variable name returns the protobuf name and index
         of residual block if weight belong in a residual block."""
+
         def convblock_to_bp(w):
             w = w.split(':')[0]
             d = {
@@ -361,8 +362,8 @@ class Net:
             elif l.startswith('w'):
                 s = l[1]
             else:
-                raise ValueError(
-                    'Unable to decode mha weight {}/{}'.format(l, w))
+                raise ValueError('Unable to decode mha weight {}/{}'.format(
+                    l, w))
             w = w.split(':')[0]
             d = {'kernel': '{}_w', 'bias': '{}_b'}
 
@@ -380,7 +381,12 @@ class Net:
                 raise ValueError(
                     'Unable to decode mha smolgen weight {}/{}'.format(l, w))
             w = w.split(':')[0]
-            d = {'kernel': 'w', 'bias': 'b', 'gamma': 'gammas', 'beta': 'betas'}
+            d = {
+                'kernel': 'w',
+                'bias': 'b',
+                'gamma': 'gammas',
+                'beta': 'betas'
+            }
 
             return s[l].format(d[w])
 
@@ -459,7 +465,8 @@ class Net:
             encoder_block = int(base_layer.split('_')[1]) - 1
             if layers[1] == 'mha':
                 if layers[2] == 'smolgen':
-                    pb_name = 'mha.smolgen.' + mha_smolgen_to_bp(layers[3], weights_name)
+                    pb_name = 'mha.smolgen.' + mha_smolgen_to_bp(
+                        layers[3], weights_name)
                 else:
                     pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
             elif layers[1] == 'ffn':
@@ -499,7 +506,8 @@ class Net:
                 # headcount is set with set_headcount()
                 continue
 
-            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -507,16 +515,12 @@ class Net:
                         name))
 
             if block is None:
-                if name.startswith("policy"):
-                    if pol_encoder_block is None:
-                        pb_weights = self.pb.weights
-                    else:
-                        pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                if pol_encoder_block is not None:
+                    pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
+                    pb_weights = self.pb.weights.encoder[encoder_block]
                 else:
-                    if encoder_block is None:
-                        pb_weights = self.pb.weights
-                    else:
-                        pb_weights = self.pb.weights.encoder[encoder_block]
+                    pb_weights = self.pb.weights
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -655,7 +659,8 @@ class Net:
                 elif name == 'embedding/kernel:0':
                     weights[:, 109] /= 99
 
-            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -663,22 +668,19 @@ class Net:
                         name))
 
             if block is None:
-                if name.startswith("policy"):
-                    if pol_encoder_block is None:
-                        pb_weights = self.pb.weights
-                    else:
-                        assert pol_encoder_block >= 0
-                        while pol_encoder_block >= len(self.pb.weights.pol_encoder):
-                            self.pb.weights.pol_encoder.add()
-                        pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                if pol_encoder_block is not None:
+                    assert pol_encoder_block >= 0
+                    while pol_encoder_block >= len(
+                            self.pb.weights.pol_encoder):
+                        self.pb.weights.pol_encoder.add()
+                    pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
+                    assert encoder_block >= 0
+                    while encoder_block >= len(self.pb.weights.encoder):
+                        self.pb.weights.encoder.add()
+                    pb_weights = self.pb.weights.encoder[encoder_block]
                 else:
-                    if encoder_block is None:
-                        pb_weights = self.pb.weights
-                    else:
-                        assert encoder_block >= 0
-                        while encoder_block >= len(self.pb.weights.encoder):
-                            self.pb.weights.encoder.add()
-                        pb_weights = self.pb.weights.encoder[encoder_block]
+                    pb_weights = self.pb.weights
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):
