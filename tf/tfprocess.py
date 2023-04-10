@@ -175,8 +175,10 @@ class TFProcess:
         if (self.encoder_layers > 0):
             self.pol_encoder_layers = 0
         else:
-            self.pol_encoder_layers = self.cfg['model'].get(
-                'pol_encoder_layers', 1)
+            self.pol_encoder_layers = 1
+        #logic is to explictly warn users who set both in yaml
+        if self.cfg['model'].get('pol_encoder_layers') is not None:
+            self.pol_encoder_layers = self.cfg['model'].get('pol_encoder_layers')
         assert not ((self.pol_encoder_layers > 0) and (self.encoder_layers > 0)), \
                 "Nets with both body encoder layers and policy encoder layers are not supported"
         self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
