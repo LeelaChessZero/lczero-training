@@ -172,8 +172,13 @@ class TFProcess:
         self.mov_embedding_size = self.cfg['model'].get(
             'moves_left_embedding_size', 8)
         #policy head
-        self.pol_encoder_layers = self.cfg['model'].get(
-            'pol_encoder_layers', 1)
+        if (self.encoder_layers > 0):
+            self.pol_encoder_layers = 0
+        else:
+            self.pol_encoder_layers = self.cfg['model'].get(
+                'pol_encoder_layers', 1)
+        assert not ((self.pol_encoder_layers > 0) and (self.encoder_layers > 0)), \
+                "Nets with both body encoder layers and policy encoder layers are not supported"
         self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
         self.pol_encoder_d_model = self.cfg['model'].get(
             'pol_encoder_d_model', self.RESIDUAL_FILTERS)
