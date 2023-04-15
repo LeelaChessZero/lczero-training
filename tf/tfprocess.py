@@ -175,7 +175,8 @@ class TFProcess:
         self.pol_encoder_layers = (0 if self.encoder_layers > 0 else 1)
         #logic is to explictly warn users who set both in yaml
         if self.cfg['model'].get('pol_encoder_layers') is not None:
-            self.pol_encoder_layers = self.cfg['model'].get('pol_encoder_layers')
+            self.pol_encoder_layers = self.cfg['model'].get(
+                'pol_encoder_layers')
         assert not ((self.pol_encoder_layers > 0) and (self.encoder_layers > 0)), \
                 "Nets with both body encoder layers and policy encoder layers are not supported"
         self.pol_encoder_heads = self.cfg['model'].get('pol_encoder_heads', 2)
@@ -299,8 +300,11 @@ class TFProcess:
         elif default_activation == "mish":
             self.net.set_defaultactivation(
                 pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            import tensorflow_addons as tfa
-            self.DEFAULT_ACTIVATION = tfa.activations.mish
+            try:
+                self.DEFAULT_ACTIVATION = tf.keras.activations.mish
+            except AttributeError:
+                import tensorflow_addons as tfa
+                self.DEFAULT_ACTIVATION = tfa.activations.mish
         else:
             raise ValueError("Unknown default activation type: {}".format(
                 default_activation))
@@ -389,9 +393,29 @@ class TFProcess:
             ]
 
         self.active_lr = tf.Variable(0.01, trainable=False)
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
+        # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
+        self.update_lr_manually = False
+        # Be sure not to set new_optimizer before TF 2.11, or unless you edit the code to specify a new optimizer explicitly.
+        if self.cfg['training'].get('new_optimizer'):
+            self.optimizer = tf.keras.optimizers.SGD(
+                learning_rate=self.active_lr, momentum=0.9, nesterov=True)
+            self.update_lr_manually = True
+        else:
+            try:
+                self.optimizer = tf.keras.optimizers.legacy.SGD(
+                    learning_rate=lambda: self.active_lr,
+                    momentum=0.9,
+                    nesterov=True)
+            except AttributeError:
+                self.optimizer = tf.keras.optimizers.SGD(
+                    learning_rate=lambda: self.active_lr,
+                    momentum=0.9,
+                    nesterov=True)
         self.orig_optimizer = self.optimizer
+        try:
+            self.aggregator = self.orig_optimizer.aggregate_gradients
+        except AttributeError:
+            self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
                 self.optimizer, self.loss_scale)
@@ -774,8 +798,8 @@ class TFProcess:
 
     def apply_grads(self, grads, effective_batch_splits):
         grads = [
-            g[0] for g in self.orig_optimizer.gradient_aggregator(
-                zip(grads, self.model.trainable_weights))
+            g[0]
+            for g in self.aggregator(zip(grads, self.model.trainable_weights))
         ]
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
@@ -835,6 +859,8 @@ class TFProcess:
         if self.strategy is not None:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr.assign(self.lr / effective_batch_splits)
+        if self.update_lr_manually:
+            self.orig_optimizer.learning_rate = self.active_lr
         if self.strategy is not None:
             grad_norm = self.strategy_apply_grads(grads,
                                                   effective_batch_splits)
