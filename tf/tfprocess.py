@@ -400,6 +400,10 @@ class TFProcess:
             self.optimizer = tf.keras.optimizers.SGD(
                 learning_rate=self.active_lr, momentum=0.9, nesterov=True)
             self.update_lr_manually = True
+            try:
+                self.aggregator = self.optimizer.aggregate_gradients
+            except AttributeError:
+                self.aggregator = self.optimizer.gradient_aggregator
         else:
             try:
                 self.optimizer = tf.keras.optimizers.legacy.SGD(
@@ -411,11 +415,10 @@ class TFProcess:
                     learning_rate=lambda: self.active_lr,
                     momentum=0.9,
                     nesterov=True)
+            finally:
+                self.aggregator = self.optimizer.gradient_aggregator
+                
         self.orig_optimizer = self.optimizer
-        try:
-            self.aggregator = self.orig_optimizer.aggregate_gradients
-        except AttributeError:
-            self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
                 self.optimizer, self.loss_scale)
