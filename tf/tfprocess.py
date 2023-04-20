@@ -1563,13 +1563,15 @@ class TFProcess:
                 # transpose and reshape
                 tokens = tf.transpose(flow, perm=[0, 2, 3, 1])
                 tokens = tf.reshape(tokens, [-1, 64, self.RESIDUAL_FILTERS])
+                embed_activation = 'selu'
             else:
                 tokens = flow
+                embed_activation = self.DEFAULT_ACTIVATION
             # SQUARE EMBEDDING: found to increase attention head performance
             tokens = tf.keras.layers.Dense(self.pol_embedding_size,
                                            kernel_initializer='glorot_normal',
                                            kernel_regularizer=self.l2reg,
-                                           activation='selu',
+                                           activation=embed_activation,
                                            name='policy/embedding')(tokens)
             if self.RESIDUAL_BLOCKS > 0:
                 # ENCODER LAYERS: intermediate layers of self-attention with residual connections
