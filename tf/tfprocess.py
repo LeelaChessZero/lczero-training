@@ -38,99 +38,21 @@ def square_relu(x):
     return tf.nn.relu(x) ** 2
 
 
-def min_max_avg_pool(x):
-    return tf.concat([tf.reduce_min(x, axis=1),
-                      tf.reduce_max(x, axis=1),
-                      tf.reduce_mean(x, axis=1)], axis=1)
-
-
-class Gating(tf.keras.layers.Layer):
-    def __init__(self, name=None, additive=True, init_value=None, **kwargs):
-        self.additive = additive
-        if init_value is None:
-            init_value = 0 if self.additive else 1
-        self.init_value = init_value
-        super().__init__(name=name, **kwargs)
+class RMSNorm(tf.keras.layers.Layer):
+    def __init__(self, scale=True, **kwargs):
+        super(RMSNorm, self).__init__(**kwargs)
+        self.scale = scale
 
     def build(self, input_shape):
-        self.gate = self.add_weight(name="gate",
-                                    shape=input_shape[1:],
-                                    constraint=tf.keras.constraints.NonNeg() if not self.additive else None,
-                                    initializer=tf.constant_initializer(
-                                        self.init_value),
-                                    trainable=True)
+        self.gamma = self.add_weight(name="gamma",
+                                     shape=[input_shape[-1]],
+                                     initializer="ones",
+                                     trainable=True) if self.scale else 1
 
     def call(self, inputs):
-        return tf.add(inputs, self.gate) if self.additive else tf.multiply(inputs, self.gate)
-
-
-class ConcatBias(tf.keras.layers.Layer):
-    def __init__(self, size: int, **kwargs):
-        self.size = size
-        super().__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.bias = self.add_weight(name="bias",
-                                    shape=(1, 64, self.size),
-                                    initializer=tf.keras.initializers.RandomNormal(
-                                        mean=0, stddev=0.2),
-                                    trainable=True)
-
-    def call(self, inputs):
-        # expand bias to match input shape
-        bias = tf.tile(self.bias, [tf.shape(inputs)[0], 1, 1])
-        return tf.concat([inputs, bias], axis=-1)
-
-
-class Bias(tf.keras.layers.Layer):
-    def __init__(self, size, **kwargs):
-        self.size = size
-        super().__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.bias = self.add_weight(name="bias",
-                                    shape=self.size,
-                                    initializer=tf.keras.initializers.RandomNormal(
-                                        mean=0, stddev=0.2),
-                                    trainable=True)
-
-    def call(self, inputs):
-        # expand bias to match input shape
-        return self.bias
-
-
-class ConstAttention(tf.keras.layers.Layer):
-    def __init__(self, in_tokens=16, size=64, **kwargs):
-        self.in_tokens = in_tokens
-        self.size = size
-        super().__init__(**kwargs)
-
-    def build(self, input_shape):
-        self.q = self.add_weight(name="q",
-                                 shape=[1, self.in_tokens, self.size],
-                                 initializer=tf.keras.initializers.RandomNormal(
-                                     mean=0, stddev=1),
-                                 trainable=True)
-
-    def call(self, k):
-        attention_logits = tf.matmul(self.q, k, transpose_b=True)
-        attention_logits = attention_logits / \
-            tf.sqrt(tf.cast(self.size, tf.float32))
-        attention = tf.nn.softmax(attention_logits, axis=-1)
-        return attention
-
-
-def ma_gating(inputs, name):
-    out = Gating(name=name+"/mult_gate", additive=False)(inputs)
-    out = Gating(name=name+"/add_gate", additive=True)(out)
-    return out
-
-
-def make_value_buckets(value_wdl, num_buckets=64):
-    value = tf.einsum("bi, i-> b", value_wdl, tf.constant([1, 0.5, 0]))
-    buckets = tf.cast(value * num_buckets, tf.int64)
-    buckets = tf.clip_by_value(buckets, 0, num_buckets - 1)
-    return buckets
+        factor = tf.math.rsqrt(tf.reduce_mean(
+            tf.square(inputs), axis=-1, keepdims=True) + 1e-5)
+        return inputs * factor * self.gamma
 
 
 class ApplyAttentionPolicyMap(tf.keras.layers.Layer):
@@ -235,10 +157,8 @@ class TFProcess:
 
         self.skip_first_ln = self.cfg["model"].get("skip_first_ln", True)
 
-        self.n_value_buckets = self.cfg["model"].get("n_value_buckets", 64)
-
         # experiments with changing have failed
-        self.encoder_norm = tf.keras.layers.LayerNormalization
+        self.encoder_norm = RMSNorm
 
         if precision == "single":
             self.model_dtype = tf.float32
@@ -414,10 +334,9 @@ class TFProcess:
 
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
-        outputs_wlh_fixed = [outputs[0], tf.nn.softmax(
-            outputs[1], name="wlh_softmax"), *(outputs[2:])]
+        outputs["value"] = tf.nn.softmax(outputs["value"], name="wlh_softmax")
         self.model_to_save = tf.keras.Model(
-            inputs=input_var, outputs=outputs_wlh_fixed)
+            inputs=input_var, outputs=outputs)
         print("model parameters:", self.model.count_params())
 
         # swa_count initialized regardless to make checkpoint code simpler.
@@ -484,23 +403,6 @@ class TFProcess:
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
 
         self.policy_loss_fn = policy_loss
-
-        def value_categorical_loss(target, output):
-            # gather indices from value then do classification loss
-            weights = tf.nn.softmax(output, axis=1)
-            weights = tf.gather(weights, target, batch_dims=1)
-            losses = -tf.math.log(weights)
-            return tf.reduce_mean(input_tensor=losses)
-
-        self.value_categorical_loss_fn = value_categorical_loss
-
-        def value_categorical_accuracy(target, output):
-            return tf.reduce_mean(
-                tf.cast(
-                    tf.equal(target,
-                             tf.argmax(input=output, axis=1)), tf.float32))
-
-        self.value_categorical_accuracy_fn = value_categorical_accuracy
 
         def policy_accuracy(target, output):
             target, output = correct_policy(target, output)
@@ -600,28 +502,39 @@ class TFProcess:
 
             self.value_loss_fn = value_loss
 
-            def mse_loss(target, output):
+            def unreduced_mse_loss(target, output):
                 output = tf.cast(output, tf.float32)
                 scalar_z_conv = tf.matmul(tf.nn.softmax(output), wdl)
                 scalar_target = tf.matmul(target, wdl)
-                return tf.reduce_mean(input_tensor=tf.math.squared_difference(
-                    scalar_target, scalar_z_conv))
-
-            self.mse_loss_fn = mse_loss
+                return tf.math.squared_difference(
+                    scalar_target, scalar_z_conv)
         else:
 
             def value_loss(target, output):
                 return tf.constant(0)
 
-            self.value_loss_fn = value_loss
-
-            def mse_loss(target, output):
+            def unreduced_mse_loss(target, output):
                 output = tf.cast(output, tf.float32)
                 scalar_target = tf.matmul(target, wdl)
-                return tf.reduce_mean(input_tensor=tf.math.squared_difference(
-                    scalar_target, output))
+                return tf.math.squared_difference(
+                    scalar_target, output)
 
-            self.mse_loss_fn = mse_loss
+        def mse_loss(target, output):
+            return tf.reduce_mean(input_tensor=unreduced_mse_loss(target, output))
+
+        self.value_loss_fn = value_loss
+        self.mse_loss_fn = mse_loss
+
+        def value_err_loss(value_target, value, output):
+            value = tf.cast(value, tf.float32)
+            scalar_z_conv = tf.matmul(tf.nn.softmax(value), wdl)
+            scalar_target = tf.matmul(value_target, wdl)
+            true_error = tf.math.abs(
+                scalar_target - scalar_z_conv)
+            loss = tf.math.squared_difference(true_error, output)
+            return tf.reduce_mean(input_tensor=loss)
+
+        self.value_err_loss_fn = value_err_loss
 
         if self.moves_left:
 
@@ -643,7 +556,8 @@ class TFProcess:
 
         pol_loss_w = self.cfg["training"]["policy_loss_weight"]
         val_loss_w = self.cfg["training"]["value_loss_weight"]
-        val_cat_loss_w = self.cfg["training"].get("value_cat_loss_weight", 0)
+        val_error_loss_w = self.cfg["training"].get(
+            "value_error_loss_weight", 0.1)
 
         if self.moves_left:
             moves_loss_w = self.cfg["training"]["moves_left_loss_weight"]
@@ -651,8 +565,9 @@ class TFProcess:
             moves_loss_w = tf.constant(0.0, dtype=tf.float32)
         reg_term_w = self.cfg["training"].get("reg_term_weight", 1.0)
 
-        def _lossMix(policy, value, moves_left, reg_term, value_cat):
-            return pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left + reg_term_w * reg_term + val_cat_loss_w * value_cat
+        def _lossMix(policy, value, moves_left, reg_term, value_err):
+            return (pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left +
+                    reg_term_w * reg_term + val_error_loss_w * value_err)
 
         self.lossMix = _lossMix
 
@@ -686,8 +601,7 @@ class TFProcess:
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
             Metric("P RL", "Policy RL"),
-            Metric("V CL", "Value CL"),
-            Metric("V C Acc", "Value C Acc", suffix="%"),
+            Metric("V Err L", "Value Err L"),
 
         ]
         self.train_metrics.extend(accuracy_thresholded_metrics)
@@ -709,8 +623,8 @@ class TFProcess:
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
             Metric("P RL", "Policy RL"),
-            Metric("V CL", "Value CL"),
-            Metric("V C Acc", "Value C Acc", suffix="%"),
+            Metric("V Err L", "Value Err L"),
+
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
 
@@ -897,29 +811,30 @@ class TFProcess:
 
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
-            policy = outputs[0]
-            value = outputs[1]
-            value_cat = outputs[-2]
+            policy = outputs["policy"]
+            value = outputs["value"]
+            value_err = outputs["value_err"]
             policy_loss = self.policy_loss_fn(y, policy)
             reg_term = sum(self.model.losses)
+
+            value_target = self.qMix(z, q)
             if self.wdl:
-                value_ce_loss = self.value_loss_fn(self.qMix(z, q), value)
+                value_ce_loss = self.value_loss_fn(value_target, value)
                 value_loss = value_ce_loss
             else:
-                value_mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+                value_mse_loss = self.mse_loss_fn(value_target, value)
                 value_loss = value_mse_loss
             if self.moves_left:
-                moves_left = outputs[2]
+                moves_left = outputs["moves_left"]
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             else:
                 moves_left_loss = tf.constant(0.)
 
-            value_buckets = make_value_buckets(
-                self.qMix(z, q), num_buckets=self.n_value_buckets)
-            value_catl = self.value_categorical_loss_fn(
-                value_buckets, value_cat)
+            value_err_loss = self.value_err_loss_fn(
+                value_target, value, value_err)
+
             total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
-                                      reg_term, value_catl)
+                                      reg_term, value_err_loss)
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
 
@@ -931,14 +846,11 @@ class TFProcess:
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
-        value_cat_accuracy = self.value_categorical_accuracy_fn(
-            value_buckets, value_cat)
-
         if self.wdl:
-            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-            value_accuracy = self.accuracy_fn(self.qMix(z, q), value)
+            mse_loss = self.mse_loss_fn(value_target, value)
+            value_accuracy = self.accuracy_fn(value_target, value)
         else:
-            value_loss = self.value_loss_fn(self.qMix(z, q), value)
+            value_loss = self.value_loss_fn(value_target, value)
             value_accuracy = tf.constant(0.)
         metrics = [
             policy_loss,
@@ -955,8 +867,7 @@ class TFProcess:
             policy_ul,
             policy_sl,
             policy_rl,
-            value_catl,
-            value_cat_accuracy * 100,
+            value_err_loss,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -1208,9 +1119,9 @@ class TFProcess:
     @tf.function()
     def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
         outputs = self.model(x, training=False)
-        policy = outputs[0]
-        value = outputs[1]
-        value_cat = outputs[-2]
+        policy = outputs["policy"]
+        value = outputs["value"]
+        value_err = outputs["value_err"]
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.policy_accuracy_fn(y, policy)
         policy_entropy = self.policy_entropy_fn(y, policy)
@@ -1220,23 +1131,20 @@ class TFProcess:
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
-        value_buckets = make_value_buckets(
-            self.qMix(z, q), num_buckets=self.n_value_buckets)
-        value_catl = self.value_categorical_loss_fn(
-            value_buckets, value_cat)
-        value_cat_accuracy = self.value_categorical_accuracy_fn(
-            value_buckets, value_cat)
+        value_target = self.qMix(z, q)
+
+        value_err_loss = self.value_err_loss_fn(value_target, value, value_err)
 
         if self.wdl:
-            value_loss = self.value_loss_fn(self.qMix(z, q), value)
-            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
-            value_accuracy = self.accuracy_fn(self.qMix(z, q), value)
+            value_loss = self.value_loss_fn(value_target, value)
+            mse_loss = self.mse_loss_fn(value_target, value)
+            value_accuracy = self.accuracy_fn(value_target, value)
         else:
-            value_loss = self.value_loss_fn(self.qMix(z, q), value)
-            mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
+            value_loss = self.value_loss_fn(value_target, value)
+            mse_loss = self.mse_loss_fn(value_target, value)
             value_accuracy = tf.constant(0.)
         if self.moves_left:
-            moves_left = outputs[2]
+            moves_left = outputs["moves_left"]
             moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             moves_left_mean_error = self.moves_left_mean_error(m, moves_left)
         else:
@@ -1254,8 +1162,7 @@ class TFProcess:
             policy_ul,
             policy_sl,
             policy_rl,
-            value_catl,
-            value_cat_accuracy * 100,
+            value_err_loss,
 
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
@@ -1474,69 +1381,6 @@ class TFProcess:
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
         return out
 
-    def cool_gen(self, x, name: str = None, k: int = 16, xavier_norm=None):
-        embedding_size = x.shape[-1]
-        cool_gen_sz = 2 * embedding_size
-        use_softmax_style = True
-
-        weigh_logits_hidden = tf.keras.layers.Dense(
-            64, name=name + "/weigh_dense_hidden", activation="swish")(x)
-        weigh_logits1 = tf.keras.layers.Dense(
-            embedding_size, name=name + "/weigh_dense1", activation=None if use_softmax_style else square_relu)(weigh_logits_hidden)
-        weigh_logits2 = tf.keras.layers.Dense(
-            embedding_size, name=name + "/weigh_dense2", activation=None if use_softmax_style else square_relu)(weigh_logits_hidden)
-        # only keep salient features
-
-        if use_softmax_style:
-            weigh_logits1 = tf.nn.softmax(weigh_logits1, axis=1)
-            weigh_logits2 = tf.nn.softmax(weigh_logits2, axis=1)
-
-        weigh_x = x
-        compressed = tf.einsum('bxy, bxy->by', weigh_x, weigh_logits1)
-        compressed1 = tf.einsum(
-            'xy, bxy->by', Bias((64, embedding_size), name=name+"/weigh_bias")(weigh_x), weigh_logits2)
-        compressed2 = tf.keras.layers.Dense(
-            16, name=name + "/compress_dense")(x)
-        compressed2 = tf.reshape(compressed2, (-1, 64 * 16))
-        compressed2 = tf.keras.layers.Dense(
-            256, name=name + "/compress_dense2", activation="swish")(compressed2)
-
-        compressed = tf.concat([compressed, compressed2], axis=1)
-
-        compressed = tf.keras.layers.LayerNormalization(
-            name=name+"/ln")(compressed)
-
-        processed = tf.keras.layers.Dense(
-            cool_gen_sz, kernel_initializer=xavier_norm, activation="swish", name=name + "/dense")(compressed)
-
-        att_d = 64
-
-        queries = tf.keras.layers.Dense(att_d, name=name + "/wq")(x)
-        values = self.coolgen_dense(processed)
-        values = tf.reshape(values, (-1, k, embedding_size))
-
-        keys = self.coolgen_k_dense(processed)
-        keys = tf.reshape(keys, (-1, k, att_d))
-        keys = tf.keras.layers.LayerNormalization(name=name+"/k_ln")(keys)
-
-        # single head attention with values
-
-        # matmul_qk.shape = b, 64, k
-        matmul_qk = tf.matmul(queries, keys, transpose_b=True)
-
-        dk = tf.cast(tf.shape(keys)[-1], self.model_dtype)
-
-        scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
-
-        extra_logits = tf.keras.layers.Dense(
-            64 * k, name=name + "/extra_logits")(processed)
-        extra_logits = tf.reshape(extra_logits, (-1, 64, k))
-        scaled_attention_logits = scaled_attention_logits + extra_logits
-
-        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
-        output = tf.matmul(attention_weights, values)
-        return output
-
     def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
@@ -1568,56 +1412,12 @@ class TFProcess:
         out2 = self.encoder_norm(
             name=name+"/norm2")(out1 + ffn_output * alpha)
 
-        # coolgen, probably will wait for bt4
-        for i in range(0):
-            cool_output = self.cool_gen(
-                name=name + "/coolgen" + str(i), x=out2, k=16, xavier_norm=xavier_norm)
-            out2 = self.encoder_norm(
-                name=name+"/norm" + str(i + 3))(out2 + cool_output * alpha)
-
         return out2, attn_wts
-
-    def fused_encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
-        # DeepNorm
-        alpha = tf.cast(tf.math.pow(
-            2. * self.encoder_layers, -0.25), self.model_dtype)
-        beta = tf.cast(tf.math.pow(
-            8. * self.encoder_layers, -0.25), self.model_dtype)
-        xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal")
-
-        # multihead attention
-        attn_output, attn_wts = self.mha(
-            inputs, emb_size, d_model, num_heads, xavier_norm, name=name + "/mha")
-
-        # dropout for weight regularization
-        attn_output = tf.keras.layers.Dropout(
-            self.dropout_rate, name=name + "/dropout1")(attn_output, training=training)
-        # skip connection + layernorm
-
-        # feed-forward network
-        ffn_output = self.ffn(inputs, emb_size, dff,
-                              xavier_norm, name=name + "/ffn")
-        ffn_output = tf.keras.layers.Dropout(
-            self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
-
-        out = self.encoder_norm(
-            name=name+"/norm")(inputs + (attn_output + ffn_output) * alpha)
-
-        if False:
-
-            attn_output = self.cool_gen(
-                name=name + "/coolgen", x=inputs, k=16, xavier_norm=xavier_norm)
-            out2 = self.encoder_norm(
-                name=name+"/norm3")(out2 + attn_output * alpha)
-
-        return out, out
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation="swish"):
         compressed = tf.keras.layers.Dense(
             hidden_channels, name=name+"/compress", use_bias=False)(inputs)
         compressed = tf.reshape(compressed, [-1, 64 * hidden_channels])
-
         hidden = tf.keras.layers.Dense(
             hidden_sz, name=name+"/hidden1_dense", activation=activation)(compressed)
 
@@ -1646,15 +1446,12 @@ class TFProcess:
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
             scale=beta, mode="fan_avg", distribution="truncated_normal")
-        self.coolgen_dense = tf.keras.layers.Dense(
-            384 * 16, name=name+"coolgen_dense", kernel_initializer=xavier_norm)
-        self.coolgen_k_dense = tf.keras.layers.Dense(
-            64 * 16, name=name+"coolgen_k_dense")
 
         flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
         flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
         # add positional encoding for each square to the input
         if self.arc_encoding:
+            assert False, "this setting is not recommended"
             self.POS_ENC = apm.make_pos_enc()
             positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
                                                   [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
@@ -1664,7 +1461,7 @@ class TFProcess:
         pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
 
         pos_info_processed = tf.keras.layers.Dense(
-            64*self.embedding_dense_sz, name=name+"pos_info_dense2")(pos_info_flat)
+            64*self.embedding_dense_sz, name=name+"pos_info_dense")(pos_info_flat)
         pos_info = tf.reshape(pos_info_processed,
                               [-1, 64, self.embedding_dense_sz])
         flow = tf.concat([flow, pos_info], axis=2)
@@ -1767,8 +1564,8 @@ class TFProcess:
                                           activation="tanh",
                                           name=name+"value/dense2")(h_fc2)
 
-        value_logits = tf.keras.layers.Dense(
-            self.n_value_buckets, kernel_initializer="glorot_normal", name=name+"value_categorical")(h_fc2)
+        value_err = tf.keras.layers.Dense(
+            1, kernel_initializer="glorot_normal", name=name+"value_error", activation="sigmoid")(h_fc2)
 
         # Moves left head
         if self.moves_left:
@@ -1792,19 +1589,11 @@ class TFProcess:
         else:
             h_fc5 = None
 
-        value_cat_weights = tf.nn.softmax(value_logits, axis=-1)
-        value_range = tf.range(
-            self.n_value_buckets, dtype=tf.float32) / self.n_value_buckets
-        value_prediction = tf.einsum("bi,i->b", value_cat_weights, value_range)
-        value_variance = tf.einsum("bi,bi->b", value_cat_weights, tf.square(
-            value_range - tf.expand_dims(value_prediction, axis=1)), name="value_variance")
-
         # attention weights added as optional output for analysis -- ignored by backend
+        outputs = {"policy": h_fc1, "value": h_fc3, "attn_wts": attn_wts,
+                   "value_err": value_err}
         if self.moves_left:
-            outputs = [h_fc1, h_fc3, h_fc5,
-                       value_variance, value_logits, attn_wts]
-        else:
-            outputs = [h_fc1, h_fc3, value_variance, value_logits, attn_wts]
+            outputs["moves_left"] = h_fc5
 
         return outputs
 
