@@ -299,7 +299,8 @@ class TFProcess:
         self.ffn_activation = self.cfg["model"].get(
             "ffn_activation", self.DEFAULT_ACTIVATION)
 
-        assert default_activation == self.ffn_activation == "mish", "Only mish is supported for now"
+        assert default_activation == "mish" and self.cfg["model"].get(
+            "ffn_activation") in [None, 'mish'], "Only mish is supported for now"
 
         if policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
@@ -1478,7 +1479,7 @@ class TFProcess:
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal")
+            scale=beta, mode="fan_avg", distribution="truncated_normal", seed=42)
 
         # multihead attention
         attn_output, attn_wts = self.mha(
@@ -1530,11 +1531,6 @@ class TFProcess:
         if self.use_smolgen:
             self.smol_weight_gen_dense = tf.keras.layers.Dense(
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
-
-        beta = tf.cast(tf.math.pow(
-            8. * self.encoder_layers, -0.25), self.model_dtype)
-        xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal")
 
         if True:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
