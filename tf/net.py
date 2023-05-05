@@ -13,6 +13,7 @@ LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_MINOR_WITH_MISH = 29
 LC0_MINOR_WITH_ATTN_BODY = 30
+LC0_MINOR_WITH_ATTN_BODY_EXPERIMENTAL = 65566
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -486,6 +487,7 @@ class Net:
             elif layers[1].split(':')[0] == 'bias':
                 pb_name = 'ip_emb_b'
             elif layers[1] == "preprocess":
+                self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY_EXPERIMENTAL
                 if layers[2].split(":")[0] == "kernel":
                     pb_name = "ip_emb_preproc_w"
                 else:
