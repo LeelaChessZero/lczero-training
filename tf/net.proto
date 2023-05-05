@@ -308,6 +308,8 @@ message OnnxModel {
 message Net {
   optional fixed32 magic = 1;
   optional string license = 2;
+  optional EngineVersion min_version = 3;
+  optional Format format = 4;
   optional TrainingParams training_params = 5;
   // Either weights or onnx_model is set, but not both.
   optional Weights weights = 10;
