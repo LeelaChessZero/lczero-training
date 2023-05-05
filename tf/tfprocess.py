@@ -34,6 +34,35 @@ import functools
 from net import Net
 
 
+class Gating(tf.keras.layers.Layer):
+
+    def __init__(self, name=None, additive=True, init_value=None, **kwargs):
+        self.additive = additive
+        if init_value is None:
+            init_value = 0 if self.additive else 1
+        self.init_value = init_value
+        super().__init__(name=name, **kwargs)
+
+    def build(self, input_shape):
+        self.gate = self.add_weight(name='gate',
+                                    shape=input_shape[1:],
+                                    constraint=tf.keras.constraints.NonNeg()
+                                    if not self.additive else None,
+                                    initializer=tf.constant_initializer(
+                                        self.init_value),
+                                    trainable=True)
+
+    def call(self, inputs):
+        return tf.add(inputs, self.gate) if self.additive else tf.multiply(
+            inputs, self.gate)
+
+
+def ma_gating(inputs, name):
+    out = Gating(name=name + '/mult_gate', additive=False)(inputs)
+    out = Gating(name=name + '/add_gate', additive=True)(out)
+    return out
+
+
 def square_relu(x):
     return tf.nn.relu(x) ** 2
 
@@ -117,7 +146,6 @@ class TFProcess:
 
         # Network structure
         self.embedding_size = self.cfg["model"]["embedding_size"]
-        self.input_gate = self.cfg["model"].get("input_gate")
         self.pol_embedding_size = self.cfg["model"].get(
             "policy_embedding_size", self.embedding_size)
         self.val_embedding_size = self.cfg["model"].get(
@@ -155,10 +183,12 @@ class TFProcess:
         self.smolgen_gen_sz = self.cfg["model"].get("smolgen_gen_sz")
         self.smolgen_activation = self.cfg["model"].get("smolgen_activation")
 
-        self.skip_first_ln = self.cfg["model"].get("skip_first_ln", True)
+        self.skip_first_ln = self.cfg["model"].get("skip_first_ln", False)
+        self.encoder_rms_norm = self.cfg["model"].get(
+            "encoder_rms_norm", False)
 
         # experiments with changing have failed
-        self.encoder_norm = RMSNorm
+        self.encoder_norm = RMSNorm if self.encoder_rms_norm else tf.keras.layers.LayerNormalization
 
         if precision == "single":
             self.model_dtype = tf.float32
@@ -170,12 +200,12 @@ class TFProcess:
         # Scale the loss to prevent gradient underflow
         self.loss_scale = 1 if self.model_dtype == tf.float32 else loss_scale
 
-        policy_head = self.cfg["model"].get("policy", "attention")
-        value_head = self.cfg["model"].get("value", "wdl")
-        moves_left_head = self.cfg["model"].get("moves_left", "v1")
-        input_mode = self.cfg["model"].get("input_type", "classic")
-        default_activation = self.cfg["model"].get(
-            "default_activation", "relu")
+        policy_head = self.cfg['model'].get('policy', 'attention')
+        value_head = self.cfg['model'].get('value', 'wdl')
+        moves_left_head = self.cfg['model'].get('moves_left', 'v1')
+        input_mode = self.cfg['model'].get('input_type', 'classic')
+        default_activation = self.cfg['model'].get('default_activation',
+                                                   'mish')
 
         self.POLICY_HEAD = None
         self.VALUE_HEAD = None
@@ -183,23 +213,93 @@ class TFProcess:
         self.INPUT_MODE = None
         self.DEFAULT_ACTIVATION = None
 
+        if policy_head == "classical":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_CLASSICAL
+        elif policy_head == "convolution":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_CONVOLUTION
+        elif policy_head == "attention":
+            self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
+            if self.encoder_layers > 0:
+                self.net.set_pol_headcount(self.encoder_heads)
+        else:
+            raise ValueError(
+                "Unknown policy head format: {}".format(policy_head))
+
+        self.net.set_policyformat(self.POLICY_HEAD)
+
+        if value_head == "classical":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_CLASSICAL
+            self.wdl = False
+        elif value_head == "wdl":
+            self.VALUE_HEAD = pb.NetworkFormat.VALUE_WDL
+            self.wdl = True
+        else:
+            raise ValueError(
+                "Unknown value head format: {}".format(value_head))
+
+        self.net.set_valueformat(self.VALUE_HEAD)
+
+        if moves_left_head == "none":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_NONE
+            self.moves_left = False
+        elif moves_left_head == "v1":
+            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_V1
+            self.moves_left = True
+        else:
+            raise ValueError(
+                "Unknown moves left head format: {}".format(moves_left_head))
+
+        self.net.set_movesleftformat(self.MOVES_LEFT_HEAD)
+
+        if input_mode == "classic":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
+        elif input_mode == "frc_castling":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
+        elif input_mode == "canonical":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
+        elif input_mode == "canonical_100":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
+        elif input_mode == "canonical_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
+        elif input_mode == "canonical_v2":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2
+        elif input_mode == "canonical_v2_armageddon":
+            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON
+        else:
+            raise ValueError(
+                "Unknown input mode format: {}".format(input_mode))
+
+        self.net.set_input(self.INPUT_MODE)
+
         if default_activation == "relu":
             self.net.set_defaultactivation(
                 pb.NetworkFormat.DEFAULT_ACTIVATION_RELU)
-            self.DEFAULT_ACTIVATION = "relu"
+            self.DEFAULT_ACTIVATION = 'relu'
         elif default_activation == "mish":
             self.net.set_defaultactivation(
                 pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            import tensorflow_addons as tfa
-            self.DEFAULT_ACTIVATION = tfa.activations.mish
-        elif default_activation == "gelu":
-            self.DEFAULT_ACTIVATION = "gelu"
+            try:
+                self.DEFAULT_ACTIVATION = tf.keras.activations.mish
+            except AttributeError:
+                import tensorflow_addons as tfa
+                self.DEFAULT_ACTIVATION = tfa.activations.mish
         else:
-            raise ValueError(
-                "Unknown default activation type: {}".format(default_activation))
+            raise ValueError("Unknown default activation type: {}".format(
+                default_activation))
+
+        if self.encoder_layers > 0:
+            self.net.set_headcount(self.encoder_heads)
+            self.net.set_networkformat(
+                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)
+            self.net.set_smolgen_activation(
+                self.net.activation(self.smolgen_activation))
+            self.net.set_ffn_activation(self.net.activation(
+                'default'))
 
         self.ffn_activation = self.cfg["model"].get(
             "ffn_activation", self.DEFAULT_ACTIVATION)
+
+        assert default_activation == self.ffn_activation == "mish", "Only mish is supported for now"
 
         if policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
@@ -269,35 +369,25 @@ class TFProcess:
         self.renorm_momentum = self.cfg["training"].get(
             "renorm_momentum", 0.99)
 
-        if self.cfg["gpu"] == "all":
-            gpus = tf.config.experimental.list_physical_devices("GPU")
+        if self.cfg['gpu'] == 'all':
+            gpus = tf.config.experimental.list_physical_devices('GPU')
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
-        elif "," in str(self.cfg["gpu"]):
-            active_gpus = []
-            gpus = tf.config.experimental.list_physical_devices("GPU")
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            for i in self.cfg["gpu"].split(","):
-                active_gpus.append("GPU:" + i)
-            self.strategy = tf.distribute.MirroredStrategy(active_gpus)
-            tf.distribute.experimental_set_strategy(self.strategy)
         else:
-            gpus = tf.config.experimental.list_physical_devices("GPU")
+            gpus = tf.config.experimental.list_physical_devices('GPU')
             print(gpus)
-            tf.config.experimental.set_visible_devices(gpus[self.cfg["gpu"]],
-                                                       "GPU")
-            tf.config.experimental.set_memory_growth(gpus[self.cfg["gpu"]],
+            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
+                                                       'GPU')
+            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
                                                      True)
             self.strategy = None
-
         if self.model_dtype == tf.float16:
-            tf.keras.mixed_precision.experimental.set_policy("mixed_float16")
+            tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
 
         self.global_step = tf.Variable(0,
-                                       name="global_step",
+                                       name='global_step',
                                        trainable=False,
                                        dtype=tf.int64)
 
@@ -327,20 +417,13 @@ class TFProcess:
             self.init_net()
 
     def init_net(self):
-        # !!!
-        self.l2reg = tf.keras.regularizers.l2(
-            l=0.5 * (0.0001))  # originally .5
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8, 8))
-
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
-        outputs["value"] = tf.nn.softmax(outputs["value"], name="wlh_softmax")
-        self.model_to_save = tf.keras.Model(
-            inputs=input_var, outputs=outputs)
-        print("model parameters:", self.model.count_params())
 
         # swa_count initialized regardless to make checkpoint code simpler.
-        self.swa_count = tf.Variable(0., name="swa_count", trainable=False)
+        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
         self.swa_weights = None
         if self.swa_enabled:
             # Count of networks accumulated into SWA
@@ -349,26 +432,33 @@ class TFProcess:
             ]
 
         self.active_lr = tf.Variable(0.01, trainable=False)
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=lambda: self.active_lr, momentum=0.9, nesterov=True)
+        # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
+        self.update_lr_manually = False
+        # Be sure not to set new_optimizer before TF 2.11, or unless you edit the code to specify a new optimizer explicitly.
+        if self.cfg['training'].get('new_optimizer'):
+            self.optimizer = tf.keras.optimizers.SGD(
+                learning_rate=self.active_lr, momentum=0.9, nesterov=True)
+            self.update_lr_manually = True
+        else:
+            try:
+                self.optimizer = tf.keras.optimizers.legacy.SGD(
+                    learning_rate=lambda: self.active_lr,
+                    momentum=0.9,
+                    nesterov=True)
+            except AttributeError:
+                self.optimizer = tf.keras.optimizers.SGD(
+                    learning_rate=lambda: self.active_lr,
+                    momentum=0.9,
+                    nesterov=True)
         self.orig_optimizer = self.optimizer
+        try:
+            self.aggregator = self.orig_optimizer.aggregate_gradients
+        except AttributeError:
+            self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
-            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
-                self.optimizer)
-        if self.cfg["training"].get("rmsprop_optimizer"):
-            self.optimizer = tf.keras.optimizers.RMSprop(
-                learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
-        if self.cfg["training"].get("Nadam_optimizer") or self.cfg["training"].get("nadam_optimizer") or self.cfg["training"].get("nadam") or self.cfg["training"].get("Nadam"):
-            self.optimizer = tf.keras.optimizers.Nadam(
-                learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
-            if self.weight_decay > 0:
-                print("using DecoupledWeightDecayExtension")
-
-                MyNadamW = extend_with_decoupled_weight_decay(
-                    tf.keras.optimizers.Nadam)
-                self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
-                                          beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
-        if self.cfg["training"].get("lookahead_optimizer"):
+            self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
+                self.optimizer, self.loss_scale)
+        if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
         def correct_policy(target, output):
@@ -858,7 +948,7 @@ class TFProcess:
             moves_left_loss,
             reg_term,
             total_loss,
-            # Google"s paper scales MSE by 1/4 to a [0, 1] range, so do the same to
+            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
             # get comparable values.
             mse_loss / 4.0,
             policy_accuracy * 100,
@@ -885,7 +975,7 @@ class TFProcess:
     def apply_grads(self, grads, effective_batch_splits: int):
 
         grads = [
-            g[0] for g in self.orig_optimizer.gradient_aggregator(
+            g[0] for g in self.optimizer.gradient_aggregator(
                 zip(grads, self.model.trainable_weights))
         ]
         if self.loss_scale != 1:
@@ -951,6 +1041,8 @@ class TFProcess:
         if self.strategy is not None:
             effective_batch_splits = batch_splits * self.strategy.num_replicas_in_sync
         self.active_lr.assign(self.lr / effective_batch_splits)
+        if self.update_lr_manually:
+            self.orig_optimizer.learning_rate = self.active_lr
         if self.strategy is not None:
             grad_norm = self.strategy_apply_grads(grads,
                                                   effective_batch_splits)
@@ -1075,7 +1167,7 @@ class TFProcess:
                     self.manager.latest_checkpoint))
 
                 # Save normal weights
-                tf.saved_model.save(self.model_to_save, os.path.join(
+                tf.saved_model.save(self.model, os.path.join(
                     self.root_dir, self.cfg["name"]) + "-onnx-" + str(evaled_steps))
 
                 # Save swa weights
@@ -1083,20 +1175,18 @@ class TFProcess:
                 for (swa, w) in zip(self.swa_weights, self.model.weights):
                     w.assign(swa.read_value())
                 evaled_steps = steps.numpy()
-                tf.saved_model.save(self.model_to_save, os.path.join(
+                tf.saved_model.save(self.model, os.path.join(
                     self.root_dir, self.cfg["name"]) + "-swa-onnx-" + str(evaled_steps))
                 for (old, w) in zip(backup, self.model.weights):
                     w.assign(old)
 
-                if False:
-                    # !!! protobuf is dead
-                    path = os.path.join(self.root_dir, self.cfg["name"])
-                    leela_path = path + "-" + str(evaled_steps)
-                    swa_path = path + "-swa-" + str(evaled_steps)
-                    self.net.pb.training_params.training_steps = evaled_steps
-                    self.save_leelaz_weights(leela_path)
-                    if self.swa_enabled:
-                        self.save_swa_weights(swa_path)
+                path = os.path.join(self.root_dir, self.cfg["name"])
+                leela_path = path + "-" + str(evaled_steps)
+                swa_path = path + "-swa-" + str(evaled_steps)
+                self.net.pb.training_params.training_steps = evaled_steps
+                self.save_leelaz_weights(leela_path)
+                if self.swa_enabled:
+                    self.save_swa_weights(swa_path)
 
         if self.profiling_start_step is not None and (
                 steps >= self.profiling_start_step +
@@ -1326,11 +1416,6 @@ class TFProcess:
 
         # output shape = (b, h, 64, d)
 
-        if heads > 1:
-            output = tf.transpose(
-                output, perm=[0, 2, 1, 3])
-            output = tf.keras.layers.Reshape(
-                (64, -1))(output)
         return output, scaled_attention_logits
 
     # multi-head attention in encoder blocks
@@ -1358,16 +1443,21 @@ class TFProcess:
         scaled_attention, attention_weights = self.scaled_dot_product_attention(
             q, k, v, name=name, inputs=inputs)
 
+        if num_heads > 1:
+            scaled_attention = tf.transpose(scaled_attention,
+                                            perm=[0, 2, 1, 3])
+            scaled_attention = tf.reshape(
+                scaled_attention,
+                (batch_size, -1, d_model))  # concatenate heads
+
         # final dense layer
         output = tf.keras.layers.Dense(
-            emb_size, name=name + "/dense_fin", kernel_initializer=initializer)(scaled_attention)
+            emb_size, name=name + "/dense", kernel_initializer=initializer)(scaled_attention)
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str):
-        if self.ffn_activation == "sqrrelu":
-            activation = square_relu
-        elif self.ffn_activation == "mish":
+        if self.ffn_activation == "mish":
             activation = tfa.activations.mish
         elif isinstance(self.ffn_activation, str):
             activation = tf.keras.activations.get(self.ffn_activation)
@@ -1401,7 +1491,7 @@ class TFProcess:
         out1 = inputs + attn_output * alpha
         if not self.skip_first_ln:
             out1 = self.encoder_norm(
-                name=name+"/norm1")(out1)
+                name=name+"/ln1")(out1)
 
         # feed-forward network
         ffn_output = self.ffn(out1, emb_size, dff,
@@ -1410,7 +1500,7 @@ class TFProcess:
             self.dropout_rate, name=name + "/dropout2")(ffn_output, training=training)
 
         out2 = self.encoder_norm(
-            name=name+"/norm2")(out1 + ffn_output * alpha)
+            name=name+"/ln2")(out1 + ffn_output * alpha)
 
         return out2, attn_wts
 
@@ -1435,7 +1525,6 @@ class TFProcess:
     def construct_net(self, inputs, name: str = ""):
         # Policy head
         assert self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION
-        attn_wts = []
         # TODO: re-add support for policy encoder blocks
         # do some input processing
         if self.use_smolgen:
@@ -1447,32 +1536,55 @@ class TFProcess:
         xavier_norm = tf.keras.initializers.VarianceScaling(
             scale=beta, mode="fan_avg", distribution="truncated_normal")
 
-        flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
-        flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
-        # add positional encoding for each square to the input
-        if self.arc_encoding:
-            assert False, "this setting is not recommended"
-            self.POS_ENC = apm.make_pos_enc()
-            positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                                                  [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-            flow = tf.concat([flow, positional_encoding], axis=2)
+        if True:
+            flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
+            flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
+            # add positional encoding for each square to the input
+            if self.arc_encoding:
+                assert False, "this setting is not recommended"
+                self.POS_ENC = apm.make_pos_enc()
+                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+                flow = tf.concat([flow, positional_encoding], axis=2)
 
-        pos_info = flow[..., :12]
-        pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
+            pos_info = flow[..., :12]
+            pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
 
-        pos_info_processed = tf.keras.layers.Dense(
-            64*self.embedding_dense_sz, name=name+"pos_info_dense")(pos_info_flat)
-        pos_info = tf.reshape(pos_info_processed,
-                              [-1, 64, self.embedding_dense_sz])
-        flow = tf.concat([flow, pos_info], axis=2)
+            pos_info_processed = tf.keras.layers.Dense(
+                64*self.embedding_dense_sz, name=name+"embedding/preprocess")(pos_info_flat)
+            pos_info = tf.reshape(pos_info_processed,
+                                  [-1, 64, self.embedding_dense_sz])
+            flow = tf.concat([flow, pos_info], axis=2)
 
-        # square embedding
-        flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
-                                     kernel_regularizer=self.l2reg, activation="swish",
-                                     name=name+"embedding")(flow)
-        flow = tf.keras.layers.LayerNormalization(
-            name=name+"embedding_norm")(flow)
+            # square embedding
+            flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
+                                         kernel_regularizer=self.l2reg, activation="swish",
+                                         name=name+"embedding")(flow)
+            flow = tf.keras.layers.LayerNormalization(
+                name=name+"embedding/ln")(flow)
+        else:
+            flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
+            flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
+            # add positional encoding for each square to the input
+            if self.arc_encoding:
+                self.POS_ENC = apm.make_pos_enc()
+                positional_encoding = tf.broadcast_to(
+                    tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                    [tf.shape(flow)[0], 64,
+                     tf.shape(self.POS_ENC)[2]])
+                flow = tf.concat([flow, positional_encoding], axis=2)
 
+            # square embedding
+            flow = tf.keras.layers.Dense(self.embedding_size,
+                                         kernel_initializer='glorot_normal',
+                                         kernel_regularizer=self.l2reg,
+                                         activation=self.DEFAULT_ACTIVATION,
+                                         name='embedding')(flow)
+
+            # !!! input gate
+            flow = ma_gating(flow, name='embedding')
+
+        attn_wts = []
         for i in range(self.encoder_layers):
             flow, attn_wts_l = self.encoder_layer(flow, self.embedding_size, self.encoder_d_model,
                                                   self.encoder_heads, self.encoder_dff,

@@ -85,7 +85,7 @@ training:
     value_loss_weight: 1.0
     reg_term_weight: 1.0
     moves_left_loss_weight: 1.0
-    value_cat_loss_weight: 0.01
+    value_error_loss_weight: 0.1
 
     path: "networks"
 
