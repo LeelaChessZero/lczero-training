@@ -299,7 +299,8 @@ class TFProcess:
         self.ffn_activation = self.cfg["model"].get(
             "ffn_activation", self.DEFAULT_ACTIVATION)
 
-        assert default_activation == self.ffn_activation == "mish", "Only mish is supported for now"
+        assert default_activation == "mish" and self.cfg["model"].get(
+            "ffn_activation") in [None, 'mish'], "Only mish is supported for now"
 
         if policy_head == "attention":
             self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
@@ -370,21 +371,26 @@ class TFProcess:
             "renorm_momentum", 0.99)
 
         if self.cfg['gpu'] == 'all':
-            gpus = tf.config.experimental.list_physical_devices('GPU')
+            gpus = tf.config.list_physical_devices('GPU')
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = tf.distribute.MirroredStrategy()
             tf.distribute.experimental_set_strategy(self.strategy)
         else:
-            gpus = tf.config.experimental.list_physical_devices('GPU')
+            gpus = tf.config.list_physical_devices('GPU')
             print(gpus)
-            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
-                                                       'GPU')
-            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
-                                                     True)
+            gpu_ids = self.cfg['gpu']
+            if isinstance(gpu_ids, str):
+                gpu_ids = [int(x) for x in gpu_ids.split(',')]
+            if isinstance(gpu_ids, int):
+                gpu_ids = [gpu_ids]
+            gpus = [gpus[i] for i in gpu_ids]
+            tf.config.set_visible_devices(gpus, 'GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
             self.strategy = None
         if self.model_dtype == tf.float16:
-            tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
+            tf.keras.mixed_precision.set_global_policy('mixed_float16')
 
         self.global_step = tf.Variable(0,
                                        name='global_step',
@@ -456,7 +462,7 @@ class TFProcess:
         except AttributeError:
             self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
-            self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
+            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
                 self.optimizer, self.loss_scale)
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
@@ -1478,7 +1484,7 @@ class TFProcess:
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal")
+            scale=beta, mode="fan_avg", distribution="truncated_normal", seed=42)
 
         # multihead attention
         attn_output, attn_wts = self.mha(
@@ -1534,7 +1540,7 @@ class TFProcess:
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal")
+            scale=beta, mode="fan_avg", distribution="truncated_normal", seed=42)
 
         if True:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
