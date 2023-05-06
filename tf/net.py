@@ -492,7 +492,7 @@ class Net:
                     pb_name = "ip_emb_preproc_w"
                 else:
                     pb_name = "ip_emb_preproc_b"
-            elif layers[1] == "norm":
+            elif layers[1] == "ln":
                 if layers[2].split(":")[0] == "gamma":
                     pb_name = "ip_emb_ln_gammas"
                 else:
