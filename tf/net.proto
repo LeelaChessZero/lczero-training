@@ -115,14 +115,14 @@ message Weights {
   // Embedding layer for attention body encoders
   // (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
 
-  optional Layer ip_emb_preproc_w = 37;
-  optional Layer ip_emb_preproc_b = 38;
+  optional Layer ip_emb_preproc_w = 41;
+  optional Layer ip_emb_preproc_b = 42;
 
   optional Layer ip_emb_w = 25;
   optional Layer ip_emb_b = 26;
 
-  optional Layer ip_emb_ln_gammas = 35;
-  optional Layer ip_emb_ln_betas = 36;
+  optional Layer ip_emb_ln_gammas = 39;
+  optional Layer ip_emb_ln_betas = 40;
 
   // Input gating (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   optional Layer ip_mult_gate = 33;
