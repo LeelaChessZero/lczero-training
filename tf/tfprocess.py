@@ -23,6 +23,8 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorflow_addons.optimizers.weight_decay_optimizers import (
     extend_with_decoupled_weight_decay)
+from tensorflow_addons.optimizers.weight_decay_optimizers import (
+    extend_with_decoupled_weight_decay)
 import time
 import bisect
 import lc0_az_policy_map
@@ -175,6 +177,8 @@ class TFProcess:
             "epsilon", 1e-07)  # Nadam epsilon value
         self.virtual_batch_size = self.cfg["model"].get(
             "virtual_batch_size", None)
+        self.optimizer_name = self.cfg["training"].get(
+            "optimizer", "sgd").lower()
 
         self.use_smolgen = self.cfg["model"].get("use_smolgen", False)
         self.smolgen_hidden_channels = self.cfg["model"].get(
@@ -445,21 +449,41 @@ class TFProcess:
         # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
         self.update_lr_manually = False
         # Be sure not to set new_optimizer before TF 2.11, or unless you edit the code to specify a new optimizer explicitly.
-        if self.cfg['training'].get('new_optimizer'):
-            self.optimizer = tf.keras.optimizers.SGD(
-                learning_rate=self.active_lr, momentum=0.9, nesterov=True)
-            self.update_lr_manually = True
-        else:
-            try:
-                self.optimizer = tf.keras.optimizers.legacy.SGD(
-                    learning_rate=lambda: self.active_lr,
-                    momentum=0.9,
-                    nesterov=True)
-            except AttributeError:
+        if self.optimizer_name == "sgd":
+            if self.cfg['training'].get('new_optimizer'):
                 self.optimizer = tf.keras.optimizers.SGD(
-                    learning_rate=lambda: self.active_lr,
-                    momentum=0.9,
-                    nesterov=True)
+                    learning_rate=self.active_lr, momentum=0.9, nesterov=True)
+                self.update_lr_manually = True
+            else:
+                try:
+                    self.optimizer = tf.keras.optimizers.legacy.SGD(
+                        learning_rate=lambda: self.active_lr,
+                        momentum=0.9,
+                        nesterov=True)
+                except AttributeError:
+                    self.optimizer = tf.keras.optimizers.SGD(
+                        learning_rate=lambda: self.active_lr,
+                        momentum=0.9,
+                        nesterov=True)
+        elif self.optimizer_name == "rmsprop":
+            self.optimizer = tf.keras.optimizers.RMSprop(
+                learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
+        elif self.optimizer_name == "nadam":
+            self.optimizer = tf.keras.optimizers.Nadam(
+                learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+            if self.weight_decay > 0:
+                print("using DecoupledWeightDecayExtension")
+
+                MyNadamW = extend_with_decoupled_weight_decay(
+                    tf.keras.optimizers.Nadam)
+                self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
+                                          beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+        elif self.optimizer_name == "adabelief":
+            self.optimizer = tfa.optimizers.AdaBelief(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
+                                                      beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+        else:
+            raise ValueError("Unknown optimizer: " + self.optimizer_name)
+
         self.orig_optimizer = self.optimizer
         try:
             self.aggregator = self.orig_optimizer.aggregate_gradients
@@ -1563,10 +1587,12 @@ class TFProcess:
 
             # square embedding
             flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
-                                         kernel_regularizer=self.l2reg, activation="swish",
+                                         kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                          name=name+"embedding")(flow)
             flow = tf.keras.layers.LayerNormalization(
                 name=name+"embedding/ln")(flow)
+            flow = ma_gating(flow, name='embedding')
+
         else:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])

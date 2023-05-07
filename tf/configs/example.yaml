@@ -89,9 +89,7 @@ training:
 
     path: "networks"
 
-    # if both false sgd is used
-    rmsprop_optimizer: false
-    Nadam_optimizer: false
+    optimizer:  # sgd/nadam/rmsprop/adabelief
     beta_1: 0.9 
     beta_2: 0.999  # these values are only for Nadam
     epsilon: 0.0000001 # 1e-7
