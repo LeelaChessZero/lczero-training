@@ -398,7 +398,7 @@ class TFProcess:
                                                      True)
             self.strategy = None
         if self.model_dtype == tf.float16:
-            tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
+            tf.keras.mixed_precision.set_global_policy('mixed_float16')
 
         self.global_step = tf.Variable(0,
                                        name='global_step',
@@ -490,8 +490,8 @@ class TFProcess:
         except AttributeError:
             self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
-            self.optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
-                self.optimizer, self.loss_scale)
+            self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
+                self.optimizer, dynamic=True, initial_scale=self.loss_scale)
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
@@ -651,6 +651,7 @@ class TFProcess:
 
         def value_err_loss(value_target, value, output):
             value = tf.cast(value, tf.float32)
+            output = tf.cast(output, tf.float32)
             scalar_z_conv = tf.matmul(tf.nn.softmax(value), wdl)
             scalar_target = tf.matmul(value_target, wdl)
             true_error = tf.math.abs(
@@ -1009,7 +1010,7 @@ class TFProcess:
     def apply_grads(self, grads, effective_batch_splits: int):
 
         grads = [
-            g[0] for g in self.optimizer.gradient_aggregator(
+            g[0] for g in self.aggregator(
                 zip(grads, self.model.trainable_weights))
         ]
         if self.loss_scale != 1:
@@ -1566,15 +1567,16 @@ class TFProcess:
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
 
         if True:
+            inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
             if self.arc_encoding:
                 assert False, "this setting is not recommended"
-                self.POS_ENC = apm.make_pos_enc()
-                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                flow = tf.concat([flow, positional_encoding], axis=2)
+                # self.POS_ENC = apm.make_pos_enc()
+                # positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                #                                       [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+                # flow = tf.concat([flow, positional_encoding], axis=2)
 
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
