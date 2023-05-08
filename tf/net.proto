@@ -115,8 +115,8 @@ message Weights {
   // Embedding layer for attention body encoders
   // (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
 
-  optional Layer ip_emb_preproc_w = 41;
-  optional Layer ip_emb_preproc_b = 42;
+  optional Layer ip_emb_preproc_w = 37;
+  optional Layer ip_emb_preproc_b = 38;
 
   optional Layer ip_emb_w = 25;
   optional Layer ip_emb_b = 26;
@@ -161,8 +161,8 @@ message Weights {
   optional Layer ip2_val_w = 9;
   optional Layer ip2_val_b = 10;
 
-  optional Layer ip_val_err_w = 37;
-  optional Layer ip_val_err_b = 38;
+  optional Layer ip_val_err_w = 41;
+  optional Layer ip_val_err_b = 42;
 
   // Moves left head
   optional ConvBlock moves_left = 12;
