@@ -23,6 +23,8 @@ import random
 import tensorflow as tf
 import time
 import bisect
+import tensorflow_addons as tfa
+
 import lc0_az_policy_map
 import attention_policy_map as apm
 import proto.net_pb2 as pb
@@ -32,7 +34,19 @@ from math import sqrt
 from net import Net
 
 
+def max_min_avg_pooling(x):
+    axes = (2,3) if x.shape[1] > 8 else (1,2)
+    max_pooled = tf.math.reduce_max(x, axis=axes, keepdims=True)
+    min_pooled = tf.math.reduce_min(x, axis=axes, keepdims=True)
+    avg_pooled = tf.math.reduce_mean(x, axis=axes, keepdims=True)
+    return tf.concat([max_pooled, min_pooled, avg_pooled], axis=1 if 3 in axes else -1)
 
+def katago_pooling_layer(x, name):
+    data_format = 'channels_first' if x.shape[1] > 8 else 'channels_last'
+    out_filters = x.shape[1] if data_format == 'channels_first' else x.shape[-1]
+    pooled = max_min_avg_pooling(x)
+    return tf.keras.layers.Conv2D(filters, 1, 1, padding='same', name=name, data_format=data_format )(pooled)
+    
 
 # https://arxiv.org/pdf/1902.08153.pdf
 
@@ -49,11 +63,13 @@ def round_pass(x):
     return tf.stop_gradient(y - y_grad) + y_grad
 
 class Quantize(tf.keras.layers.Layer):
-    def __init__(self, is_activation=True, p=8, regularizer=None, **kwargs):
+    def __init__(self, is_activation=True, p=8, regularizer=None, min_value = 0, **kwargs):
         super().__init__(**kwargs)
         self.p = p
         self.is_activation = is_activation
         self.regularizer = regularizer
+        self.min_value = min_value
+        assert not (min_value != 0 and is_activation), "min_value != 0 and is_activation"
         if self.is_activation:
             # quantizing activation
             # qn = 0
@@ -91,6 +107,9 @@ class Quantize(tf.keras.layers.Layer):
             mean, std = tf.reduce_mean(inputs), tf.math.reduce_std(inputs)
             s_init = tf.math.maximum(tf.abs(mean + 3 * std), tf.abs(mean - 3 * std)) / 2**(self.p - 1) + 1e-8
             self.s.assign(tf.cast(tf.greater_equal(self.s, 100), self.dtype) * s_init + tf.cast(tf.less(self.s, 100), self.dtype) * self.s)
+        
+        if self.min_value != 0:
+            inputs = inputs - self.min_value
             
 
         dtype = inputs.dtype
@@ -103,6 +122,10 @@ class Quantize(tf.keras.layers.Layer):
         x = tf.clip_by_value(x, qn, qp)
         x = round_pass(x)
         x = x * s_scale
+
+        if self.min_value != 0:
+            x = x + self.min_value
+
         return x
 
     def get_config(self):
@@ -129,17 +152,17 @@ class QuantizedConv(tf.keras.layers.Layer):
     def build(self, input_shape, **kwargs):
         in_channels = input_shape[1] if self.data_format == "channels_first" else input_shape[-1]
         assert in_channels > 8, "in_channels <= 8, is your data format correct?"
-        self.weight = self.add_weight(name='kernel',
+        self.kernel = self.add_weight(name='kernel',
                                         shape=[3, 3, in_channels, self.filters],
                                         initializer=self.kernel_initializer,
                                         trainable=True, regularizer=self.kernel_regularizer)
         self.bias = self.add_weight(name='bias', shape=[self.filters],
             initializer=tf.keras.initializers.Zeros(), trainable=True) if self.use_bias else None
-        self.weight_quantize = Quantize(is_activation=False, p=self.p, regularizer=self.regularizer, name=self.name+"/weight_quantize")
+        self.kernel_quantize = Quantize(is_activation=False, p=self.p, regularizer=self.regularizer, name=self.name+"/kernel_quantize")
     
     def call(self, inputs):
-        weight = self.weight_quantize(self.weight)
-        return tf.nn.conv2d(inputs, weight, strides=1, padding='SAME',
+        kernel = self.kernel_quantize(self.kernel)
+        return tf.nn.conv2d(inputs, kernel, strides=1, padding='SAME',
             data_format="NCHW" if self.data_format == "channels_first" else "NHWC" ) + (self.bias if self.use_bias else 0)
 
     def get_config(self):
@@ -147,11 +170,11 @@ class QuantizedConv(tf.keras.layers.Layer):
         config.update({'filters': self.filters, 'p': self.p, 'use_bias': self.use_bias, 'kernel_regularizer': self.kernel_regularizer, 'kernel_initializer': self.kernel_initializer, 'data_format': self.data_format, 'weight': self.weight, 'bias': self.bias, 'weight_quantize': self.weight_quantize})
         return config
 
-def quantized_conv(filters, name, p=4, regularizer=None, **kwargs):
+def quantized_conv(filters, name, p=4, regularizer=None, min_value=0, **kwargs):
     assert regularizer is not None, "quantization is unstable with regularization"
     return tf.keras.Sequential([
-        Quantize(is_activation=True, p=p, regularizer=regularizer, name=name+"/activation_quantize"),
-        QuantizedConv(filters, p=p, name=name, regularizer=regularizer, **kwargs)
+        Quantize(is_activation=True, p=p, regularizer=regularizer, min_value=min_value, name=name+"/activation_quantize"),
+        QuantizedConv(filters, p=p, name=name+"/conv2d", regularizer=regularizer, **kwargs)
         # tf.keras.layers.Conv2D(filters,
         #                                 3,
         #                                 use_bias=False,
@@ -369,7 +392,6 @@ class TFProcess:
             self.DEFAULT_ACTIVATION = 'relu'
         elif default_activation == "mish":
             self.net.set_defaultactivation(pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            import tensorflow_addons as tfa
             self.DEFAULT_ACTIVATION = tfa.activations.mish
         else:
             raise ValueError(
@@ -1297,6 +1319,7 @@ class TFProcess:
             conv, name=name + '/bn', scale=bn_scale))
 
     def residual_block(self, inputs, channels, name):
+        min_value = -0.31 if self.DEFAULT_ACTIVATION == tfa.activations.mish else 0.0
         
         quantize = False
         if quantize:
@@ -1304,7 +1327,7 @@ class TFProcess:
                                        kernel_initializer='glorot_normal',
                                        regularizer=self.l2reg,
                                        data_format='channels_first',
-                                       name=name + '/1/conv2d')(inputs)
+                                       name=name + '/1', min_value=min_value)(inputs)
         else:
             conv1 = tf.keras.layers.Conv2D(channels // 2,
                                         3,
@@ -1325,7 +1348,7 @@ class TFProcess:
                                         kernel_initializer='glorot_normal',
                                         regularizer=self.l2reg,
                                         data_format='channels_first',
-                                        name=name + '/2/conv2d')(out1)
+                                        name=name + '/2', min_value=min_value)(out1)
         else:
             conv2 = tf.keras.layers.Conv2D(channels,
                                         3,
@@ -1338,7 +1361,7 @@ class TFProcess:
         out2 = self.batch_norm(conv2,
                                                        name + '/2/bn',
                                                        scale=True)
-        if False:
+        if True:
             out2 = self.squeeze_excitation(out2,
                                         channels,
                                         name=name + '/se')
