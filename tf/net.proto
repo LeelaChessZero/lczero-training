@@ -48,6 +48,8 @@ message Weights {
     optional Layer bn_stddivs = 4;
     optional Layer bn_gammas = 5;
     optional Layer bn_betas = 6;
+    optional Layer input_quantize_scale = 7;
+    optional Layer weights_quantize_scale = 8;
   }
 
   message SEunit {
