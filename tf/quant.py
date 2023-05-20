@@ -123,13 +123,14 @@ class QuantizedConv(tf.keras.layers.Layer):
 
 
 class QuantizedDense(tf.keras.layers.Layer):
-    def __init__(self, out_units, p=8, use_bias=False, kernel_regularizer=None, regularizer=None, kernel_initializer="glorot_normal", **kwargs):
+    def __init__(self, out_units, p=8, use_bias=False, kernel_regularizer=None, regularizer=None, kernel_initializer="glorot_normal", activation=None, **kwargs):
         super().__init__(**kwargs)
         self.out_units = out_units
         self.p = p
         self.use_bias = use_bias
         self.kernel_regularizer = kernel_regularizer
         self.regularizer = regularizer
+        self.activation = activation
         if kernel_regularizer is None:
             self.kernel_regularizer = regularizer
         self.kernel_initializer = kernel_initializer
@@ -140,14 +141,19 @@ class QuantizedDense(tf.keras.layers.Layer):
                                       shape=[in_units, self.out_units],
                                       initializer=self.kernel_initializer,
                                       trainable=True, regularizer=self.kernel_regularizer)
-        self.bias = self.add_weight(name='bias', shape=[self.filters],
+        self.bias = self.add_weight(name='bias', shape=[self.out_units],
                                     initializer=tf.keras.initializers.Zeros(), trainable=True) if self.use_bias else None
         self.weight_quantize = Quantize(
             is_activation=False, p=self.p, regularizer=self.regularizer, name=self.name+"/kernel_quantize")
 
     def call(self, inputs):
         weight = self.weight_quantize(self.weight)
-        return tf.einsum('bsi,io->bso', inputs, weight)
+        out = tf.einsum('bsi,io->bso', inputs, weight)
+        if self.use_bias:
+            out += self.bias
+        if self.activation is not None:
+            out = self.activation(out)
+        return out
 
     def get_config(self):
         config = super().get_config()
