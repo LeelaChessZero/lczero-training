@@ -11,11 +11,14 @@ def _grad_scale(x, scale):
     return tf.stop_gradient(y - y_grad) + y_grad
 
 
+@tf.custom_gradient
 def _round_pass(x):
     # Can be implemented more efficiently with custom gradient
     y = tf.round(x)
-    y_grad = x
-    return tf.stop_gradient(y - y_grad) + y_grad
+
+    def grad(dy):
+        return dy
+    return y, grad
 
 
 class Quantize(tf.keras.layers.Layer):
