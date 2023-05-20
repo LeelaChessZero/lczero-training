@@ -123,7 +123,7 @@ class QuantizedConv(tf.keras.layers.Layer):
 
 
 class QuantizedDense(tf.keras.layers.Layer):
-    def __init__(self, out_units, p=8, use_bias=False, kernel_regularizer=None, regularizer=None, kernel_initializer="glorot_normal", data_format="channels_first", **kwargs):
+    def __init__(self, out_units, p=8, use_bias=False, kernel_regularizer=None, regularizer=None, kernel_initializer="glorot_normal", **kwargs):
         super().__init__(**kwargs)
         self.out_units = out_units
         self.p = p
@@ -133,11 +133,9 @@ class QuantizedDense(tf.keras.layers.Layer):
         if kernel_regularizer is None:
             self.kernel_regularizer = regularizer
         self.kernel_initializer = kernel_initializer
-        self.data_format = data_format
 
     def build(self, input_shape, **kwargs):
-        in_units = input_shape[1] if self.data_format == "channels_first" else input_shape[-1]
-        assert in_units > 8, "in_channels <= 8, is your data format correct?"
+        in_units = input_shape[-1]
         self.weight = self.add_weight(name='kernel',
                                       shape=[in_units, self.out_units],
                                       initializer=self.kernel_initializer,
@@ -145,7 +143,7 @@ class QuantizedDense(tf.keras.layers.Layer):
         self.bias = self.add_weight(name='bias', shape=[self.filters],
                                     initializer=tf.keras.initializers.Zeros(), trainable=True) if self.use_bias else None
         self.weight_quantize = Quantize(
-            is_activation=False, p=self.p, regularizer=self.regularizer, name=self.name+"/weight_quantize")
+            is_activation=False, p=self.p, regularizer=self.regularizer, name=self.name+"/kernel_quantize")
 
     def call(self, inputs):
         weight = self.weight_quantize(self.weight)
@@ -161,19 +159,8 @@ class QuantizedDense(tf.keras.layers.Layer):
 def quantized_dense(in_units, name, p=8, regularizer=None, **kwargs):
     return tf.keras.Sequential([
         Quantize(is_activation=True, p=p, regularizer=regularizer,
-                 name=name+"/activation_quantize"),
+                 name=name),
         QuantizedDense(in_units, p=p, name=name,
                        regularizer=regularizer, **kwargs)
-
-    ])
-
-
-def quantized_conv(filters, name, p=8, regularizer=None, **kwargs):
-    assert regularizer is not None, "quantization is unstable with regularization"
-    return tf.keras.Sequential([
-        Quantize(is_activation=True, p=p, regularizer=regularizer,
-                 name=name+"/activation_quantize"),
-        QuantizedConv(filters, p=p, name=name,
-                      regularizer=regularizer, **kwargs)
 
     ])
