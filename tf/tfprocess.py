@@ -25,13 +25,12 @@ from tensorflow_addons.optimizers.weight_decay_optimizers import (
     extend_with_decoupled_weight_decay)
 import time
 import bisect
-import lc0_az_policy_map
 import attention_policy_map as apm
 import proto.net_pb2 as pb
 from functools import reduce
 import operator
-import functools
 from net import Net
+from quant import *
 
 
 class Gating(tf.keras.layers.Layer):
@@ -1564,17 +1563,17 @@ class TFProcess:
             self.smol_weight_gen_dense = tf.keras.layers.Dense(
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
 
-        if True:
+        if False:
             inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
             if self.arc_encoding:
                 assert False, "this setting is not recommended"
-                # self.POS_ENC = apm.make_pos_enc()
-                # positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                #                                       [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                # flow = tf.concat([flow, positional_encoding], axis=2)
+                self.POS_ENC = apm.make_pos_enc()
+                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+                flow = tf.concat([flow, positional_encoding], axis=2)
 
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
@@ -1584,14 +1583,6 @@ class TFProcess:
             pos_info = tf.reshape(pos_info_processed,
                                   [-1, 64, self.embedding_dense_sz])
             flow = tf.concat([flow, pos_info], axis=2)
-
-            # square embedding
-            flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
-                                         kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
-                                         name=name+"embedding")(flow)
-            flow = tf.keras.layers.LayerNormalization(
-                name=name+"embedding/ln")(flow)
-            flow = ma_gating(flow, name='embedding')
 
         else:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
@@ -1605,15 +1596,13 @@ class TFProcess:
                      tf.shape(self.POS_ENC)[2]])
                 flow = tf.concat([flow, positional_encoding], axis=2)
 
-            # square embedding
-            flow = tf.keras.layers.Dense(self.embedding_size,
-                                         kernel_initializer='glorot_normal',
-                                         kernel_regularizer=self.l2reg,
-                                         activation=self.DEFAULT_ACTIVATION,
-                                         name='embedding')(flow)
-
-            # !!! input gate
-            flow = ma_gating(flow, name='embedding')
+        # square embedding
+        flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
+                                     kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                     name=name+"embedding")(flow)
+        flow = tf.keras.layers.LayerNormalization(
+            name=name+"embedding/ln")(flow)
+        flow = ma_gating(flow, name='embedding')
 
         attn_wts = []
         for i in range(self.encoder_layers):
