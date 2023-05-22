@@ -835,28 +835,8 @@ class TFProcess:
                 else:
                     raise KeyError(error_string)
 
-            if weight.shape.ndims == 4:
-                # Rescale rule50 related weights as clients do not normalize the input.
-                if weight.name == "input/conv2d/kernel:0" and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
-                    num_inputs = 112
-                    # 50 move rule is the 110th input, or 109 starting from 0.
-                    rule50_input = 109
-                    for i in range(len(new_weight)):
-                        if (i % (num_inputs * 9)) // 9 == rule50_input:
-                            new_weight[i] = new_weight[i] * 99
-
-                # Convolution weights need a transpose
-                #
-                # TF (kYXInputOutput)
-                # [filter_height, filter_width, in_channels, out_channels]
-                #
-                # Leela/cuDNN/Caffe (kOutputInputYX)
-                # [output, input, filter_size, filter_size]
-                s = weight.shape.as_list()
-                shape = [s[i] for i in [3, 2, 0, 1]]
-                new_weight = tf.constant(new_weight, shape=shape)
-                weight.assign(tf.transpose(a=new_weight, perm=[2, 3, 1, 0]))
-            elif weight.shape.ndims == 2:
+            assert weight.shape.ndims <= 2, f"Transformers only use 1d or 2d weights, got {weight.shape.ndims}d"
+            if weight.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
                 # [out, in] in Leela
