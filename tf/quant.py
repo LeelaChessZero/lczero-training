@@ -5,10 +5,11 @@ import operator
 # https://arxiv.org/pdf/1902.08153.pdf
 
 
+@ tf.custom_gradient
 def _grad_scale(x, scale):
-    y = x
-    y_grad = x * scale
-    return tf.stop_gradient(y - y_grad) + y_grad
+    def grad(upstream):
+        return upstream * scale
+    return x, grad
 
 
 @tf.custom_gradient
