@@ -1418,7 +1418,6 @@ class TFProcess:
 
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
-        batch_size = tf.shape(q)[0]
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
         heads = scaled_attention_logits.shape[1]
