@@ -427,21 +427,7 @@ class TFProcess:
         else:
             self.init_net()
 
-    def init_net(self):
-        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
-        input_var = tf.keras.Input(shape=(112, 8, 8))
-        outputs = self.construct_net(input_var)
-        self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
-
-        # swa_count initialized regardless to make checkpoint code simpler.
-        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
-        self.swa_weights = None
-        if self.swa_enabled:
-            # Count of networks accumulated into SWA
-            self.swa_weights = [
-                tf.Variable(w, trainable=False) for w in self.model.weights
-            ]
-
+    def init_optimizer(self):
         self.active_lr = tf.Variable(0.01, trainable=False)
         # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
         self.update_lr_manually = False
@@ -492,6 +478,7 @@ class TFProcess:
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
+    def init_metric_functions(self):
         def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
@@ -702,6 +689,7 @@ class TFProcess:
 
         self.accuracy_fn = accuracy
 
+    def init_metrics(self):
         accuracy_thresholded_metrics = []
         for threshold in self.accuracy_thresholds:
             accuracy_thresholded_metrics.append(
@@ -749,6 +737,25 @@ class TFProcess:
 
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
+
+    def init_net(self):
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+        input_var = tf.keras.Input(shape=(112, 8, 8))
+        outputs = self.construct_net(input_var)
+        self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
+
+        # swa_count initialized regardless to make checkpoint code simpler.
+        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
+        self.swa_weights = None
+        if self.swa_enabled:
+            # Count of networks accumulated into SWA
+            self.swa_weights = [
+                tf.Variable(w, trainable=False) for w in self.model.weights
+            ]
+
+        self.init_optimizer()
+        self.init_metric_functions()
+        self.init_metrics()
 
         # Set adaptive learning rate during training
         self.cfg["training"]["lr_boundaries"].sort()
