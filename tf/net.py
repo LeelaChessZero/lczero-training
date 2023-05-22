@@ -12,6 +12,8 @@ LC0_MINOR_WITH_INPUT_TYPE_3 = 25
 LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_MINOR_WITH_MISH = 29
+LC0_MINOR_WITH_ATTN_BODY = 30
+LC0_MINOR_WITH_ATTN_BODY_EXPERIMENTAL = 65566
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -54,12 +56,18 @@ class Net:
 
     def set_networkformat(self, net):
         self.pb.format.network_format.network = net
+        if net == pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT \
+                and self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
 
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
 
     def set_headcount(self, headcount):
         self.pb.weights.headcount = headcount
+
+    def set_pol_headcount(self, headcount):
+        self.pb.weights.pol_headcount = headcount
 
     def set_valueformat(self, value):
         self.pb.format.network_format.value = value
@@ -88,6 +96,40 @@ class Net:
         if activation == pb.NetworkFormat.DEFAULT_ACTIVATION_MISH:
             if self.pb.min_version.minor < LC0_MINOR_WITH_MISH:
                 self.pb.min_version.minor = LC0_MINOR_WITH_MISH
+
+    def set_smolgen_activation(self, activation):
+        self.pb.format.network_format.smolgen_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def set_ffn_activation(self, activation):
+        self.pb.format.network_format.ffn_activation = activation
+        if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
+            self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        return None
+
+    def activation(self, name):
+        if name == "relu":
+            return pb.NetworkFormat.ACTIVATION_RELU
+        elif name == "tanh":
+            return pb.NetworkFormat.ACTIVATION_TANH
+        elif name == "sigmoid":
+            return pb.NetworkFormat.ACTIVATION_SIGMOID
+        elif name == "softmax":
+            return pb.NetworkFormat.ACTIVATION_SOFTMAX
+        elif name == "selu":
+            return pb.NetworkFormat.ACTIVATION_SELU
+        elif name == "mish":
+            return pb.NetworkFormat.ACTIVATION_MISH
+        elif name == "swish":
+            return pb.NetworkFormat.ACTIVATION_SWISH
+        elif name == "relu_2" or name == "sqrrelu":
+            return pb.NetworkFormat.ACTIVATION_RELU_2
+        elif name == "default":
+            return pb.NetworkFormat.ACTIVATION_DEFAULT
+        else:
+            return pb.NetworkFormat.ACTIVATION_NONE
 
     def get_weight_amounts(self):
         value_weights = 8
@@ -237,6 +279,7 @@ class Net:
     def tf_name_to_pb_name(self, name):
         """Given Tensorflow variable name returns the protobuf name and index
         of residual block if weight belong in a residual block."""
+
         def convblock_to_bp(w):
             w = w.split(':')[0]
             d = {
@@ -246,7 +289,6 @@ class Net:
                 'moving_mean': 'bn_means',
                 'moving_variance': 'bn_stddivs',
                 'bias': 'biases'
-                ''
             }
 
             return d[w]
@@ -320,12 +362,33 @@ class Net:
             elif l.startswith('w'):
                 s = l[1]
             else:
-                raise ValueError(
-                    'Unable to decode mha weight {}/{}'.format(l, w))
+                raise ValueError('Unable to decode mha weight {}/{}'.format(
+                    l, w))
             w = w.split(':')[0]
             d = {'kernel': '{}_w', 'bias': '{}_b'}
 
             return d[w].format(s)
+
+        def mha_smolgen_to_bp(l, w):
+            s = {
+                'compress': 'compress',
+                'hidden1_dense': 'dense1_{}',
+                'hidden1_ln': 'ln1_{}',
+                'gen_from': 'dense2_{}',
+                'gen_from_ln': 'ln2_{}'
+            }
+            if s[l] is None:
+                raise ValueError(
+                    'Unable to decode mha smolgen weight {}/{}'.format(l, w))
+            w = w.split(':')[0]
+            d = {
+                'kernel': 'w',
+                'bias': 'b',
+                'gamma': 'gammas',
+                'beta': 'betas'
+            }
+
+            return s[l].format(d[w])
 
         def ffn_to_bp(l, w):
             w = w.split(':')[0]
@@ -354,6 +417,7 @@ class Net:
         pb_name = None
         block = None
         encoder_block = None
+        pol_encoder_block = None
 
         if base_layer == 'input':
             pb_name = 'input.' + convblock_to_bp(weights_name)
@@ -370,7 +434,7 @@ class Net:
             elif layers[1] == 'attention':
                 pb_name = attn_pol_to_bp(layers[2], weights_name)
             elif layers[1].startswith('enc_layer_'):
-                encoder_block = int(layers[1].split('_')[2]) - 1
+                pol_encoder_block = int(layers[1].split('_')[2]) - 1
                 if layers[2] == 'mha':
                     pb_name = 'mha.' + mha_to_bp(layers[3], weights_name)
                 elif layers[2] == 'ffn':
@@ -384,6 +448,11 @@ class Net:
                 pb_name = value_to_bp(layers[1], weights_name)
             else:
                 pb_name = 'value.' + convblock_to_bp(weights_name)
+        elif base_layer == "value_error":
+            if "dense" in layers[1]:
+                pb_name = "ip_val_err_w"
+            else:
+                pb_name = "ip_val_err_b"
         elif base_layer == 'moves_left':
             if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = moves_left_to_bp(layers[1], weights_name)
@@ -391,34 +460,50 @@ class Net:
                 pb_name = 'moves_left.' + convblock_to_bp(weights_name)
         elif base_layer.startswith('residual'):
             block = int(base_layer.split('_')[1]) - 1  # 1 indexed
-            
-            if layers[1] in ['1', '2']:
-                if 'quantize' in name:
-                    if '/kernel_quantize/' in name:
-                        pb_name = 'weights_quantize_scale'
-                    else:
-                        pb_name = 'inputs_quantize_scale'
-                else:
-                    pb_name = convblock_to_bp(weights_name)
-
-                pb_name = 'conv' + layers[1] + '.' + pb_name
+            if layers[1] == '1':
+                pb_name = 'conv1.' + convblock_to_bp(weights_name)
+            elif layers[1] == '2':
+                pb_name = 'conv2.' + convblock_to_bp(weights_name)
             elif layers[1] == 'se':
                 pb_name = 'se.' + se_to_bp(layers[-2], weights_name)
         elif base_layer.startswith('encoder'):
             encoder_block = int(base_layer.split('_')[1]) - 1
             if layers[1] == 'mha':
-                pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
+                if layers[2] == 'smolgen':
+                    pb_name = 'mha.smolgen.' + mha_smolgen_to_bp(
+                        layers[3], weights_name)
+                else:
+                    pb_name = 'mha.' + mha_to_bp(layers[2], weights_name)
             elif layers[1] == 'ffn':
                 pb_name = 'ffn.' + ffn_to_bp(layers[2], weights_name)
             else:
                 pb_name = encoder_to_bp(layers[1], weights_name)
         elif base_layer == 'embedding':
-            if layers[1].split(':')[0] == 'kernel':
+            if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
+                if layers[2].split(':')[0] == 'gate':
+                    pb_name = 'ip_{}'.format(layers[1])
+            elif layers[1].split(':')[0] == 'kernel':
                 pb_name = 'ip_emb_w'
-            else:
+            elif layers[1].split(':')[0] == 'bias':
                 pb_name = 'ip_emb_b'
+            elif layers[1] == "preprocess":
+                self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY_EXPERIMENTAL
+                if layers[2].split(":")[0] == "kernel":
+                    pb_name = "ip_emb_preproc_w"
+                else:
+                    pb_name = "ip_emb_preproc_b"
+            elif layers[1] == "ln":
+                if layers[2].split(":")[0] == "gamma":
+                    pb_name = "ip_emb_ln_gammas"
+                else:
+                    pb_name = "ip_emb_ln_betas"
+        elif base_layer == 'smol_weight_gen':
+            if layers[1].split(':')[0] == 'kernel':
+                pb_name = 'smolgen_w'
+            else:
+                pb_name = 'smolgen_b'
 
-        return (pb_name, block, encoder_block)
+        return (pb_name, block, pol_encoder_block, encoder_block)
 
     def get_weights_v2(self, names):
         # `names` is a list of Tensorflow tensor names to get from the protobuf.
@@ -437,7 +522,8 @@ class Net:
                 # headcount is set with set_headcount()
                 continue
 
-            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -445,10 +531,12 @@ class Net:
                         name))
 
             if block is None:
-                if encoder_block is None:
-                    pb_weights = self.pb.weights
-                else:
+                if pol_encoder_block is not None:
+                    pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
                     pb_weights = self.pb.weights.encoder[encoder_block]
+                else:
+                    pb_weights = self.pb.weights
             else:
                 pb_weights = self.pb.weights.residual[block]
 
@@ -580,11 +668,15 @@ class Net:
                     weights = np.square(weights) - 1e-5
                     name = name.replace('stddev', 'variance')
 
-            if name == 'input/conv2d/kernel:0' and self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
-                # 50 move rule is the 110th input, or 109 starting from 0.
-                weights[:, 109, :, :] /= 99
+            if self.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if name == 'input/conv2d/kernel:0':
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    weights[:, 109, :, :] /= 99
+                elif name == 'embedding/kernel:0':
+                    weights[:, 109] /= 99
 
-            pb_name, block, encoder_block = self.tf_name_to_pb_name(name)
+            pb_name, block, pol_encoder_block, encoder_block = self.tf_name_to_pb_name(
+                name)
 
             if pb_name is None:
                 raise ValueError(
@@ -592,13 +684,19 @@ class Net:
                         name))
 
             if block is None:
-                if encoder_block is None:
-                    pb_weights = self.pb.weights
-                else:
+                if pol_encoder_block is not None:
+                    assert pol_encoder_block >= 0
+                    while pol_encoder_block >= len(
+                            self.pb.weights.pol_encoder):
+                        self.pb.weights.pol_encoder.add()
+                    pb_weights = self.pb.weights.pol_encoder[pol_encoder_block]
+                elif encoder_block is not None:
                     assert encoder_block >= 0
                     while encoder_block >= len(self.pb.weights.encoder):
                         self.pb.weights.encoder.add()
                     pb_weights = self.pb.weights.encoder[encoder_block]
+                else:
+                    pb_weights = self.pb.weights
             else:
                 assert block >= 0
                 while block >= len(self.pb.weights.residual):

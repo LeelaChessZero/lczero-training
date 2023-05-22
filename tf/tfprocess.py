@@ -1600,8 +1600,9 @@ class TFProcess:
         flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
                                      kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                      name=name+"embedding")(flow)
-        flow = tf.keras.layers.LayerNormalization(
-            name=name+"embedding/ln")(flow)
+        if False:
+            flow = tf.keras.layers.LayerNormalization(
+                name=name+"embedding/ln")(flow)
         flow = ma_gating(flow, name='embedding')
 
         attn_wts = []
