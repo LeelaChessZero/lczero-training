@@ -25,12 +25,13 @@ from tensorflow_addons.optimizers.weight_decay_optimizers import (
     extend_with_decoupled_weight_decay)
 import time
 import bisect
+import lc0_az_policy_map
 import attention_policy_map as apm
 import proto.net_pb2 as pb
 from functools import reduce
 import operator
+import functools
 from net import Net
-from quant import *
 
 
 class Gating(tf.keras.layers.Layer):
@@ -427,7 +428,21 @@ class TFProcess:
         else:
             self.init_net()
 
-    def init_optimizer(self):
+    def init_net(self):
+        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
+        input_var = tf.keras.Input(shape=(112, 8, 8))
+        outputs = self.construct_net(input_var)
+        self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
+
+        # swa_count initialized regardless to make checkpoint code simpler.
+        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
+        self.swa_weights = None
+        if self.swa_enabled:
+            # Count of networks accumulated into SWA
+            self.swa_weights = [
+                tf.Variable(w, trainable=False) for w in self.model.weights
+            ]
+
         self.active_lr = tf.Variable(0.01, trainable=False)
         # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
         self.update_lr_manually = False
@@ -478,7 +493,6 @@ class TFProcess:
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
-    def init_metric_functions(self):
         def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
@@ -689,7 +703,6 @@ class TFProcess:
 
         self.accuracy_fn = accuracy
 
-    def init_metrics(self):
         accuracy_thresholded_metrics = []
         for threshold in self.accuracy_thresholds:
             accuracy_thresholded_metrics.append(
@@ -737,25 +750,6 @@ class TFProcess:
 
         ]
         self.test_metrics.extend(accuracy_thresholded_metrics)
-
-    def init_net(self):
-        self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
-        input_var = tf.keras.Input(shape=(112, 8, 8))
-        outputs = self.construct_net(input_var)
-        self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
-
-        # swa_count initialized regardless to make checkpoint code simpler.
-        self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
-        self.swa_weights = None
-        if self.swa_enabled:
-            # Count of networks accumulated into SWA
-            self.swa_weights = [
-                tf.Variable(w, trainable=False) for w in self.model.weights
-            ]
-
-        self.init_optimizer()
-        self.init_metric_functions()
-        self.init_metrics()
 
         # Set adaptive learning rate during training
         self.cfg["training"]["lr_boundaries"].sort()
@@ -835,8 +829,28 @@ class TFProcess:
                 else:
                     raise KeyError(error_string)
 
-            assert weight.shape.ndims <= 2, f"Transformers only use 1d or 2d weights, got {weight.shape.ndims}d"
-            if weight.shape.ndims == 2:
+            if weight.shape.ndims == 4:
+                # Rescale rule50 related weights as clients do not normalize the input.
+                if weight.name == "input/conv2d/kernel:0" and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                    num_inputs = 112
+                    # 50 move rule is the 110th input, or 109 starting from 0.
+                    rule50_input = 109
+                    for i in range(len(new_weight)):
+                        if (i % (num_inputs * 9)) // 9 == rule50_input:
+                            new_weight[i] = new_weight[i] * 99
+
+                # Convolution weights need a transpose
+                #
+                # TF (kYXInputOutput)
+                # [filter_height, filter_width, in_channels, out_channels]
+                #
+                # Leela/cuDNN/Caffe (kOutputInputYX)
+                # [output, input, filter_size, filter_size]
+                s = weight.shape.as_list()
+                shape = [s[i] for i in [3, 2, 0, 1]]
+                new_weight = tf.constant(new_weight, shape=shape)
+                weight.assign(tf.transpose(a=new_weight, perm=[2, 3, 1, 0]))
+            elif weight.shape.ndims == 2:
                 # Fully connected layers are [in, out] in TF
                 #
                 # [out, in] in Leela
@@ -1418,6 +1432,7 @@ class TFProcess:
 
         # 0 h 64 d, 0 h d 64
         matmul_qk = tf.matmul(q, k, transpose_b=True)
+        batch_size = tf.shape(q)[0]
         dk = tf.cast(tf.shape(k)[-1], self.model_dtype)
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
         heads = scaled_attention_logits.shape[1]
@@ -1549,17 +1564,17 @@ class TFProcess:
             self.smol_weight_gen_dense = tf.keras.layers.Dense(
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
 
-        if False:
+        if True:
             inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
             if self.arc_encoding:
                 assert False, "this setting is not recommended"
-                self.POS_ENC = apm.make_pos_enc()
-                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                flow = tf.concat([flow, positional_encoding], axis=2)
+                # self.POS_ENC = apm.make_pos_enc()
+                # positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                #                                       [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+                # flow = tf.concat([flow, positional_encoding], axis=2)
 
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
@@ -1569,6 +1584,14 @@ class TFProcess:
             pos_info = tf.reshape(pos_info_processed,
                                   [-1, 64, self.embedding_dense_sz])
             flow = tf.concat([flow, pos_info], axis=2)
+
+            # square embedding
+            flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
+                                         kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                         name=name+"embedding")(flow)
+            flow = tf.keras.layers.LayerNormalization(
+                name=name+"embedding/ln")(flow)
+            flow = ma_gating(flow, name='embedding')
 
         else:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
@@ -1582,14 +1605,15 @@ class TFProcess:
                      tf.shape(self.POS_ENC)[2]])
                 flow = tf.concat([flow, positional_encoding], axis=2)
 
-        # square embedding
-        flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
-                                     kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
-                                     name=name+"embedding")(flow)
-        if False:
-            flow = tf.keras.layers.LayerNormalization(
-                name=name+"embedding/ln")(flow)
-        flow = ma_gating(flow, name='embedding')
+            # square embedding
+            flow = tf.keras.layers.Dense(self.embedding_size,
+                                         kernel_initializer='glorot_normal',
+                                         kernel_regularizer=self.l2reg,
+                                         activation=self.DEFAULT_ACTIVATION,
+                                         name='embedding')(flow)
+
+            # !!! input gate
+            flow = ma_gating(flow, name='embedding')
 
         attn_wts = []
         for i in range(self.encoder_layers):
