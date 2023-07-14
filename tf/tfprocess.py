@@ -26,6 +26,7 @@ import lc0_az_policy_map
 import attention_policy_map as apm
 import proto.net_pb2 as pb
 from functools import reduce
+from aum import AUMTracker
 import operator
 
 from net import Net
@@ -211,6 +212,8 @@ class TFProcess:
         loss_scale = self.cfg['training'].get('loss_scale', 128)
         self.virtual_batch_size = self.cfg['model'].get(
             'virtual_batch_size', None)
+
+        self.aum_tracker = AUMTracker()
 
         if precision == 'single':
             self.model_dtype = tf.float32
@@ -438,6 +441,7 @@ class TFProcess:
 
         def policy_loss(target, output):
             target, output = correct_policy(target, output)
+
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
@@ -748,7 +752,7 @@ class TFProcess:
         return [w.read_value() for w in self.model.weights]
 
     @tf.function()
-    def process_inner_loop(self, x, y, z, q, m):
+    def process_inner_loop(self, x, y, z, q, m, s):
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
             policy = outputs[0]
@@ -770,6 +774,7 @@ class TFProcess:
                                       reg_term)
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
+
         if self.wdl:
             mse_loss = self.mse_loss_fn(self.qMix(z, q), value)
         else:
@@ -784,7 +789,7 @@ class TFProcess:
             # get comparable values.
             mse_loss / 4.0,
         ]
-        return metrics, tape.gradient(total_loss, self.model.trainable_weights)
+        return policy, metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
     @tf.function()
     def strategy_process_inner_loop(self, x, y, z, q, m):
@@ -838,12 +843,14 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for _ in range(batch_splits):
-            x, y, z, q, m = next(self.train_iter)
+            x, y, z, q, m, s = next(self.train_iter)
             if self.strategy is not None:
                 metrics, new_grads = self.strategy_process_inner_loop(
                     x, y, z, q, m)
             else:
-                metrics, new_grads = self.process_inner_loop(x, y, z, q, m)
+                logits, metrics, new_grads = self.process_inner_loop(x, y, z, q, m, s)
+                if steps % 10 == 0:
+                    self.aum_tracker.update(logits, y, s)
             if not grads:
                 grads = new_grads
             else:
@@ -875,9 +882,15 @@ class TFProcess:
         self.global_step.assign_add(1)
         steps = self.global_step.read_value()
 
+        if steps % 2000 == 0:
+            self.aum_tracker.graph()
+        if steps % 10000 == 0:
+            self.aum_tracker.clear()
+
         if steps % self.cfg['training'][
                 'train_avg_report_steps'] == 0 or steps % self.cfg['training'][
                     'total_steps'] == 0:
+
             time_end = time.time()
             speed = 0
             if self.time_start:
@@ -1051,7 +1064,7 @@ class TFProcess:
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
-            x, y, z, q, m = next(self.test_iter)
+            x, y, z, q, m, s = next(self.test_iter)
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m)
