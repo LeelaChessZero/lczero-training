@@ -265,6 +265,10 @@ class Net:
             return d[w] + str(n)
 
         def value_to_bp(l, w):
+            if l == 'dense_error':
+                w = w.split(':')[0]
+                d = {'kernel': 'ip_val_err_w', 'bias': 'ip_val_err_b'}
+                return d[w]
             if l == 'embedding':
                 n = ''
             elif l == 'dense1':
@@ -301,17 +305,11 @@ class Net:
             return d[w].format(n)
 
         def encoder_to_bp(l, w):
-            if l == 'ln1':
-                n = 1
-            elif l == 'ln2':
-                n = 2
-            else:
-                raise ValueError(
-                    'Unable to decode encoder weight {}/{}'.format(l, w))
+            assert 'ln' in l, 'Unable to decode encoder weight {}/{}'.format(l, w)
             w = w.split(':')[0]
-            d = {'gamma': 'ln{}_gammas', 'beta': 'ln{}_betas'}
+            d = {'gamma': '{}_gammas', 'beta': '{}_betas'}
 
-            return d[w].format(n)
+            return d[w].format(l)
 
         def mha_to_bp(l, w):
             s = ''
@@ -360,30 +358,26 @@ class Net:
         elif base_layer == 'policy1':
             pb_name = 'policy1.' + convblock_to_bp(weights_name)
         elif base_layer == 'policy':
-            if 'dense' in layers[1]:
-                pb_name = conv_policy_to_bp(weights_name)
-            elif layers[1] == 'embedding':
+            pb_prefix = 'policy.'
+            if layers[1] == 'embedding':
                 if layers[2].split(':')[0] == 'kernel':
                     pb_name = 'ip_pol_w'
                 else:
                     pb_name = 'ip_pol_b'
-            elif layers[1] == 'attention':
-                pb_name = attn_pol_to_bp(layers[2], weights_name)
-            elif layers[1].startswith('enc_layer_'):
-                encoder_block = int(layers[1].split('_')[2]) - 1
-                if layers[2] == 'mha':
-                    pb_name = 'mha.' + mha_to_bp(layers[3], weights_name)
-                elif layers[2] == 'ffn':
-                    pb_name = 'ffn.' + ffn_to_bp(layers[3], weights_name)
-                else:
-                    pb_name = encoder_to_bp(layers[2], weights_name)
-            else:
-                pb_name = 'policy.' + convblock_to_bp(weights_name)
+            elif layers[1] in ['vanilla', 'optimistic_st', 'optimistic', 'policy_val']:
+                pb_prefix = pb_prefix + layers[1] + '.'
+                if layers[2] == 'attention':
+                    pb_name = attn_pol_to_bp(layers[2], weights_name)
+                pb_name = pb_prefix + pb_name
+
+    
         elif base_layer == 'value':
-            if 'dense' in layers[1] or 'embedding' in layers[1]:
+            if layers[1] in ['st', 'vanilla']:
+                pb_prefix = 'value.' + layers[1] + '.'
+            if 'dense' in layers[2] or 'embedding' in layers[2]:
                 pb_name = value_to_bp(layers[1], weights_name)
-            else:
-                pb_name = 'value.' + convblock_to_bp(weights_name)
+            pb_name = pb_prefix + pb_name
+
         elif base_layer == 'moves_left':
             if 'dense' in layers[1] or 'embedding' in layers[1]:
                 pb_name = moves_left_to_bp(layers[1], weights_name)
@@ -415,8 +409,30 @@ class Net:
         elif base_layer == 'embedding':
             if layers[1].split(':')[0] == 'kernel':
                 pb_name = 'ip_emb_w'
-            else:
+            elif layers[1].split(':')[0] == 'bias':
                 pb_name = 'ip_emb_b'
+            elif layers[1] == 'ffn':
+                pb_name = 'ffn.' + ffn_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ln':
+                pb_name = 'ln.' + encoder_to_bp(layers[2], weights_name)
+            elif layers[1] == 'ffn_ln':
+                pb_name = 'ffn_ln.' + encoder_to_bp(layers[2], weights_name)
+            elif layers[1] == 'preprocess':
+                if layers[2].split(':')[0] == 'kernel':
+                    pb_name = 'ip_preproc_w'
+                else:
+                    pb_name = 'ip_preproc_b'
+            if layers[1] == 'mult_gate' or layers[1] == 'add_gate':
+                if layers[2].split(':')[0] == 'gate':
+                    pb_name = 'ip_{}'.format(layers[1])
+
+
+        if pb_name is None:
+            raise ValueError(
+                    'Unable to decode embedding weight given by {}'.format(
+                        '/'.join(layers)))
+
+            
 
         return (pb_name, block, encoder_block)
 

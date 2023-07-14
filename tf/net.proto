@@ -108,6 +108,51 @@ message Weights {
     optional Layer ln2_betas = 6;
   }
 
+  message PolicyHead {
+    // Policy head
+    // Extra convolution for AZ-style policy head
+    optional ConvBlock policy1 = 100;
+    optional ConvBlock policy = 101;
+    optional Layer ip_pol_w = 1;    // "embedding" in policy attention
+    optional Layer ip_pol_b = 2;
+    // For policy attention, up to and including NETWORK_SE_WITH_HEADFORMAT the
+    // "embedding" activation is SELU, otherwise it is the default activation.
+    optional Layer ip2_pol_w = 3;  // "wq" in policy attention
+    optional Layer ip2_pol_b = 4;
+    optional Layer ip3_pol_w = 5;  // "wk" in policy attention
+    optional Layer ip3_pol_b = 6;
+    optional Layer ip4_pol_w = 7;  // "ppo" in policy attention
+  }
+
+  message ValueHead {
+
+    // Value head
+    optional Layer ip_val_w = 1;  // "embedding" for attention body value
+    optional Layer ip_val_b = 2;
+    optional Layer ip1_val_w = 3;
+    optional Layer ip1_val_b = 4;
+    optional Layer ip2_val_w = 5;
+    optional Layer ip2_val_b = 6;
+    optional Layer ip_val_err_w = 7;
+    optional Layer ip_val_err_b = 8;
+    optional ActivationFunction ip_val_activation = 9;
+    optional ActivationFunction ip_val_err_activation = 10;
+  }
+
+  
+  message PolicyHeads {
+    optional Layer ip_pol_w = 1;    // "embedding" in policy attention
+    optional Layer ip_pol_b = 2;
+    optional PolicyHead vanilla = 3;
+    optional PolicyHead optimistic_st = 4;
+    optional PolicyHead policy_val = 5;
+  }
+
+  message ValueHeads {
+    optional ValueHead vanilla = 1;
+    optional ValueHead st = 2;
+  }
+
   // Input convnet.
   optional ConvBlock input = 1;
 
@@ -126,9 +171,15 @@ message Weights {
   optional Layer ip_emb_ln_gammas = 39;
   optional Layer ip_emb_ln_betas = 40;
 
+
+
   // Input gating (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   optional Layer ip_mult_gate = 33;
   optional Layer ip_add_gate = 34;
+
+  optional FFN ip_emb_ffn = 41;
+  optional Layer ip_emb_ffn_ln_gammas = 42;
+  optional Layer ip_emb_ffn_ln_betas = 43;
 
   // Encoder stack (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   repeated EncoderLayer encoder = 27;
@@ -163,8 +214,8 @@ message Weights {
   optional Layer ip2_val_w = 9;
   optional Layer ip2_val_b = 10;
 
-  optional Layer ip_val_err_w = 41;
-  optional Layer ip_val_err_b = 42;
+  optional ValueHeads value = 44;
+  optional PolicyHeads policy = 45;
 
   // Moves left head
   optional ConvBlock moves_left = 12;

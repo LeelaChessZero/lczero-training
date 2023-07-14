@@ -518,11 +518,11 @@ class TFProcess:
 
         self.reducible_policy_loss_fn = reducible_policy_loss
 
-        def policy_loss(target, output):
+        def policy_loss(target, output, weights=None):
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
-            return tf.reduce_mean(input_tensor=policy_cross_entropy)
+            return tf.reduce_mean(input_tensor=policy_cross_entropy if weights == None else policy_cross_entropy * weights)
 
         self.policy_loss_fn = policy_loss
 
@@ -614,46 +614,53 @@ class TFProcess:
 
         self.qMix = lambda z, q: q * q_ratio + z * (1 - q_ratio)
         # Loss on value head
-        if self.wdl:
 
-            def value_loss(target, output):
-                output = tf.cast(output, tf.float32)
+
+
+        def unreduced_mse_loss(target, output):
+            output = tf.cast(output, tf.float32)
+            scalar_z_conv = convert_val_to_scalar(output, softmax=True)
+            scalar_target = tf.matmul(target, wdl)
+            return tf.math.squared_difference(
+                scalar_target, scalar_z_conv)
+
+
+        def convert_val_to_scalar(val, softmax=False):
+            if val.shape[-1] == 3:
+                if softmax:
+                    val = tf.nn.softmax(val)
+                return tf.matmul(val, wdl)
+            elif val.shape[-1] == 1:
+                return val
+            else:
+                raise ValueError(
+                    "Value head size must be 3 or 1 but got: {}".format(val.shape[-1]))
+
+        self.convert_val_to_scalar = convert_val_to_scalar
+
+        def mse_loss(target, output):
+            return tf.reduce_mean(input_tensor=unreduced_mse_loss(target, output))
+        
+        self.mse_loss_fn = mse_loss
+
+        def value_loss(target, output):
+            output = tf.cast(output, tf.float32)
+            if output.shape[-1] == 1:
+                return mse_loss(target, output)
+            else:
                 value_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                     labels=tf.stop_gradient(target), logits=output)
                 return tf.reduce_mean(input_tensor=value_cross_entropy)
 
-            self.value_loss_fn = value_loss
-
-            def unreduced_mse_loss(target, output):
-                output = tf.cast(output, tf.float32)
-                scalar_z_conv = tf.matmul(tf.nn.softmax(output), wdl)
-                scalar_target = tf.matmul(target, wdl)
-                return tf.math.squared_difference(
-                    scalar_target, scalar_z_conv)
-        else:
-
-            def value_loss(target, output):
-                return tf.constant(0)
-
-            def unreduced_mse_loss(target, output):
-                output = tf.cast(output, tf.float32)
-                scalar_target = tf.matmul(target, wdl)
-                return tf.math.squared_difference(
-                    scalar_target, output)
-
-        def mse_loss(target, output):
-            return tf.reduce_mean(input_tensor=unreduced_mse_loss(target, output))
-
         self.value_loss_fn = value_loss
-        self.mse_loss_fn = mse_loss
 
         def value_err_loss(value_target, value, output):
             value = tf.cast(value, tf.float32)
             output = tf.cast(output, tf.float32)
-            scalar_z_conv = tf.matmul(tf.nn.softmax(value), wdl)
-            scalar_target = tf.matmul(value_target, wdl)
+            value = convert_val_to_scalar(value, softmax=True)
+            value_target = convert_val_to_scalar(value_target)
             true_error = tf.math.abs(
-                scalar_target - scalar_z_conv)
+                value - value_target)
             loss = tf.math.squared_difference(true_error, output)
             return tf.reduce_mean(input_tensor=loss)
 
@@ -930,31 +937,56 @@ class TFProcess:
         return [w.read_value() for w in self.model.weights]
 
     @tf.function()
-    def process_inner_loop(self, x, y, z, q, m):
+    def process_inner_loop(self, x, y, z, q, m, q_st):
 
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
             policy = outputs["policy"]
             value = outputs["value"]
-            value_err = outputs["value_err"]
+            value_err = outputs.get("value_err")
             policy_loss = self.policy_loss_fn(y, policy)
-            reg_term = sum(self.model.losses)
+            policy_optimistic_st = outputs.get("policy_optimistic_st")
+            value_st = outputs.get("value_st")
+            value_st_err = outputs.get("value_st_err")
 
             value_target = self.qMix(z, q)
-            if self.wdl:
-                value_ce_loss = self.value_loss_fn(value_target, value)
-                value_loss = value_ce_loss
-            else:
-                value_mse_loss = self.mse_loss_fn(value_target, value)
-                value_loss = value_mse_loss
+
+
+            def get_policy_optimism_weights(value_pred, value_target, value_err_pred, strength=1.5):
+                value_pred = self.convert_val_to_scalar(value_pred)
+                value_target = self.convert_val_to_scalar(value_target)
+                z_values = (value_target - value_pred) / (value_err_pred + 1e-5)
+                weights = tf.math.sigmoid((z_values - strength) * 3)
+                weights = tf.stop_gradient(weights)
+                return weights
+            
+            def get_value_losses(target, output, err_output):
+                value_loss = self.value_loss_fn(target, output)
+                value_err_loss = self.value_err_loss_fn(target, tf.stop_gradient(output), err_output) if err_output is not None else tf.constant(0.)
+                return value_loss, value_err_loss
+
+            if policy_optimistic_st is not None:
+                policy_optimistic_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=get_policy_optimism_weights(q_st, value_st, value_st_err, strength=1.5))
+                policy_loss = policy_loss + policy_optimistic_loss
+            
+
+
+
+            value_loss, value_err_loss = get_value_losses(value_target, value, value_err)
+            value_st_loss, value_st_err_loss = get_value_losses(value_target, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
+
+            value_loss = value_loss + value_st_loss
+            value_err_loss = value_err_loss + value_st_err_loss
+
+            reg_term = sum(self.model.losses)
+
+            
+            
             if self.moves_left:
                 moves_left = outputs["moves_left"]
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             else:
                 moves_left_loss = tf.constant(0.)
-
-            value_err_loss = self.value_err_loss_fn(
-                value_target, value, value_err)
 
             total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
                                       reg_term, value_err_loss)
@@ -996,9 +1028,9 @@ class TFProcess:
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
     @tf.function()
-    def strategy_process_inner_loop(self, x, y, z, q, m):
+    def strategy_process_inner_loop(self, x, y, z, q, m, q_st):
         metrics, new_grads = self.strategy.run(self.process_inner_loop,
-                                               args=(x, y, z, q, m))
+                                               args=(x, y, z, q, m, q_st))
         metrics = [
             self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
             for m in metrics
@@ -1049,12 +1081,12 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for batch_id in range(batch_splits):
-            x, y, z, q, m = next(self.train_iter)
+            x, y, z, q, m, q_st = next(self.train_iter)
             if self.strategy is not None:
                 metrics, new_grads = self.strategy_process_inner_loop(
-                    x, y, z, q, m)
+                    x, y, z, q, m, q_st)
             else:
-                metrics, new_grads = self.process_inner_loop(x, y, z, q, m)
+                metrics, new_grads = self.process_inner_loop(x, y, z, q, m, q_st)
             if not grads:
                 grads = new_grads
             else:
@@ -1203,6 +1235,7 @@ class TFProcess:
                 tf.saved_model.save(self.model, os.path.join(
                     self.root_dir, self.cfg["name"]) + "-onnx-" + str(evaled_steps))
 
+                
                 # Save swa weights
                 backup = self.read_weights()
                 for (swa, w) in zip(self.swa_weights, self.model.weights):
@@ -1211,15 +1244,18 @@ class TFProcess:
                 tf.saved_model.save(self.model, os.path.join(
                     self.root_dir, self.cfg["name"]) + "-swa-onnx-" + str(evaled_steps))
                 for (old, w) in zip(backup, self.model.weights):
-                    w.assign(old)
+                        w.assign(old)
 
-                path = os.path.join(self.root_dir, self.cfg["name"])
-                leela_path = path + "-" + str(evaled_steps)
-                swa_path = path + "-swa-" + str(evaled_steps)
-                self.net.pb.training_params.training_steps = evaled_steps
-                self.save_leelaz_weights(leela_path)
-                if self.swa_enabled:
-                    self.save_swa_weights(swa_path)
+                if False: # hack protobuf not working !!!
+                    
+
+                    path = os.path.join(self.root_dir, self.cfg["name"])
+                    leela_path = path + "-" + str(evaled_steps)
+                    swa_path = path + "-swa-" + str(evaled_steps)
+                    self.net.pb.training_params.training_steps = evaled_steps
+                    self.save_leelaz_weights(leela_path)
+                    if self.swa_enabled:
+                        self.save_swa_weights(swa_path)
 
         if self.profiling_start_step is not None and (
                 steps >= self.profiling_start_step +
@@ -1229,6 +1265,7 @@ class TFProcess:
             self.profiling_start_step = None
 
     def calculate_swa_summaries(self, test_batches: int, steps: int):
+        return
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
@@ -1240,11 +1277,11 @@ class TFProcess:
             w.assign(old)
 
     @tf.function()
-    def calculate_test_summaries_inner_loop(self, x, y, z, q, m):
+    def calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st):
         outputs = self.model(x, training=False)
         policy = outputs["policy"]
         value = outputs["value"]
-        value_err = outputs["value_err"]
+        value_err = outputs.get("value_st_err")
         policy_loss = self.policy_loss_fn(y, policy)
         policy_accuracy = self.policy_accuracy_fn(y, policy)
         policy_entropy = self.policy_entropy_fn(y, policy)
@@ -1256,7 +1293,21 @@ class TFProcess:
 
         value_target = self.qMix(z, q)
 
-        value_err_loss = self.value_err_loss_fn(value_target, value, value_err)
+        value_st = outputs.get("value_st")
+        value_st_err = outputs.get("value_st_err")
+
+        value_target = self.qMix(z, q)
+
+        def get_value_losses(target, output, err_output):
+            value_loss = self.value_loss_fn(target, output)
+            value_err_loss = self.value_err_loss_fn(target, tf.stop_gradient(output), err_output) if err_output is not None else tf.constant(0.)
+            return value_loss, value_err_loss
+
+        value_loss, value_err_loss = get_value_losses(value_target, value, value_err)
+        value_st_loss, value_st_err_loss = get_value_losses(value_target, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
+
+        value_loss = value_loss + value_st_loss
+        value_err_loss = value_err_loss + value_st_err_loss
 
         if self.wdl:
             value_loss = self.value_loss_fn(value_target, value)
@@ -1292,9 +1343,9 @@ class TFProcess:
         return metrics
 
     @tf.function()
-    def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m):
+    def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st):
         metrics = self.strategy.run(self.calculate_test_summaries_inner_loop,
-                                    args=(x, y, z, q, m))
+                                    args=(x, y, z, q, m, q_st))
         metrics = [
             self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
             for m in metrics
@@ -1305,13 +1356,13 @@ class TFProcess:
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
-            x, y, z, q, m = next(self.test_iter)
+            x, y, z, q, m, q_st = next(self.test_iter)
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m)
+                    x, y, z, q, m, q_st)
             else:
                 metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m)
+                    x, y, z, q, m, q_st)
             for acc, val in zip(self.test_metrics, metrics):
                 acc.accumulate(val)
         self.net.pb.training_params.learning_rate = self.lr
@@ -1347,13 +1398,13 @@ class TFProcess:
     def calculate_test_validations(self, steps: int):
         for metric in self.test_metrics:
             metric.reset()
-        for (x, y, z, q, m) in self.validation_dataset:
+        for (x, y, z, q, m, q_st) in self.validation_dataset:
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m)
+                    x, y, z, q, m, q_st)
             else:
                 metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m)
+                    x, y, z, q, m, q_st)
             for acc, val in zip(self.test_metrics, metrics):
                 acc.accumulate(val)
         with self.validation_writer.as_default():
@@ -1564,17 +1615,17 @@ class TFProcess:
             self.smol_weight_gen_dense = tf.keras.layers.Dense(
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
 
-        if True:
+        if False:
             inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
             if self.arc_encoding:
                 assert False, "this setting is not recommended"
-                # self.POS_ENC = apm.make_pos_enc()
-                # positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                #                                       [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                # flow = tf.concat([flow, positional_encoding], axis=2)
+                self.POS_ENC = apm.make_pos_enc()
+                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
+                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
+                flow = tf.concat([flow, positional_encoding], axis=2)
 
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
@@ -1593,11 +1644,28 @@ class TFProcess:
                 name=name+"embedding/ln")(flow)
             flow = ma_gating(flow, name='embedding')
 
+            # DeepNorm
+            alpha = tf.cast(tf.math.pow(
+                2. * self.encoder_layers, -0.25), self.model_dtype)
+            beta = tf.cast(tf.math.pow(
+                8. * self.encoder_layers, -0.25), self.model_dtype)
+            xavier_norm = tf.keras.initializers.VarianceScaling(
+                scale=beta, mode="fan_avg", distribution="truncated_normal", seed=42)
+
+
+            # feed-forward network
+            ffn_output = self.ffn(flow, emb_size, dff,
+                                xavier_norm, name=name + "embedding/ffn")
+
+            flow = self.encoder_norm(
+                name=name+"embedding/ffn_ln")(flow + ffn_output * alpha)
+
         else:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
             if self.arc_encoding:
+                assert False, "this setting is not recommended"
                 self.POS_ENC = apm.make_pos_enc()
                 positional_encoding = tf.broadcast_to(
                     tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
@@ -1624,91 +1692,117 @@ class TFProcess:
 
         flow_ = flow
 
-        # policy embedding
-        tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer="glorot_normal",
-                                       kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
-                                       name=name+"policy/embedding")(flow_)
 
-        # create queries and keys for policy self-attention
-        queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
-                                        name=name+"policy/attention/wq")(tokens)
-        keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
-                                     name=name+"policy/attention/wk")(tokens)
+        policy_tokens = tf.keras.layers.Dense(self.pol_embedding_size, kernel_initializer="glorot_normal",
+                                        kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
+                                        name=name+"policy/embedding")(flow_)
+        
+        def policy_head(name, activation=None):
+            # policy embedding
 
-        # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
-        # Bx64x64 (from 64 queries, 64 keys)
-        matmul_qk = tf.matmul(queries, keys, transpose_b=True)
-        # queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
-        #                                 name="policy/attention/wq")(flow)
-        # keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
-        #                              name="policy/attention/wk")(flow)
 
-        # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
-        # constant for scaling
-        dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))
-        promotion_keys = keys[:, -8:, :]
-        # queen, rook, bishop, knight order
-        promotion_offsets = tf.keras.layers.Dense(4, kernel_initializer="glorot_normal",
-                                                  name=name+"policy/attention/ppo", use_bias=False)(promotion_keys)
-        promotion_offsets = tf.transpose(
-            promotion_offsets, perm=[0, 2, 1]) * dk  # Bx4x8
-        # knight offset is added to the other three
-        promotion_offsets = promotion_offsets[:,
-                                              :3, :] + promotion_offsets[:, 3:4, :]
+            # create queries and keys for policy self-attention
+            queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
+                                            name=name+"/attention/wq")(policy_tokens)
+            keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
+                                        name=name+"/attention/wk")(policy_tokens)
 
-        # q, r, and b promotions are offset from the default promotion logit (knight)
-        # default traversals from penultimate rank to promotion rank
-        n_promo_logits = matmul_qk[:, -16:-8, -8:]
-        q_promo_logits = tf.expand_dims(
-            n_promo_logits + promotion_offsets[:, 0:1, :], axis=3)  # Bx8x8x1
-        r_promo_logits = tf.expand_dims(
-            n_promo_logits + promotion_offsets[:, 1:2, :], axis=3)
-        b_promo_logits = tf.expand_dims(
-            n_promo_logits + promotion_offsets[:, 2:3, :], axis=3)
-        promotion_logits = tf.concat(
-            [q_promo_logits, r_promo_logits, b_promo_logits], axis=3)  # Bx8x8x3
-        # logits now alternate a7a8q,a7a8r,a7a8b,...,
-        promotion_logits = tf.reshape(promotion_logits, [-1, 8, 24])
+            # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
+            # Bx64x64 (from 64 queries, 64 keys)
+            matmul_qk = tf.matmul(queries, keys, transpose_b=True)
+            # queries = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
+            #                                 name="policy/attention/wq")(flow)
+            # keys = tf.keras.layers.Dense(self.policy_d_model, kernel_initializer="glorot_normal",
+            #                              name="policy/attention/wk")(flow)
 
-        # scale the logits by dividing them by sqrt(d_model) to stabilize gradients
-        # Bx8x24 (8 from-squares, 3x8 promotions)
-        promotion_logits = promotion_logits / dk
-        # Bx64x64 (64 from-squares, 64 to-squares)
-        policy_attn_logits = matmul_qk / dk
+            # PAWN PROMOTION: create promotion logits using scalar offsets generated from the promotion-rank keys
+            # constant for scaling
+            dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))
+            promotion_keys = keys[:, -8:, :]
+            # queen, rook, bishop, knight order
+            promotion_offsets = tf.keras.layers.Dense(4, kernel_initializer="glorot_normal",
+                                                    name=name+"/attention/ppo", use_bias=False)(promotion_keys)
+            promotion_offsets = tf.transpose(
+                promotion_offsets, perm=[0, 2, 1]) * dk  # Bx4x8
+            # knight offset is added to the other three
+            promotion_offsets = promotion_offsets[:,
+                                                :3, :] + promotion_offsets[:, 3:4, :]
 
-        attn_wts.append(promotion_logits)
-        attn_wts.append(policy_attn_logits)
+            # q, r, and b promotions are offset from the default promotion logit (knight)
+            # default traversals from penultimate rank to promotion rank
+            n_promo_logits = matmul_qk[:, -16:-8, -8:]
+            q_promo_logits = tf.expand_dims(
+                n_promo_logits + promotion_offsets[:, 0:1, :], axis=3)  # Bx8x8x1
+            r_promo_logits = tf.expand_dims(
+                n_promo_logits + promotion_offsets[:, 1:2, :], axis=3)
+            b_promo_logits = tf.expand_dims(
+                n_promo_logits + promotion_offsets[:, 2:3, :], axis=3)
+            promotion_logits = tf.concat(
+                [q_promo_logits, r_promo_logits, b_promo_logits], axis=3)  # Bx8x8x3
+            # logits now alternate a7a8q,a7a8r,a7a8b,...,
+            promotion_logits = tf.reshape(promotion_logits, [-1, 8, 24])
 
-        # APPLY POLICY MAP: output becomes Bx1856
-        h_fc1 = ApplyAttentionPolicyMap()(policy_attn_logits, promotion_logits)
+            # scale the logits by dividing them by sqrt(d_model) to stabilize gradients
+            # Bx8x24 (8 from-squares, 3x8 promotions)
+            promotion_logits = promotion_logits / dk
+            # Bx64x64 (64 from-squares, 64 to-squares)
+            policy_attn_logits = matmul_qk / dk
 
-        # Value head
-        assert self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION and self.encoder_layers > 0
-        embedded_val = tf.keras.layers.Dense(self.val_embedding_size, kernel_initializer="glorot_normal",
+            attn_wts.append(promotion_logits)
+            attn_wts.append(policy_attn_logits)
+
+            # APPLY POLICY MAP: output becomes Bx1856
+            h_fc1 = ApplyAttentionPolicyMap(name=name+"/attention_map")(policy_attn_logits, promotion_logits)
+
+            if activation is not None:
+                h_fc1 = tf.keras.layers.Activation(activation)(h_fc1)
+
+            # Value head
+            assert self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION and self.encoder_layers > 0
+
+            return h_fc1
+
+
+        def value_head(name, wdl=True, use_err=True):
+            embedded_val = tf.keras.layers.Dense(self.val_embedding_size, kernel_initializer="glorot_normal",
                                              kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
-                                             name=name+"value/embedding")(flow)
-        h_val_flat = tf.keras.layers.Flatten()(embedded_val)
-        h_fc2 = tf.keras.layers.Dense(128,
-                                      kernel_initializer="glorot_normal",
-                                      kernel_regularizer=self.l2reg,
-                                      activation=self.DEFAULT_ACTIVATION,
-                                      name=name+"value/dense1")(h_val_flat)
-        # WDL head
-        if self.wdl:
-            h_fc3 = tf.keras.layers.Dense(3,
-                                          kernel_initializer="glorot_normal",
-                                          kernel_regularizer=self.l2reg,
-                                          bias_regularizer=self.l2reg,
-                                          name=name+"value/dense2")(h_fc2)
-        else:
-            h_fc3 = tf.keras.layers.Dense(1,
-                                          kernel_initializer="glorot_normal",
-                                          kernel_regularizer=self.l2reg,
-                                          activation="tanh",
-                                          name=name+"value/dense2")(h_fc2)
+                                             name=name+"/embedding")(flow)
+            h_val_flat = tf.keras.layers.Flatten()(embedded_val)
+            h_fc2 = tf.keras.layers.Dense(128,
+                                        kernel_initializer="glorot_normal",
+                                        kernel_regularizer=self.l2reg,
+                                        activation=self.DEFAULT_ACTIVATION,
+                                        name=name+"/dense1")(h_val_flat)
+            # WDL head
+            if wdl:
+                value = tf.keras.layers.Dense(3,
+                                            kernel_initializer="glorot_normal",
+                                            kernel_regularizer=self.l2reg,
+                                            bias_regularizer=self.l2reg,
+                                            name=name+"/dense2")(h_fc2)
+            else:
+                value = tf.keras.layers.Dense(1,
+                                            kernel_initializer="glorot_normal",
+                                            kernel_regularizer=self.l2reg,
+                                            activation="tanh",
+                                            name=name+"/dense2")(h_fc2)
+            
+            if use_err:
+                # Shouldn't be more than 1
+                value_err = tf.keras.layers.Dense(
+                    1, kernel_initializer="glorot_normal", name=name+"/dense_error", activation="sigmoid")(h_fc2)
+            else:
+                value_err = None
+                
+            return value, value_err
 
-        value_err = tf.keras.layers.Dense(
-            1, kernel_initializer="glorot_normal", name=name+"value_error", activation="sigmoid")(h_fc2)
+        policy = policy_head(name="policy/vanilla")
+        policy_optimistic_st = policy_head(name="policy/optimistic_st")
+        policy_val = policy_head(name="policy/policy_val", activation="tanh")
+
+
+        value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=False)
+        value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True)
 
         # Moves left head
         if self.moves_left:
@@ -1724,20 +1818,27 @@ class TFProcess:
                 activation=self.DEFAULT_ACTIVATION,
                 name=name+"moves_left/dense1")(h_mov_flat)
 
-            h_fc5 = tf.keras.layers.Dense(1,
+            moves_left = tf.keras.layers.Dense(1,
                                           kernel_initializer="glorot_normal",
                                           kernel_regularizer=self.l2reg,
                                           activation="relu",
                                           name=name+"moves_left/dense2")(h_fc4)
         else:
-            h_fc5 = None
+            moves_left = None
 
         # attention weights added as optional output for analysis -- ignored by backend
-        outputs = {"policy": h_fc1, "value": h_fc3, "attn_wts": attn_wts,
-                   "value_err": value_err}
-        if self.moves_left:
-            outputs["moves_left"] = h_fc5
+        outputs = {"policy": policy, "policy_optimistic_st": policy_optimistic_st, "policy_val": policy_val, "value": value, "attn_wts": attn_wts,
+                   "value_err": value_err, "moves_left": moves_left, "value_st": value_st, "value_st_err": value_st_err}
 
+        # Tensorflow does not accept None values in the output dictionary
+        none_keys = []
+        for key in outputs:
+            if outputs[key] is None:
+                none_keys.append(key)
+
+        for key in none_keys:
+            del outputs[key]
+        
         return outputs
 
     def set_sparsity_patterns(self):
