@@ -28,6 +28,8 @@ from chunkparser import ChunkParser
 
 SKIP = 32
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 
 def get_chunks(data_prefix):
     return glob.glob(data_prefix + "*.gz")
@@ -182,25 +184,30 @@ def main(cmd):
                                         batch_size=split_batch_size,
                                         workers=0)
 
+
     import tensorflow as tf
     from chunkparsefunc import parse_function
     from tfprocess import TFProcess
+
+
+
     tfprocess = TFProcess(cfg)
+    output_types = 6 * (tf.string,)
+
     train_dataset = tf.data.Dataset.from_generator(
         train_parser.parse,
-        output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
+        output_types=output_types)
     train_dataset = train_dataset.map(parse_function)
     test_dataset = tf.data.Dataset.from_generator(
         test_parser.parse,
-        output_types=(tf.string, tf.string, tf.string, tf.string, tf.string))
+        output_types=output_types)
     test_dataset = test_dataset.map(parse_function)
 
     validation_dataset = None
     if "input_validation" in cfg["dataset"]:
         validation_dataset = tf.data.Dataset.from_generator(
             validation_parser.sequential,
-            output_types=(tf.string, tf.string, tf.string, tf.string,
-                          tf.string))
+            output_types=output_types)
         validation_dataset = validation_dataset.map(parse_function)
 
     if tfprocess.strategy is None:  # Mirrored strategy appends prefetch itself with a value depending on number of replicas

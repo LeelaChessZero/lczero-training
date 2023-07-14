@@ -111,7 +111,9 @@ model:
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
     
     embedding_dense_sz: 128           # number of params added is 50k times this number so care is needed
-    skip_first_ln: true               # apparently actually improves performance
+    skip_first_ln: false               # makes training unstable
+    policy_val: true
+    embedding_style: "new"
 
     
     value: "wdl"

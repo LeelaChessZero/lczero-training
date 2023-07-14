@@ -66,6 +66,7 @@ import shufflebuffer as sb
 import struct
 import unittest
 import gzip
+from time import time, sleep
 from select import select
 
 V6_VERSION = struct.pack("i", 6)
@@ -73,7 +74,7 @@ V5_VERSION = struct.pack("i", 5)
 CLASSICAL_INPUT = struct.pack("i", 1)
 V4_VERSION = struct.pack("i", 4)
 V3_VERSION = struct.pack("i", 3)
-V6_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHH4H"
+V6_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff"
 V5_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffff"
 V4_STRUCT_STRING = "4s7432s832sBBBBBBBbffff"
 V3_STRUCT_STRING = "4s7432s832sBBBBBBBb"
@@ -294,7 +295,8 @@ class ChunkParserInner:
         // Indices in the probabilities array.
         uint16_t played_idx;                         8344
         uint16_t best_idx;                           8346
-        uint64_t reserved;                           8348
+        float pol_kld;                               8348
+        float q_st;                                  8352
         """
         # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
         # for the 8 "reserved" bytes
@@ -302,8 +304,7 @@ class ChunkParserInner:
          stm, rule50_count, invariance_info, dep_result, root_q, best_q,
          root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
          played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
-         played_idx, best_idx, reserved1, reserved2, reserved3,
-         reserved4) = self.v6_struct.unpack(content)
+         played_idx, best_idx, pol_kld, q_st) = self.v6_struct.unpack(content)
         """
         v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
@@ -400,7 +401,13 @@ class ChunkParserInner:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack("fff", best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q, plies_left)
+        
+        assert abs(q_st) <= 1.0, "q_st out of range: {}".format(q_st)
+
+        q_st = struct.pack("f", q_st)
+
+
+        return (planes, probs, winner, best_q, plies_left, q_st)
 
     def sample_record(self, chunkdata):
         """
@@ -464,6 +471,8 @@ class ChunkParserInner:
             with gzip.open(filename, "rb") as chunk_file:
                 version = chunk_file.read(4)
                 chunk_file.seek(0)
+                if version == b'':
+                    return
                 if version == V6_VERSION:
                     record_size = self.v6_struct.size
                 elif version == V5_VERSION:
@@ -552,9 +561,8 @@ class ChunkParserInner:
             s = list(itertools.islice(gen, self.batch_size))
             if not len(s) or (not allow_partial and len(s) != self.batch_size):
                 return
-            yield (b"".join([x[0] for x in s]), b"".join([x[1] for x in s]),
-                   b"".join([x[2] for x in s]), b"".join([x[3] for x in s]),
-                   b"".join([x[4] for x in s]))
+            n_entries = len(s[0])
+            yield tuple([b"".join([x[i] for x in s]) for i in range(n_entries)])
 
     def parse(self):
         """
@@ -664,3 +672,134 @@ class ChunkParserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def apply_alpha(qs, alpha):
+    if not isinstance(qs, np.ndarray):
+        qs = np.array(qs)
+    qs = qs * (-1)**np.arange(len(qs))
+    
+    # Create an array with alpha^(i-j) at (i, j) if this is at most 1 and 0 otherwise.
+    weights = np.arange(len(qs)) - np.arange(len(qs))[:, None]
+    weights = np.where(weights >= 0, alpha**weights, 0)
+
+    qs_adjusted = np.einsum("ij,j->i", weights, qs) / np.sum(weights, axis=1)
+    qs_adjusted = qs_adjusted * (-1)**np.arange(len(qs_adjusted))
+
+    return qs_adjusted
+
+def rescore_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
+    v6_struct = struct.Struct(V6_STRUCT_STRING)
+    record_size = v6_struct.size
+    # C:/leeladata/train/training-run2-test77-20211214-1618/*.gz
+    # apply ema with alpha
+    cd_array = bytearray()
+
+    try:
+        with gzip.open(filename, "rb") as chunk_file:
+            chunk_file.seek(0)
+            chunkdata = chunk_file.read()
+            if len(chunkdata) == 0:
+                return
+            version = chunkdata[0:4]
+            assert version == V6_VERSION
+
+            n_chunks = len(chunkdata) // record_size
+
+            # Gather q bytes
+            qs = []
+            for i in range(n_chunks):
+                # this is the best q, not 
+                qs.append(struct.unpack("f", chunkdata[i*record_size+8284:i*record_size+8288])[0])
+
+            # Create st values
+            qs = apply_alpha(qs, st_alpha)
+
+            # Write st values
+            cd_array = bytearray(chunkdata)
+            for i in range(n_chunks):
+                if abs(qs[i]) > 1 + 1e-6:
+                    print(f"Got {qs[i]}")
+                # this is the best q, not 
+                cd_array[i*record_size + 8352:i*record_size + 8356] = struct.pack("f", qs[i])
+    
+    except Exception as e:
+        print(f"Could not read {filename}, got {e}")
+
+    with gzip.open(filename, 'wb') as chunk_file:
+        chunk_file.write(bytes(cd_array))
+
+def rescore_files(filenames, progress, task_id, **kwargs):
+    i = 0
+    for filename in filenames:
+        rescore_file(filename, **kwargs)
+        i += 1
+        progress[task_id] = {"progress": i + 1, "total": len(filenames)}
+
+def rescore_files_normal(filenames, **kwargs):
+    n_chunks = 0
+    i = 0
+    for filename in filenames:
+        rescore_file(filename, **kwargs)
+        i += 1
+        print(f"Processed {i} of {len(filenames)} chunks")
+
+
+def rescore(filenames, n_workers=16, n_jobs=1000, **kwargs):
+    from concurrent.futures import ProcessPoolExecutor
+    from rich import progress
+    import multiprocessing
+
+    if isinstance(filenames, str):
+        if not filename.endswith(".gz"):
+            filenames = filenames + "/*.gz"
+        import glob
+        filenames = glob.glob(filenames)
+    
+    print(f"Rescoring {len(filenames)} files with {n_workers} workers and {n_jobs} jobs each")
+
+    with progress.Progress(
+        "[progress.description]{task.description}",
+        progress.BarColumn(),
+        "[progress.percentage]{task.percentage:>3.1f}%",
+        progress.TimeRemainingColumn(),
+        progress.TimeElapsedColumn(),
+        refresh_per_second=1,  # bit slower updates
+    ) as progress:
+        futures = []  # keep track of the jobs
+        with multiprocessing.Manager() as manager:
+            # this is the key - we share some state between our 
+            # main process and our worker functions
+            _progress = manager.dict()
+            overall_progress_task = progress.add_task("[green]All jobs progress:")
+
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                for n in range(0, n_jobs):  # iterate over the jobs we need to run
+                    # set visible false so we don't have a lot of bars all at once:
+                    task_id = progress.add_task(f"task {n}", visible=False)
+                    lo = n * len(filenames) // n_jobs
+                    hi = min((n + 1) * len(filenames) // n_jobs, len(filenames))
+                    futures.append(executor.submit(rescore_files, filenames[lo:hi], progress=_progress, task_id=task_id, **kwargs))
+
+                # monitor the progress:
+                while (n_finished := sum([future.done() for future in futures])) < len(
+                    futures
+                ):
+                    progress.update(
+                        overall_progress_task, completed=n_finished, total=len(futures)
+                    )
+                    for task_id, update_data in _progress.items():
+                        latest = update_data["progress"]
+                        total = update_data["total"]
+                        # update the progress bar for this task:
+                        progress.update(
+                            task_id,
+                            completed=latest,
+                            total=total,
+                            visible=latest < total,
+                        )
+
+                # raise any errors:
+                for future in futures:
+                    future.result()
+        

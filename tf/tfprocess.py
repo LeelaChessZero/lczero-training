@@ -34,6 +34,8 @@ import functools
 from net import Net
 
 
+
+
 class Gating(tf.keras.layers.Layer):
 
     def __init__(self, name=None, additive=True, init_value=None, **kwargs):
@@ -188,6 +190,9 @@ class TFProcess:
         self.skip_first_ln = self.cfg["model"].get("skip_first_ln", False)
         self.encoder_rms_norm = self.cfg["model"].get(
             "encoder_rms_norm", False)
+
+        self.use_policy_val = self.cfg["model"].get("policy_val", True)
+        self.embedding_style = self.cfg["model"].get("embedding_style", "new").lower()
 
         # experiments with changing have failed
         self.encoder_norm = RMSNorm if self.encoder_rms_norm else tf.keras.layers.LayerNormalization
@@ -620,7 +625,7 @@ class TFProcess:
         def unreduced_mse_loss(target, output):
             output = tf.cast(output, tf.float32)
             scalar_z_conv = convert_val_to_scalar(output, softmax=True)
-            scalar_target = tf.matmul(target, wdl)
+            scalar_target = convert_val_to_scalar(target, softmax=False)
             return tf.math.squared_difference(
                 scalar_target, scalar_z_conv)
 
@@ -948,6 +953,7 @@ class TFProcess:
             policy_optimistic_st = outputs.get("policy_optimistic_st")
             value_st = outputs.get("value_st")
             value_st_err = outputs.get("value_st_err")
+            policy_val = outputs.get("policy_val")
 
             value_target = self.qMix(z, q)
 
@@ -969,13 +975,21 @@ class TFProcess:
                 policy_optimistic_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=get_policy_optimism_weights(q_st, value_st, value_st_err, strength=1.5))
                 policy_loss = policy_loss + policy_optimistic_loss
             
-
+            if policy_val is not None:
+                # the error is the mse between the predicted value and the target value, weighted by the policy vector
+                scalar_target = self.convert_val_to_scalar(value_target)
+                value_err = tf.math.squared_difference(scalar_target, policy_val)
+                weight = tf.where(tf.greater(y, 0), tf.math.maximum(y, 0.01), 0)
+                loss = value_err * weight
+                policy_val_loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1) * 0.1)
+            else:
+                policy_val_loss = tf.constant(0.)
 
 
             value_loss, value_err_loss = get_value_losses(value_target, value, value_err)
-            value_st_loss, value_st_err_loss = get_value_losses(value_target, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
+            value_st_loss, value_st_err_loss = get_value_losses(q_st, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
 
-            value_loss = value_loss + value_st_loss
+            value_loss = value_loss + value_st_loss + policy_val_loss
             value_err_loss = value_err_loss + value_st_err_loss
 
             reg_term = sum(self.model.losses)
@@ -1223,7 +1237,7 @@ class TFProcess:
         if steps % self.cfg["training"]["total_steps"] == 0 or (
                 "checkpoint_steps" in self.cfg["training"]
                 and steps % self.cfg["training"]["checkpoint_steps"] == 0):
-            if True:  # !!! hack because protobuf is not working
+            if True:
 
                 # Checkpoint the model weights.
                 evaled_steps = steps.numpy()
@@ -1246,9 +1260,7 @@ class TFProcess:
                 for (old, w) in zip(backup, self.model.weights):
                         w.assign(old)
 
-                if False: # hack protobuf not working !!!
-                    
-
+                if True: # hack protobuf not working !!!
                     path = os.path.join(self.root_dir, self.cfg["name"])
                     leela_path = path + "-" + str(evaled_steps)
                     swa_path = path + "-swa-" + str(evaled_steps)
@@ -1615,7 +1627,7 @@ class TFProcess:
             self.smol_weight_gen_dense = tf.keras.layers.Dense(
                 64 * 64, name=name+"smol_weight_gen", use_bias=False)
 
-        if False:
+        if self.embedding_style == "new":
             inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
@@ -1642,7 +1654,7 @@ class TFProcess:
                                          name=name+"embedding")(flow)
             flow = tf.keras.layers.LayerNormalization(
                 name=name+"embedding/ln")(flow)
-            flow = ma_gating(flow, name='embedding')
+            flow = ma_gating(flow, name=name+'embedding')
 
             # DeepNorm
             alpha = tf.cast(tf.math.pow(
@@ -1654,13 +1666,13 @@ class TFProcess:
 
 
             # feed-forward network
-            ffn_output = self.ffn(flow, emb_size, dff,
+            ffn_output = self.ffn(flow, self.embedding_size, self.encoder_dff,
                                 xavier_norm, name=name + "embedding/ffn")
 
             flow = self.encoder_norm(
                 name=name+"embedding/ffn_ln")(flow + ffn_output * alpha)
 
-        else:
+        elif self.embedding_style == "old":
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
             # add positional encoding for each square to the input
@@ -1682,6 +1694,9 @@ class TFProcess:
 
             # !!! input gate
             flow = ma_gating(flow, name='embedding')
+        
+        else:
+            raise ValueError("Unknown embedding style: {}".format(self.embedding_style))
 
         attn_wts = []
         for i in range(self.encoder_layers):
@@ -1798,7 +1813,8 @@ class TFProcess:
 
         policy = policy_head(name="policy/vanilla")
         policy_optimistic_st = policy_head(name="policy/optimistic_st")
-        policy_val = policy_head(name="policy/policy_val", activation="tanh")
+
+        policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.use_policy_val else None
 
 
         value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=False)

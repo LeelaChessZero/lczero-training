@@ -135,8 +135,6 @@ message Weights {
     optional Layer ip2_val_b = 6;
     optional Layer ip_val_err_w = 7;
     optional Layer ip_val_err_b = 8;
-    optional ActivationFunction ip_val_activation = 9;
-    optional ActivationFunction ip_val_err_activation = 10;
   }
 
   
@@ -214,8 +212,8 @@ message Weights {
   optional Layer ip2_val_w = 9;
   optional Layer ip2_val_b = 10;
 
-  optional ValueHeads value = 44;
-  optional PolicyHeads policy = 45;
+  optional ValueHeads value_heads = 44;
+  optional PolicyHeads policy_heads = 45;
 
   // Moves left head
   optional ConvBlock moves_left = 12;
