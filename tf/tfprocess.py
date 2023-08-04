@@ -33,7 +33,13 @@ import operator
 import functools
 from net import Net
 
-
+def get_activation(activation):
+    if activation == "mish":
+        return tfa.activations.mish
+    elif isinstance(activation, str):
+        return tf.keras.activations.get(activation)
+    else:
+        return activation
 
 
 class Gating(tf.keras.layers.Layer):
@@ -67,6 +73,48 @@ def ma_gating(inputs, name):
 
 def square_relu(x):
     return tf.nn.relu(x) ** 2
+
+class MOEDense(tf.keras.layers.Layer):
+    def __init__(self, out_units, activation=None, beta=1, **kwargs):
+        self.out_units = out_units
+        self.activation = get_activation(activation)
+        self.beta = beta
+        super().__init__(**kwargs)
+    
+    def build(self, input_shape):
+        self.num_experts = input_shape[1]
+        self.in_units = input_shape[-1]
+        initializer = tf.keras.initializers.TruncatedNormal(stddev = self.beta * tf.math.sqrt(1 / self.in_units) )
+        self.kernel = self.add_weight(name='kernel', shape=[self.num_experts, self.in_units, self.out_units], initializer=initializer, trainable=True)
+        self.bias = self.add_weight(name='bias', shape=[self.num_experts, 1, self.out_units], initializer=tf.keras.initializers.Zeros(), trainable=True)
+    
+    def call(self, inputs):
+        # inputs is b, num_experts, slots_per_expert, in_units
+        # kernel is num_experts, in_units, out_units
+        # bias is num_experts, 1, out_units
+        # output is b, num_experts, slots_per_expert, out_units
+        out = tf.einsum('besi,eio->beso', inputs, self.kernel)
+        out = tf.add(out, self.bias)
+        out = self.activation(out)
+        return out
+
+
+
+def soft_moe(inputs, num_experts, ffn_size, num_slots, activation=None, name=None, beta=1):
+    # inputs is b, 64, N
+    in_units = inputs.shape[-1]
+    assert num_slots % num_experts == 0, "num_slots must be divisible by num_experts"
+    in_logits = tf.keras.layers.Dense(num_slots, name=name + '/in_logits')(inputs)
+    in_weights = tf.softmax(in_weights, axis=1)
+    mixed = tf.einsum('bsc,bso->boc', inputs, in_logits)
+    mixed = tf.keras.layers.Reshape((num_experts, num_slots // num_experts, inputs.shape[-1]))(mixed)
+    dense1 = MOEDense(ffn_size, name=name + '/dense1', activation=activation, beta=1)(mixed)
+    out = MOEDense(in_units, name=name + '/dense2', activation=None, beta=1)(dense1)
+    out = tf.keras.layers.Reshape((num_slots, inputs.shape[-1]))(out)
+    out_logits = tf.keras.layers.Dense(num_slots, name=name + '/out_logits')(out)
+    out_weights = tf.softmax(out_logits, axis=-1)
+    out = tf.einsum('bsc,bqs->bqc', out, out_weights)
+    return out
 
 
 class RMSNorm(tf.keras.layers.Layer):
@@ -191,7 +239,6 @@ class TFProcess:
         self.encoder_rms_norm = self.cfg["model"].get(
             "encoder_rms_norm", False)
 
-        self.use_policy_val = self.cfg["model"].get("policy_val", True)
         self.embedding_style = self.cfg["model"].get("embedding_style", "new").lower()
 
         # experiments with changing have failed
@@ -1601,7 +1648,7 @@ class TFProcess:
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
         return out
 
-    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
+    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool, use_moe: bool = False):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
             2. * self.encoder_layers, -0.25), self.model_dtype)
@@ -1631,6 +1678,11 @@ class TFProcess:
 
         out2 = self.encoder_norm(
             name=name+"/ln2")(out1 + ffn_output * alpha)
+
+        if use_moe:
+            moe_output = soft_moe(out2, 8, self.ffn_size, 64, activation=self.ffn_activation, name=name+"/moe", beta=beta)
+
+        
 
         return out2, attn_wts
 
@@ -1847,16 +1899,13 @@ class TFProcess:
 
         policy = policy_head(name="policy/vanilla")
 
-        if self.cfg['model'].get('policy_optimistic_st', False):
-            policy_optimistic_st = policy_head(name="policy/optimistic_st")
+        policy_optimistic_st = policy_head(name="policy/optimistic_st") if self.cfg['model'].get('policy_optimistic_st', False) else None
 
-        if self.cfg['model'].get('policy_val', False):
-            policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.use_policy_val else None
+        policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.cfg['model'].get('policy_val', False) else None
 
 
         value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=False)
-        if self.cfg['model'].get('value_st', False):
-            value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True)
+        value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True) if self.cfg['model'].get('value_st', False) else None, None
 
         # Moves left head
         if self.moves_left:
