@@ -128,3 +128,8 @@ model:
     smolgen_hidden_channels: 16
     smolgen_hidden_sz: 192
     smolgen_gen_sz: 192
+
+    # Enable or disable BT3 features
+    policy_val: false
+    policy_optimistic_st: false
+    value_st: false

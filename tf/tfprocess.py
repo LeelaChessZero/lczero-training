@@ -1846,13 +1846,17 @@ class TFProcess:
             return value, value_err
 
         policy = policy_head(name="policy/vanilla")
-        policy_optimistic_st = policy_head(name="policy/optimistic_st")
 
-        policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.use_policy_val else None
+        if self.cfg['model'].get('policy_optimistic_st', False):
+            policy_optimistic_st = policy_head(name="policy/optimistic_st")
+
+        if self.cfg['model'].get('policy_val', False):
+            policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.use_policy_val else None
 
 
         value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=False)
-        value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True)
+        if self.cfg['model'].get('value_st', False):
+            value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True)
 
         # Moves left head
         if self.moves_left:
