@@ -406,8 +406,10 @@ class ChunkParserInner:
 
         q_st = struct.pack("f", q_st)
 
+        played_idx = struct.pack("i", played_idx)
 
-        return (planes, probs, winner, best_q, plies_left, q_st)
+
+        return (planes, probs, winner, best_q, plies_left, q_st, played_idx)
 
     def sample_record(self, chunkdata):
         """

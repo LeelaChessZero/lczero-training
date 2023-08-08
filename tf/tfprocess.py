@@ -36,7 +36,7 @@ from net import Net
 def get_activation(activation):
     if activation == "mish":
         return tfa.activations.mish
-    elif isinstance(activation, str):
+    elif isinstance(activation, str) or activation is None:
         return tf.keras.activations.get(activation)
     else:
         return activation
@@ -73,48 +73,6 @@ def ma_gating(inputs, name):
 
 def square_relu(x):
     return tf.nn.relu(x) ** 2
-
-class MOEDense(tf.keras.layers.Layer):
-    def __init__(self, out_units, activation=None, beta=1, **kwargs):
-        self.out_units = out_units
-        self.activation = get_activation(activation)
-        self.beta = beta
-        super().__init__(**kwargs)
-    
-    def build(self, input_shape):
-        self.num_experts = input_shape[1]
-        self.in_units = input_shape[-1]
-        initializer = tf.keras.initializers.TruncatedNormal(stddev = self.beta * tf.math.sqrt(1 / self.in_units) )
-        self.kernel = self.add_weight(name='kernel', shape=[self.num_experts, self.in_units, self.out_units], initializer=initializer, trainable=True)
-        self.bias = self.add_weight(name='bias', shape=[self.num_experts, 1, self.out_units], initializer=tf.keras.initializers.Zeros(), trainable=True)
-    
-    def call(self, inputs):
-        # inputs is b, num_experts, slots_per_expert, in_units
-        # kernel is num_experts, in_units, out_units
-        # bias is num_experts, 1, out_units
-        # output is b, num_experts, slots_per_expert, out_units
-        out = tf.einsum('besi,eio->beso', inputs, self.kernel)
-        out = tf.add(out, self.bias)
-        out = self.activation(out)
-        return out
-
-
-
-def soft_moe(inputs, num_experts, ffn_size, num_slots, activation=None, name=None, beta=1):
-    # inputs is b, 64, N
-    in_units = inputs.shape[-1]
-    assert num_slots % num_experts == 0, "num_slots must be divisible by num_experts"
-    in_logits = tf.keras.layers.Dense(num_slots, name=name + '/in_logits')(inputs)
-    in_weights = tf.softmax(in_weights, axis=1)
-    mixed = tf.einsum('bsc,bso->boc', inputs, in_logits)
-    mixed = tf.keras.layers.Reshape((num_experts, num_slots // num_experts, inputs.shape[-1]))(mixed)
-    dense1 = MOEDense(ffn_size, name=name + '/dense1', activation=activation, beta=1)(mixed)
-    out = MOEDense(in_units, name=name + '/dense2', activation=None, beta=1)(dense1)
-    out = tf.keras.layers.Reshape((num_slots, inputs.shape[-1]))(out)
-    out_logits = tf.keras.layers.Dense(num_slots, name=name + '/out_logits')(out)
-    out_weights = tf.softmax(out_logits, axis=-1)
-    out = tf.einsum('bsc,bqs->bqc', out, out_weights)
-    return out
 
 
 class RMSNorm(tf.keras.layers.Layer):
@@ -558,28 +516,19 @@ class TFProcess:
             target = tf.nn.relu(target)
             return target, output
 
-        def reducible_policy_loss(target, output):
-            # This is equivalently the KL divergence between the target and output
+        def policy_loss(target, output, weights=None):
             target, output = correct_policy(target, output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
             target_entropy = tf.math.negative(
                 tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
-            policy_cross_entropy -= target_entropy
-            return tf.reduce_mean(input_tensor=policy_cross_entropy)
-
-        self.reducible_policy_loss_fn = reducible_policy_loss
-
-        def policy_loss(target, output, weights=None):
-            target, output = correct_policy(target, output)
-            policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
-                labels=tf.stop_gradient(target), logits=output)
-            return tf.reduce_mean(input_tensor=policy_cross_entropy if weights == None else policy_cross_entropy * weights)
+            policy_kld = policy_cross_entropy - target_entropy
+            return tf.reduce_mean(input_tensor=policy_kld if weights == None else policy_kld * weights)
 
         self.policy_loss_fn = policy_loss
 
         
-        def get_policy_optimism_weights(value_pred, value_target, value_err_pred, strength=1.5):
+        def get_policy_optimism_weights(value_target, value_pred, value_err_pred, strength=1.5):
             value_pred = self.convert_val_to_scalar(value_pred)
             value_target = self.convert_val_to_scalar(value_target)
             z_values = (value_target - value_pred) / (value_err_pred + 1e-5)
@@ -671,15 +620,15 @@ class TFProcess:
         self.policy_thresholded_accuracy_fn = policy_thresholded_accuracy
 
 
-        def policy_val_loss(value_target, policy_target, policy_val):
+        def policy_val_loss(value_target, policy_target, policy_val, played_idx):
             if policy_val is None:
                 return tf.constant(0.)
             # the error is the mse between the predicted value and the target value, weighted by the policy vector
             scalar_target = self.convert_val_to_scalar(value_target)
             value_err = tf.math.squared_difference(scalar_target, policy_val)
-            weight = tf.where(tf.greater(policy_target, 1e-5), tf.math.maximum(policy_target, 0.01), 0)
+            weight = tf.one_hot(played_idx, depth=1858) + 0.02 * tf.cast(tf.greater(policy_target, 0), tf.float32)
             loss = value_err * weight
-            policy_val_loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1) * 0.1)
+            policy_val_loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1))
             return policy_val_loss
         
         self.policy_val_loss_fn = policy_val_loss
@@ -770,20 +719,20 @@ class TFProcess:
 
         self.moves_left_loss_fn = moves_left_loss
 
-        pol_loss_w = self.cfg["training"]["policy_loss_weight"]
-        val_loss_w = self.cfg["training"]["value_loss_weight"]
-        val_error_loss_w = self.cfg["training"].get(
-            "value_error_loss_weight", 10.0)
 
-        if self.moves_left:
-            moves_loss_w = self.cfg["training"]["moves_left_loss_weight"]
-        else:
-            moves_loss_w = tf.constant(0.0, dtype=tf.float32)
-        reg_term_w = self.cfg["training"].get("reg_term_weight", 1.0)
+        self.possible_losses = ["policy", "policy_optimistic_st", "moves_left", "value", "value_err", "value_st", "value_st_err", "policy_val", "reg", "moves_left"]
+        self.loss_weights = self.cfg["training"]["loss_weights"]
+        for key in self.loss_weights:
+            if key not in self.possible_losses:
+                raise ValueError("Unrecognized loss: {}".format(key))
+            
 
-        def _lossMix(policy, value, moves_left, reg_term, value_err):
-            return (pol_loss_w * policy + val_loss_w * value + moves_loss_w * moves_left +
-                    reg_term_w * reg_term + val_error_loss_w * value_err)
+
+        def _lossMix(losses):
+            for key in losses:
+                assert key in self.possible_losses, "Unrecognized loss: {}".format(key)
+                losses[key] = losses[key] * self.loss_weights.get(key, tf.constant(0.0))
+            return sum(losses.values())
 
         self.lossMix = _lossMix
 
@@ -817,7 +766,6 @@ class TFProcess:
             Metric("P Entropy", "Policy Entropy"),
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
-            Metric("P RL", "Policy RL"),
             Metric("V", "Value Loss"),
             Metric("V Err", "Value Err L"),
             Metric("V ST", "Value ST Loss"),
@@ -842,7 +790,6 @@ class TFProcess:
             Metric("P Entropy", "Policy Entropy"),
             Metric("P UL", "Policy UL"),
             Metric("P SL", "Policy SL"),
-            Metric("P RL", "Policy RL"),
             Metric("V", "Value Loss"),
             Metric("V Err", "Value Err L"),
             Metric("V ST", "Value ST Loss"),
@@ -1031,7 +978,7 @@ class TFProcess:
         return [w.read_value() for w in self.model.weights]
 
     @tf.function()
-    def process_inner_loop(self, x, y, z, q, m, q_st):
+    def process_inner_loop(self, x, y, z, q, m, q_st, p_idx):
 
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
@@ -1046,18 +993,16 @@ class TFProcess:
             # Policy losses
             policy_loss = self.policy_loss_fn(y, policy)
             if policy_optimistic_st is not None:
-                policy_optimistic_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err, strength=1.5))
+                policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err, strength=1.5))
             else:
-                policy_optimistic_loss = tf.constant(0.)
-            total_policy_loss = policy_loss + policy_optimistic_loss
+                policy_optimistic_st_loss = tf.constant(0.)
 
             # Value losses
             value_target = self.qMix(z, q)
-            policy_val_loss = self.policy_val_loss_fn(value_target, y, policy_val)
+            policy_val_loss = self.policy_val_loss_fn(value_target, y, policy_val, p_idx)
             value_loss, value_err_loss = self.value_losses_fn(value_target, value, value_err)
             value_st_loss, value_st_err_loss = self.value_losses_fn(q_st, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
-            total_value_loss = value_loss + value_st_loss + policy_val_loss
-            total_value_err_loss = value_err_loss + value_st_err_loss
+
 
             reg_term = sum(self.model.losses)
             if self.moves_left:
@@ -1065,9 +1010,21 @@ class TFProcess:
                 moves_left_loss = self.moves_left_loss_fn(m, moves_left)
             else:
                 moves_left_loss = tf.constant(0.)
+            
+            losses = {
+                "policy": policy_loss,
+                "policy_optimistic_st": policy_optimistic_st_loss,
+                "value": value_loss,
+                "value_err": value_err_loss,
+                "value_st": value_st_loss,
+                "value_st_err": value_st_err_loss,
+                "policy_val": policy_val_loss,
+                "moves_left": moves_left_loss, 
+                "reg": reg_term,
+            }
 
-            total_loss = self.lossMix(total_policy_loss, total_value_loss, moves_left_loss,
-                                      reg_term, total_value_err_loss)
+            total_loss = self.lossMix(losses)
+
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
 
@@ -1075,7 +1032,6 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
-        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
@@ -1089,7 +1045,7 @@ class TFProcess:
         
         metrics = [
             policy_loss,
-            policy_optimistic_loss,
+            policy_optimistic_st_loss,
             moves_left_loss,
             reg_term,
             total_loss,
@@ -1101,7 +1057,6 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
-            policy_rl,
             value_loss,
             value_err_loss,
             value_st_loss,
@@ -1112,9 +1067,9 @@ class TFProcess:
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
     @tf.function()
-    def strategy_process_inner_loop(self, x, y, z, q, m, q_st):
+    def strategy_process_inner_loop(self, x, y, z, q, m, q_st, p_idx):
         metrics, new_grads = self.strategy.run(self.process_inner_loop,
-                                               args=(x, y, z, q, m, q_st))
+                                               args=(x, y, z, q, m, q_st, p_idx))
         metrics = [
             self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
             for m in metrics
@@ -1165,12 +1120,12 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for batch_id in range(batch_splits):
-            x, y, z, q, m, q_st = next(self.train_iter)
+            x, y, z, q, m, q_st, p_idx = next(self.train_iter)
             if self.strategy is not None:
                 metrics, new_grads = self.strategy_process_inner_loop(
-                    x, y, z, q, m, q_st)
+                    x, y, z, q, m, q_st, p_idx)
             else:
-                metrics, new_grads = self.process_inner_loop(x, y, z, q, m, q_st)
+                metrics, new_grads = self.process_inner_loop(x, y, z, q, m, q_st, p_idx)
             if not grads:
                 grads = new_grads
             else:
@@ -1324,14 +1279,15 @@ class TFProcess:
 
                 
                 # Save swa weights
-                backup = self.read_weights()
-                for (swa, w) in zip(self.swa_weights, self.model.weights):
-                    w.assign(swa.read_value())
-                evaled_steps = steps.numpy()
-                tf.saved_model.save(self.model, os.path.join(
-                    self.root_dir, self.cfg["name"]) + "-swa-onnx-" + str(evaled_steps))
-                for (old, w) in zip(backup, self.model.weights):
-                        w.assign(old)
+                if self.swa_enabled:
+                    backup = self.read_weights()
+                    for (swa, w) in zip(self.swa_weights, self.model.weights):
+                        w.assign(swa.read_value())
+                    evaled_steps = steps.numpy()
+                    tf.saved_model.save(self.model, os.path.join(
+                        self.root_dir, self.cfg["name"]) + "-swa-onnx-" + str(evaled_steps))
+                    for (old, w) in zip(backup, self.model.weights):
+                            w.assign(old)
 
                 if True: # hack protobuf not working !!!
                     path = os.path.join(self.root_dir, self.cfg["name"])
@@ -1362,7 +1318,7 @@ class TFProcess:
             w.assign(old)
 
     @tf.function()
-    def calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st):
+    def calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st, p_idx):
         outputs = self.model(x, training=False)
 
         policy = outputs["policy"]
@@ -1378,19 +1334,17 @@ class TFProcess:
         policy_entropy = self.policy_entropy_fn(y, policy)
         policy_ul = self.policy_uniform_loss_fn(y, policy)
         policy_sl = self.policy_search_loss_fn(y, policy)
-        policy_rl = self.reducible_policy_loss_fn(y, policy)
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
 
         value_target = self.qMix(z, q)
 
         if policy_optimistic_st is not None:
-            policy_optimistic_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err, strength=1.5))
+            policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err, strength=1.5))
         else:
-            policy_optimistic_loss = tf.constant(0.)
+            policy_optimistic_st_loss = tf.constant(0.)
         
-        policy_val_loss = self.policy_val_loss_fn(value_target, y, policy_val)
-
+        policy_val_loss = self.policy_val_loss_fn(value_target, y, policy_val, p_idx)
 
         value_loss, value_err_loss = self.value_losses_fn(value_target, value, value_err)
         value_st_loss, value_st_err_loss = self.value_losses_fn(q_st, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
@@ -1413,7 +1367,7 @@ class TFProcess:
 
         metrics = [
             policy_loss,
-            policy_optimistic_loss,
+            policy_optimistic_st_loss,
             moves_left_loss,
             # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
             # get comparable values.
@@ -1423,7 +1377,6 @@ class TFProcess:
             policy_entropy,
             policy_ul,
             policy_sl,
-            policy_rl,
             value_loss,
             value_err_loss,
             value_st_loss,
@@ -1436,9 +1389,9 @@ class TFProcess:
         return metrics
 
     @tf.function()
-    def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st):
+    def strategy_calculate_test_summaries_inner_loop(self, x, y, z, q, m, q_st, p_idx):
         metrics = self.strategy.run(self.calculate_test_summaries_inner_loop,
-                                    args=(x, y, z, q, m, q_st))
+                                    args=(x, y, z, q, m, q_st, p_idx))
         metrics = [
             self.strategy.reduce(tf.distribute.ReduceOp.MEAN, m, axis=None)
             for m in metrics
@@ -1449,13 +1402,13 @@ class TFProcess:
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
-            x, y, z, q, m, q_st = next(self.test_iter)
+            x, y, z, q, m, q_st, p_idx = next(self.test_iter)
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, q_st)
+                    x, y, z, q, m, q_st, p_idx)
             else:
                 metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, q_st)
+                    x, y, z, q, m, q_st, p_idx)
             for acc, val in zip(self.test_metrics, metrics):
                 acc.accumulate(val)
         self.net.pb.training_params.learning_rate = self.lr
@@ -1491,13 +1444,13 @@ class TFProcess:
     def calculate_test_validations(self, steps: int):
         for metric in self.test_metrics:
             metric.reset()
-        for (x, y, z, q, m, q_st) in self.validation_dataset:
+        for (x, y, z, q, m, q_st, p_idx) in self.validation_dataset:
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, q_st)
+                    x, y, z, q, m, q_st, p_idx)
             else:
                 metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, q_st)
+                    x, y, z, q, m, q_st, p_idx)
             for acc, val in zip(self.test_metrics, metrics):
                 acc.accumulate(val)
         with self.validation_writer.as_default():
@@ -1648,7 +1601,7 @@ class TFProcess:
             emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
         return out
 
-    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool, use_moe: bool = False):
+    def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
             2. * self.encoder_layers, -0.25), self.model_dtype)
@@ -1679,10 +1632,7 @@ class TFProcess:
         out2 = self.encoder_norm(
             name=name+"/ln2")(out1 + ffn_output * alpha)
 
-        if use_moe:
-            moe_output = soft_moe(out2, 8, self.ffn_size, 64, activation=self.ffn_activation, name=name+"/moe", beta=beta)
-
-        
+            
 
         return out2, attn_wts
 
@@ -1894,7 +1844,7 @@ class TFProcess:
                     1, kernel_initializer="glorot_normal", name=name+"/dense_error", activation="sigmoid")(h_fc2)
             else:
                 value_err = None
-                
+
             return value, value_err
 
         policy = policy_head(name="policy/vanilla")
@@ -1904,8 +1854,8 @@ class TFProcess:
         policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.cfg['model'].get('policy_val', False) else None
 
 
-        value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=False)
-        value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True) if self.cfg['model'].get('value_st', False) else None, None
+        value, value_err = value_head(name="value/vanilla", wdl=self.wdl, use_err=self.cfg['model'].get('value_err', False))
+        value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True) if self.cfg['model'].get('value_st', False) else (None, None)
 
         # Moves left head
         if self.moves_left:
@@ -1928,6 +1878,7 @@ class TFProcess:
                                           name=name+"moves_left/dense2")(h_fc4)
         else:
             moves_left = None
+
 
         # attention weights added as optional output for analysis -- ignored by backend
         outputs = {"policy": policy, "policy_optimistic_st": policy_optimistic_st, "policy_val": policy_val, "value": value, "attn_wts": attn_wts,

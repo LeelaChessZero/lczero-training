@@ -192,7 +192,7 @@ def main(cmd):
 
 
     tfprocess = TFProcess(cfg)
-    output_types = 6 * (tf.string,)
+    output_types = 7 * (tf.string,)
 
     train_dataset = tf.data.Dataset.from_generator(
         train_parser.parse,
