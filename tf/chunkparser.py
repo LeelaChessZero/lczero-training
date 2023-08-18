@@ -753,7 +753,7 @@ def rescore(filenames, n_workers=16, n_jobs=1000, **kwargs):
     import multiprocessing
 
     if isinstance(filenames, str):
-        if not filename.endswith(".gz"):
+        if not filenames.endswith(".gz"):
             filenames = filenames + "/*.gz"
         import glob
         filenames = glob.glob(filenames)

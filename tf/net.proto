@@ -143,12 +143,14 @@ message Weights {
     optional Layer ip_pol_b = 2;
     optional PolicyHead vanilla = 3;
     optional PolicyHead optimistic_st = 4;
-    optional PolicyHead policy_val = 5;
+    optional PolicyHead soft = 5;
+    optional PolicyHead policy_val = 6;
   }
 
   message ValueHeads {
-    optional ValueHead vanilla = 1;
-    optional ValueHead st = 2;
+    optional ValueHead winner = 1;
+    optional ValueHead q = 2;
+    optional ValueHead st = 3;
   }
 
   // Input convnet.

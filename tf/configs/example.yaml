@@ -83,14 +83,17 @@ training:
         - 1_900_000
     loss_weights:
         policy: 1.0
-        policy_optimistic_st: 1.0
-        value: 1.0
-        value_st: 2.0
-        value_err: 10.0
-        value_st_err: 10.0
+        policy_optimistic_st: 4.0
+        policy_soft: 4.0 # loss is much smaller at optimum
+        value_winner: 1.0
+        value_q: 1.0
+        value_st: 2.0 # larger because mse loss
+        value_q_err: 5.0 
+        value_st_err: 5.0
         policy_val: 2.0
         moves_left: 1.0
         reg: 1.0
+        policy_val: 2.0
 
     path: "networks"
 
@@ -135,7 +138,9 @@ model:
     smolgen_gen_sz: 192
 
     # Enable or disable BT3 features
-    policy_val: true
+    policy_val: false # not particular useful right now
     policy_optimistic_st: true
     value_st: true
-    value_err: false
+    soft_policy: true
+
+    soft_policy_temperature: 4.0
