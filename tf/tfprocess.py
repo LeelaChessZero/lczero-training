@@ -549,6 +549,7 @@ class TFProcess:
             # value err pred already has square root taken
             value_pred = self.convert_val_to_scalar(value_pred)
             value_target = self.convert_val_to_scalar(value_target)
+            value_err_pred = tf.math.sqrt(value_err_pred)
             z_values = (value_target - value_pred) / (value_err_pred + 1e-5)
             weights = tf.math.sigmoid((z_values - strength) * 3)
             weights = tf.stop_gradient(weights)
@@ -664,6 +665,7 @@ class TFProcess:
 
 
         def unreduced_mse_loss(target, output):
+            assert target.shape[-1] == output.shape[-1]
             output = tf.cast(output, tf.float32)
             scalar_z_conv = convert_val_to_scalar(output, softmax=True)
             scalar_target = convert_val_to_scalar(target, softmax=False)
@@ -1034,7 +1036,7 @@ class TFProcess:
             policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
                 y, policy)
             if policy_optimistic_st is not None:
-                policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, tf.math.sqrt(value_st_err)))
+                policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err))
                 policy_optimistic_st_divergence = self.policy_divergence_fn(policy, policy_optimistic_st, y)
             else:
                 policy_optimistic_st_loss = tf.constant(0.)
@@ -1352,7 +1354,6 @@ class TFProcess:
             self.profiling_start_step = None
 
     def calculate_swa_summaries(self, test_batches: int, steps: int):
-        return
         backup = self.read_weights()
         for (swa, w) in zip(self.swa_weights, self.model.weights):
             w.assign(swa.read_value())
@@ -1388,7 +1389,7 @@ class TFProcess:
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
         if policy_optimistic_st is not None:
-            policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, tf.math.sqrt(value_st_err)))
+            policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, self.policy_optimism_weights_fn(q_st, value_st, value_st_err))
             policy_optimistic_st_divergence = self.policy_divergence_fn(policy, policy_optimistic_st, y)
         else:
             policy_optimistic_st_loss = tf.constant(0.)
@@ -1913,7 +1914,7 @@ class TFProcess:
             return value, value_err
 
         value_winner, value_winner_err = value_head(name="value/winner", wdl=self.wdl, use_err=False)
-        value_q, value_q_err = value_head(name="value/q", wdl=False, use_err=True)
+        value_q, value_q_err = value_head(name="value/q", wdl=self.wdl, use_err=True)
         value_st, value_st_err = value_head(name="value/st", wdl=False, use_err=True) if self.cfg['model'].get('value_st', False) else (None, None)
 
         # Moves left head
