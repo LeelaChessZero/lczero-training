@@ -528,7 +528,9 @@ class TFProcess:
             target_entropy = tf.math.negative(
                 tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
             policy_kld = policy_cross_entropy - target_entropy
-            return tf.reduce_mean(input_tensor=policy_kld if weights == None else policy_kld * weights)
+            if weights != None:
+                policy_kld *= weights
+            return tf.reduce_mean(policy_kld)
 
         self.policy_loss_fn = policy_loss
 
@@ -553,6 +555,7 @@ class TFProcess:
             z_values = (value_target - value_pred) / (value_err_pred + 1e-5)
             weights = tf.math.sigmoid((z_values - strength) * 3)
             weights = tf.stop_gradient(weights)
+            weights = tf.reshape(weights, [-1])
             return weights
 
         self.policy_optimism_weights_fn = get_policy_optimism_weights
@@ -1036,7 +1039,8 @@ class TFProcess:
             policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
                 y, policy)
             if policy_optimistic_st is not None:
-                policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=self.policy_optimism_weights_fn(q_st, value_st, value_st_err))
+                optimism_weights = self.policy_optimism_weights_fn(q_st, value_st, value_st_err)
+                policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=optimism_weights)
                 policy_optimistic_st_divergence = self.policy_divergence_fn(policy, policy_optimistic_st, y)
             else:
                 policy_optimistic_st_loss = tf.constant(0.)
@@ -1389,7 +1393,8 @@ class TFProcess:
         policy_thresholded_accuracies = self.policy_thresholded_accuracy_fn(
             y, policy)
         if policy_optimistic_st is not None:
-            policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, self.policy_optimism_weights_fn(q_st, value_st, value_st_err))
+            optimism_weights = self.policy_optimism_weights_fn(q_st, value_st, value_st_err)
+            policy_optimistic_st_loss = self.policy_loss_fn(y, policy_optimistic_st, weights=optimism_weights)
             policy_optimistic_st_divergence = self.policy_divergence_fn(policy, policy_optimistic_st, y)
         else:
             policy_optimistic_st_loss = tf.constant(0.)
