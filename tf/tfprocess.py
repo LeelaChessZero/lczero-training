@@ -642,20 +642,6 @@ class TFProcess:
         self.policy_thresholded_accuracy_fn = policy_thresholded_accuracy
 
 
-        def policy_val_loss(value_target, policy_target, policy_val, played_idx):
-            if policy_val is None:
-                return tf.constant(0.)
-            # the error is the mse between the predicted value and the target value, weighted by the policy vector
-            scalar_target = self.convert_val_to_scalar(value_target)
-            value_err = tf.math.squared_difference(scalar_target, policy_val)
-            weight = tf.one_hot(played_idx, depth=1858) + 0.02 * tf.cast(tf.greater(policy_target, 0), tf.float32)
-            loss = value_err * weight
-            policy_val_loss = tf.reduce_mean(tf.reduce_sum(loss, axis=1))
-            return policy_val_loss
-        
-        self.policy_val_loss_fn = policy_val_loss
-
-
         q_ratio = self.cfg["training"].get("q_ratio", 0)
         assert 0 <= q_ratio <= 1
 
@@ -748,7 +734,6 @@ class TFProcess:
                                 "value_q_err",
                                 "value_st",
                                 "value_st_err",
-                                "policy_val",
                                 "reg",
                                 "moves_left",
                                 ]
@@ -1028,7 +1013,6 @@ class TFProcess:
             policy = outputs["policy"]
             policy_optimistic_st = outputs.get("policy_optimistic_st")
             policy_soft = outputs.get("policy_soft")
-            policy_val = outputs.get("policy_val")
 
             # Policy losses
             policy_loss = self.policy_loss_fn(y, policy)
@@ -1049,8 +1033,6 @@ class TFProcess:
                 policy_soft_loss = self.policy_loss_fn(y, policy_soft, temperature=self.soft_policy_temperature)
             else:
                 policy_soft_loss = tf.constant(0.)
-
-            policy_val_loss = self.policy_val_loss_fn(q, y, policy_val, p_idx)
 
 
             # Value losses
@@ -1081,7 +1063,6 @@ class TFProcess:
                 "value_q_err": value_q_err_loss,
                 "value_st": value_st_loss,
                 "value_st_err": value_st_err_loss,
-                "policy_val": policy_val_loss,
                 "moves_left": moves_left_loss, 
                 "reg": reg_term,
             }
@@ -1113,7 +1094,6 @@ class TFProcess:
             value_q_err_loss,
             value_st_loss,
             value_st_err_loss,
-            policy_val_loss,
         ]
         metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
@@ -1382,7 +1362,6 @@ class TFProcess:
         policy = outputs["policy"]
         policy_optimistic_st = outputs.get("policy_optimistic_st")
         policy_soft = outputs.get("policy_soft")
-        policy_val = outputs.get("policy_val")
 
         # Policy losses
         policy_loss = self.policy_loss_fn(y, policy)
@@ -1404,8 +1383,6 @@ class TFProcess:
         else:
             policy_soft_loss = tf.constant(0.)
 
-        
-        policy_val_loss = self.policy_val_loss_fn(q, y, policy_val, p_idx)
 
         # Value losses
         value_winner_loss, value_winner_err_loss = self.value_losses_fn(z, value_winner, value_winner)
@@ -1446,7 +1423,6 @@ class TFProcess:
             value_st_err_loss,
             value_st_loss,
             value_st_err_loss,
-            policy_val_loss,
         ]
 
 
@@ -1883,7 +1859,6 @@ class TFProcess:
         policy = policy_head(name="policy/vanilla")
         policy_soft = policy_head(name="policy/soft") if self.cfg['model'].get('soft_policy', False) else None
         policy_optimistic_st = policy_head(name="policy/optimistic_st") if self.cfg['model'].get('policy_optimistic_st', False) else None
-        policy_val = policy_head(name="policy/policy_val", activation="tanh") if self.cfg['model'].get('policy_val', False) else None
 
         def value_head(name, wdl=True, use_err=True):
             embedded_val = tf.keras.layers.Dense(self.val_embedding_size, kernel_initializer="glorot_normal",
@@ -1949,7 +1924,6 @@ class TFProcess:
         outputs = {"policy": policy,
                    "policy_optimistic_st": policy_optimistic_st,
                    "policy_soft": policy_soft,
-                   "policy_val": policy_val,
                    "value_winner": value_winner,
                    "value_q": value_q,
                    "value_q_err": value_q_err,
