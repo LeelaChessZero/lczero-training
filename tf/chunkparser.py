@@ -74,6 +74,7 @@ V5_VERSION = struct.pack("i", 5)
 CLASSICAL_INPUT = struct.pack("i", 1)
 V4_VERSION = struct.pack("i", 4)
 V3_VERSION = struct.pack("i", 3)
+V6_OPP_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff7432s"
 V6_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff"
 V5_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffff"
 V4_STRUCT_STRING = "4s7432s832sBBBBBBBbffff"
@@ -243,12 +244,13 @@ class ChunkParserInner:
         struct.Struct doesn"t pickle, so it needs to be separately
         constructed in workers.
         """
+        self.v6_opp_struct = struct.Struct(V6_OPP_STRUCT_STRING)
         self.v6_struct = struct.Struct(V6_STRUCT_STRING)
         self.v5_struct = struct.Struct(V5_STRUCT_STRING)
         self.v4_struct = struct.Struct(V4_STRUCT_STRING)
         self.v3_struct = struct.Struct(V3_STRUCT_STRING)
 
-    def convert_v6_to_tuple(self, content):
+    def convert_v6_to_tuple(self, content, opp=True):
         """
         Unpack a v6 binary record to 5-tuple (state, policy pi, result, q, m)
 
@@ -300,11 +302,20 @@ class ChunkParserInner:
         """
         # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
         # for the 8 "reserved" bytes
-        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
-         stm, rule50_count, invariance_info, dep_result, root_q, best_q,
-         root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
-         played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
-         played_idx, best_idx, pol_kld, q_st) = self.v6_struct.unpack(content)
+        if opp:
+            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
+            stm, rule50_count, invariance_info, dep_result, root_q, best_q,
+            root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
+            played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
+            played_idx, best_idx, pol_kld, q_st, opp_probs) = self.v6_opp_struct.unpack(content)
+
+        else:
+            (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
+            stm, rule50_count, invariance_info, dep_result, root_q, best_q,
+            root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
+            played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
+            played_idx, best_idx, pol_kld, q_st) = self.v6_struct.unpack(content)
+        
         """
         v5 struct format was (8308 bytes total)
             int32 version (4 bytes)
@@ -408,10 +419,12 @@ class ChunkParserInner:
 
         played_idx = struct.pack("i", played_idx)
 
+        out = (planes, probs, winner, best_q, plies_left, q_st)
+        if opp:
+            out += (opp_probs,)
+        return out
 
-        return (planes, probs, winner, best_q, plies_left, q_st, played_idx)
-
-    def sample_record(self, chunkdata):
+    def sample_record(self, chunkdata, opp=True):
         """
         Randomly sample through the v3/4/5/6 chunk data and select records in v6 format
         Downsampling to avoid highly correlated positions skips most records, and
@@ -465,6 +478,25 @@ class ChunkParserInner:
                     thresh_p = self.diff_focus_min + self.diff_focus_slope * total
                     if thresh_p < 1.0 and random.random() > thresh_p:
                         continue
+            
+            if opp:
+                if i + record_size < len(chunkdata):
+                    app = chunkdata[i + record_size + 8: i + record_size + 7440]
+                else:
+                    app = struct.pack("f", -1.0) * 1858
+                    
+                if len(app) != 1858 * 4:
+                    print("app size is not 1858*4, but {}".format(len(app)))
+                    print("\n"*10)
+                    print(i + record_size <= len(chunkdata))
+
+                record += app
+            
+            if len(record) != 15788:
+                print()
+                print("record size is not 15788, but {}".format(len(record)))
+                print("\n"*10)
+
 
             yield record
 
@@ -491,7 +523,7 @@ class ChunkParserInner:
                     chunkdata = chunk_file.read(256 * record_size)
                     if len(chunkdata) == 0:
                         break
-                    for item in self.sample_record(chunkdata):
+                    for item in self.sample_record(chunkdata, opp=True):
                         yield item
 
         except:
@@ -526,7 +558,7 @@ class ChunkParserInner:
         Read v6 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(self.v6_struct.size, self.shuffle_size)
+        sbuff = sb.ShuffleBuffer(self.v6_opp_struct.size, self.shuffle_size)
         while len(self.readers):
             for r in self.readers:
                 try:
@@ -679,8 +711,7 @@ if __name__ == "__main__":
 def apply_alpha(qs, alpha):
     if not isinstance(qs, np.ndarray):
         qs = np.array(qs)
-    qs = qs * (-1)**np.arange(len(qs))
-    
+    qs = qs * (-1)**np.arange(len(qs))    
     # Create an array with alpha^(i-j) at (i, j) if this is at most 1 and 0 otherwise.
     weights = np.arange(len(qs)) - np.arange(len(qs))[:, None]
     weights = np.where(weights >= 0, alpha**weights, 0)
@@ -709,15 +740,29 @@ def rescore_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
             n_chunks = len(chunkdata) // record_size
 
             # Gather q bytes
+            root_qs = []
             qs = []
+            qs_st = []
+            played_qs = []
             for i in range(n_chunks):
-                # this is the best q, not 
+                played_qs.append(struct.unpack("f", chunkdata[i*record_size+8316:i*record_size+8320])[0])
+                root_qs.append(struct.unpack("f", chunkdata[i*record_size+8280:i*record_size+8284])[0])
                 qs.append(struct.unpack("f", chunkdata[i*record_size+8284:i*record_size+8288])[0])
+                qs_st.append(struct.unpack("f", chunkdata[i*record_size+8352:i*record_size+8356])[0])
 
-            # Create st values
-            qs = apply_alpha(qs, st_alpha)
+            
+            new_qs = apply_alpha(qs, st_alpha)
+            for a,b,c,d,e in zip(qs, root_qs, qs_st, new_qs, played_qs):
+                if abs(a - e) > 0.5:
+                    
+                    print(filename)
+                    print(a,b,c,d,e)
 
-            # Write st values
+                    # Create st values
+                    print()
+                    break
+
+                # Write st values
             cd_array = bytearray(chunkdata)
             for i in range(n_chunks):
                 if abs(qs[i]) > 1 + 1e-6:
@@ -728,8 +773,59 @@ def rescore_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
     except Exception as e:
         print(f"Could not read {filename}, got {e}")
 
-    with gzip.open(filename, 'wb') as chunk_file:
-        chunk_file.write(bytes(cd_array))
+    # with gzip.open(filename, 'wb') as chunk_file:
+    #     chunk_file.write(bytes(cd_array))
+
+
+def record_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
+    v6_struct = struct.Struct(V6_STRUCT_STRING)
+    record_size = v6_struct.size
+    # C:/leeladata/train/training-run2-test77-20211214-1618/*.gz
+    # apply ema with alpha
+    cd_array = bytearray()
+
+    try:
+        with gzip.open(filename, "rb") as chunk_file:
+            chunk_file.seek(0)
+            chunkdata = chunk_file.read()
+            if len(chunkdata) == 0:
+                return
+            version = chunkdata[0:4]
+            assert version == V6_VERSION
+
+            n_chunks = len(chunkdata) // record_size
+
+            # Gather q bytes
+            qs = []
+            qs_st = []
+            for i in range(n_chunks):
+                qs.append(struct.unpack("f", chunkdata[i*record_size+8284:i*record_size+8288])[0])
+                qs_st.append(struct.unpack("f", chunkdata[i*record_size+8352:i*record_size+8356])[0])
+
+
+            print("OLD:", qs)
+
+            qs = np.array(qs)
+            qs_st = np.array(qs_st)
+
+            # Create st values
+            qs = apply_alpha(qs, st_alpha)
+
+            print("EXPECTING:", qs)
+
+            print("NEW:", qs_st)
+
+            # Write st values
+            cd_array = bytearray(chunkdata)
+            for i in range(n_chunks):
+                if abs(qs[i]) > 1 + 1e-6:
+                    print(f"Got {qs[i]}")
+                cd_array[i*record_size + 8352:i*record_size + 8356] = struct.pack("f", qs[i])
+    
+    except Exception as e:
+        print(f"Could not read {filename}, got {e}")
+
+
 
 def rescore_files(filenames, progress, task_id, **kwargs):
     i = 0
