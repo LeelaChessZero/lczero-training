@@ -432,7 +432,7 @@ class Net:
                     pb_name = 'ip_pol_w'
                 else:
                     pb_name = 'ip_pol_b'
-            elif layers[1] in ['vanilla', 'optimistic_st', 'optimistic', 'soft', 'opponent']:
+            elif layers[1] in ['vanilla', 'optimistic_st', 'optimistic']:
                 pb_prefix = pb_prefix + layers[1] + '.'
                 if layers[2] == 'attention':
                     pb_name = attn_pol_to_bp(layers[3], weights_name)
@@ -451,7 +451,7 @@ class Net:
                 # pb_name = 'policy.' + convblock_to_bp(weights_name)
 
         elif base_layer == 'value':
-            if layers[1] in ['st', 'winner', 'q']:
+            if layers[1] in ['st', 'vanilla']:
                 pb_prefix = 'value_heads.' + layers[1] + '.'
             if 'dense' in layers[2] or 'embedding' in layers[2]:
                 pb_name = value_to_bp(layers[2], weights_name)

@@ -93,7 +93,7 @@ training:
         policy_val: 2.0
         moves_left: 1.0
         reg: 1.0
-        policy_opponen: 0.2
+        policy_val: 2.0
 
     path: "networks"
 
@@ -138,8 +138,9 @@ model:
     smolgen_gen_sz: 192
 
     # Enable or disable BT3 features
+    policy_val: false # not particular useful right now
     policy_optimistic_st: true
     value_st: true
     soft_policy: true
+
     soft_policy_temperature: 4.0
-    policy_opponent: true
