@@ -711,23 +711,20 @@ def rescore_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
             # Gather q bytes
             qs = []
             for i in range(n_chunks):
-                # this is the best q, not 
-                qs.append(struct.unpack("f", chunkdata[i*record_size+8284:i*record_size+8288])[0])
+                qs.append(struct.unpack("f", chunkdata[i*record_size+8280:i*record_size+8284])[0])
 
-            # Create st values
-            qs = apply_alpha(qs, st_alpha)
+            q_st = apply_alpha(qs, st_alpha)
 
-            # Write st values
             cd_array = bytearray(chunkdata)
             for i in range(n_chunks):
-                if abs(qs[i]) > 1 + 1e-6:
-                    print(f"Got {qs[i]}")
-                # this is the best q, not 
-                cd_array[i*record_size + 8352:i*record_size + 8356] = struct.pack("f", qs[i])
-    
+                if abs(q_st[i]) > 1 + 1e-6:
+                    print(f"Got {q_st[i]}")
+                # root q 
+                cd_array[i*record_size + 8352:i*record_size + 8356] = struct.pack("f", q_st[i])
+            
     except Exception as e:
         print(f"Could not read {filename}, got {e}")
-
+    
     with gzip.open(filename, 'wb') as chunk_file:
         chunk_file.write(bytes(cd_array))
 
