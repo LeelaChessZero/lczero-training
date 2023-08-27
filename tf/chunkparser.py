@@ -679,16 +679,23 @@ if __name__ == "__main__":
 def apply_alpha(qs, alpha):
     if not isinstance(qs, np.ndarray):
         qs = np.array(qs)
-    qs = qs * (-1)**np.arange(len(qs))
     
+    n = len(qs)
+    signs = (-1)**np.arange(n)
+    qs = qs * signs
     # Create an array with alpha^(i-j) at (i, j) if this is at most 1 and 0 otherwise.
-    weights = np.arange(len(qs)) - np.arange(len(qs))[:, None]
-    weights = np.where(weights >= 0, alpha**weights, 0)
+    q_st = np.zeros(n)
+    val = 0
+    for i in range(n):
+        if i == 0:
+            val = qs[-1]
+        else:
+            val = alpha * val + qs[-i-1] * (1- alpha)
+        q_st[-i-1] = val
 
-    qs_adjusted = np.einsum("ij,j->i", weights, qs) / np.sum(weights, axis=1)
-    qs_adjusted = qs_adjusted * (-1)**np.arange(len(qs_adjusted))
+    q_st = q_st * signs
 
-    return qs_adjusted
+    return q_st
 
 def rescore_file(filename, st_alpha=1-1/6, lt_alpha=1-1/24):
     v6_struct = struct.Struct(V6_STRUCT_STRING)
