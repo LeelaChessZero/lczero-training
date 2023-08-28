@@ -1645,7 +1645,7 @@ class TFProcess:
     def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
         # DeepNorm
         alpha = tf.cast(tf.math.pow(
-            2. * self.encoder_layers, -0.25), self.model_dtype)
+            2. * self.encoder_layers, 0.25), self.model_dtype)
         beta = tf.cast(tf.math.pow(
             8. * self.encoder_layers, -0.25), self.model_dtype)
         xavier_norm = tf.keras.initializers.VarianceScaling(
@@ -1735,7 +1735,7 @@ class TFProcess:
 
             # DeepNorm
             alpha = tf.cast(tf.math.pow(
-                2. * self.encoder_layers, -0.25), self.model_dtype)
+                2. * self.encoder_layers, 0.25), self.model_dtype)
             beta = tf.cast(tf.math.pow(
                 8. * self.encoder_layers, -0.25), self.model_dtype)
             xavier_norm = tf.keras.initializers.VarianceScaling(
