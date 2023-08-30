@@ -788,7 +788,6 @@ class TFProcess:
             Metric("V Q Err", "Value Err L"),
             Metric("V ST", "Value ST Loss"),
             Metric("V ST Err", "Value ST Err Loss"),
-            Metric("P Val", "Policy Value Loss"),
         ]
 
         self.train_metrics.extend(accuracy_thresholded_metrics)
@@ -815,7 +814,6 @@ class TFProcess:
             Metric("V Q Err", "Value Err L"),
             Metric("V ST", "Value ST Loss"),
             Metric("V ST Err", "Value ST Err Loss"),
-            Metric("P Val", "Policy Value Loss"),
         ]
 
         self.test_metrics.extend(accuracy_thresholded_metrics)
