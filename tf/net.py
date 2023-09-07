@@ -429,9 +429,9 @@ class Net:
             pb_prefix = 'policy_heads.'
             if layers[1] == 'embedding':
                 if layers[2].split(':')[0] == 'kernel':
-                    pb_name = 'ip_pol_w'
+                    pb_name = pb_prefix + 'ip_pol_w'
                 else:
-                    pb_name = 'ip_pol_b'
+                    pb_name = pb_prefix + 'ip_pol_b'
             elif layers[1] in ['vanilla', 'soft', 'optimistic_st', 'opponent']:
                 pb_prefix = pb_prefix + layers[1] + '.'
                 if layers[2] == 'attention':
