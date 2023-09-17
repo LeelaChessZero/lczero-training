@@ -1034,7 +1034,7 @@ class TFProcess:
 
 
             # Value losses
-            value_winner_loss, value_winner_err_loss = self.value_losses_fn(z, value_winner, value_winner)
+            value_winner_loss, value_winner_err_loss = self.value_losses_fn(z, value_winner, None)
             value_q_loss, value_q_err_loss = self.value_losses_fn(q, value_q, value_q_err)
             value_st_loss, value_st_err_loss = self.value_losses_fn(q_st, value_st, value_st_err) if value_st is not None else (tf.constant(0.), tf.constant(0.))
             if self.wdl:
