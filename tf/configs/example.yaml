@@ -120,16 +120,12 @@ model:
     
     embedding_dense_sz: 128           # number of params added is 50k times this number so care is needed
     skip_first_ln: false               # makes training unstable
-    policy_val: true
+    encoder_rms_norm: true
     embedding_style: "new"
-
     
     value: "wdl"
     moves_left: "v1"
     input_type: "classic"
-
-    # degrades performance, not recommended
-    arc_encoding: false
     
     # smolgen: more efficient version of fullgen, adds a lot of params
     use_smolgen: true
@@ -138,9 +134,7 @@ model:
     smolgen_gen_sz: 192
 
     # Enable or disable BT3 features
-    policy_val: false # not particular useful right now
     policy_optimistic_st: true
     value_st: true
     soft_policy: true
-
     soft_policy_temperature: 4.0

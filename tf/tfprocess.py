@@ -169,7 +169,6 @@ class TFProcess:
         self.policy_d_model = self.cfg["model"].get(
             "policy_d_model", self.embedding_size)
         self.dropout_rate = self.cfg["model"].get("dropout_rate", 0.0)
-        self.arc_encoding = self.cfg["model"].get("arc_encoding", False)
 
         precision = self.cfg["training"].get("precision", "single")
         loss_scale = self.cfg["training"].get("loss_scale", 128)
@@ -1706,13 +1705,6 @@ class TFProcess:
             inputs = tf.cast(inputs, self.model_dtype)
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
-            # add positional encoding for each square to the input
-            if self.arc_encoding:
-                assert False, "Arc encoding is not recommended"
-                self.POS_ENC = apm.make_pos_enc()
-                positional_encoding = tf.broadcast_to(tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                                                      [tf.shape(flow)[0], 64, tf.shape(self.POS_ENC)[2]])
-                flow = tf.concat([flow, positional_encoding], axis=2)
 
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
@@ -1750,15 +1742,6 @@ class TFProcess:
         elif self.embedding_style == "old":
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
-            # add positional encoding for each square to the input
-            if self.arc_encoding:
-                assert False, "this setting is not recommended"
-                self.POS_ENC = apm.make_pos_enc()
-                positional_encoding = tf.broadcast_to(
-                    tf.convert_to_tensor(self.POS_ENC, dtype=flow.dtype),
-                    [tf.shape(flow)[0], 64,
-                     tf.shape(self.POS_ENC)[2]])
-                flow = tf.concat([flow, positional_encoding], axis=2)
 
             # square embedding
             flow = tf.keras.layers.Dense(self.embedding_size,
@@ -1851,8 +1834,6 @@ class TFProcess:
             assert self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION and self.encoder_layers > 0
 
             return h_fc1
-
-
 
         policy = policy_head(name="policy/vanilla")
         policy_soft = policy_head(name="policy/soft") if self.cfg['model'].get('soft_policy', False) else None
