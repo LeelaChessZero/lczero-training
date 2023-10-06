@@ -311,6 +311,16 @@ class TFProcess:
             self.net.set_ffn_activation(self.net.activation(
                 'default'))
 
+        if self.embedding_style == "new":
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_PE_DENSE)
+        elif self.encoder_layers > 0:
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_PE_MAP)
+        else:
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_NONE)
+
         self.ffn_activation = self.cfg["model"].get(
             "ffn_activation", self.DEFAULT_ACTIVATION)
 
