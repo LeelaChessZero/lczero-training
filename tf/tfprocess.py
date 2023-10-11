@@ -304,11 +304,21 @@ class TFProcess:
         if self.encoder_layers > 0:
             self.net.set_headcount(self.encoder_heads)
             self.net.set_networkformat(
-                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT)
+                pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT)
             self.net.set_smolgen_activation(
                 self.net.activation(self.smolgen_activation))
             self.net.set_ffn_activation(self.net.activation(
                 'default'))
+
+        if self.embedding_style == "new":
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_PE_DENSE)
+        elif self.encoder_layers > 0:
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_PE_MAP)
+        else:
+            self.net.set_input_embedding(
+                pb.NetworkFormat.INPUT_EMBEDDING_NONE)
 
         self.ffn_activation = self.cfg["model"].get(
             "ffn_activation", self.DEFAULT_ACTIVATION)

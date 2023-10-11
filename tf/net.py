@@ -13,6 +13,7 @@ LC0_MINOR_WITH_INPUT_TYPE_4 = 26
 LC0_MINOR_WITH_INPUT_TYPE_5 = 27
 LC0_MINOR_WITH_MISH = 29
 LC0_MINOR_WITH_ATTN_BODY = 30
+LC0_MINOR_WITH_MULTIHEAD = 31
 LC0_PATCH = 0
 WEIGHTS_MAGIC = 0x1c0
 
@@ -63,6 +64,9 @@ class Net:
         if net == pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_HEADFORMAT \
                 and self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
             self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
+        if net == pb.NetworkFormat.NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT \
+                and self.pb.min_version.minor < LC0_MINOR_WITH_MULTIHEAD:
+            self.pb.min_version.minor = LC0_MINOR_WITH_MULTIHEAD
 
     def set_policyformat(self, policy):
         self.pb.format.network_format.policy = policy
@@ -112,6 +116,11 @@ class Net:
         if self.pb.min_version.minor < LC0_MINOR_WITH_ATTN_BODY:
             self.pb.min_version.minor = LC0_MINOR_WITH_ATTN_BODY
         return None
+
+    def set_input_embedding(self, embedding):
+        self.pb.format.network_format.input_embedding = embedding
+        if self.pb.min_version.minor < LC0_MINOR_WITH_MULTIHEAD:
+            self.pb.min_version.minor = LC0_MINOR_WITH_MULTIHEAD
 
     def activation(self, name):
         if name == "relu":
@@ -451,7 +460,8 @@ class Net:
                 # pb_name = 'policy.' + convblock_to_bp(weights_name)
 
         elif base_layer == 'value':
-            if layers[1] in ['st', 'vanilla']:
+            pb_prefix = ''
+            if layers[1] in ['st', 'q', 'winner']:
                 pb_prefix = 'value_heads.' + layers[1] + '.'
             if 'dense' in layers[2] or 'embedding' in layers[2]:
                 pb_name = value_to_bp(layers[2], weights_name)
