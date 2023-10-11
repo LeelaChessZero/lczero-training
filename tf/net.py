@@ -444,7 +444,7 @@ class Net:
                     pb_name = pb_prefix + 'ip_pol_w'
                 else:
                     pb_name = pb_prefix + 'ip_pol_b'
-            elif layers[1] in ['vanilla', 'soft', 'optimistic_st', 'opponent']:
+            elif layers[1] in ['vanilla', 'soft', 'optimistic_st', 'opponent', 'next']:
                 pb_prefix = pb_prefix + layers[1] + '.'
                 if layers[2] == 'attention':
                     pb_name = attn_pol_to_bp(layers[3], weights_name)

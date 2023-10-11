@@ -26,6 +26,7 @@ import random
 import multiprocessing as mp
 from chunkparser import ChunkParser
 
+
 SKIP = 32
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -184,16 +185,16 @@ def main(cmd):
                                         batch_size=split_batch_size,
                                         workers=0)
 
-
     import tensorflow as tf
     from chunkparsefunc import parse_function
     from tfprocess import TFProcess
 
-
-
+    print("Creating TFProcess")
     tfprocess = TFProcess(cfg)
-    output_types = 7 * (tf.string,)
+    print("Done")
+    output_types = 8 * (tf.string,)
 
+    print("Initializing datasets")
     train_dataset = tf.data.Dataset.from_generator(
         train_parser.parse,
         output_types=output_types)
@@ -222,10 +223,14 @@ def main(cmd):
         test_dataset = test_dataset.with_options(options)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.with_options(options)
+    print("Done")
+
+    print("Initializing TFProcess")
     tfprocess.init(train_dataset, test_dataset,
                    validation_dataset)  # None, None, None
 
     tfprocess.restore()
+    print("Done")
 
     # If number of test positions is not given
     # sweeps through all test chunks statistically
