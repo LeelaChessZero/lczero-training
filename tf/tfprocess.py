@@ -1075,34 +1075,34 @@ class TFProcess:
             }
 
             total_loss = self.lossMix(losses)
-
+        
+            metrics = [
+                policy_loss,
+                policy_optimistic_st_loss,
+                policy_optimistic_st_divergence,
+                policy_soft_loss,
+                moves_left_loss,
+                reg_term,
+                total_loss,
+                # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
+                # get comparable values.
+                mse_loss / 4.0,
+                policy_accuracy * 100,
+                value_accuracy * 100,
+                policy_entropy,
+                policy_ul,
+                policy_sl,
+                value_winner_loss,
+                value_q_loss,
+                value_q_err_loss,
+                value_st_loss,
+                value_st_err_loss,
+            ]
+            metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
+        
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
-
         
-        metrics = [
-            policy_loss,
-            policy_optimistic_st_loss,
-            policy_optimistic_st_divergence,
-            policy_soft_loss,
-            moves_left_loss,
-            reg_term,
-            total_loss,
-            # Google's paper scales MSE by 1/4 to a [0, 1] range, so do the same to
-            # get comparable values.
-            mse_loss / 4.0,
-            policy_accuracy * 100,
-            value_accuracy * 100,
-            policy_entropy,
-            policy_ul,
-            policy_sl,
-            value_winner_loss,
-            value_q_loss,
-            value_q_err_loss,
-            value_st_loss,
-            value_st_err_loss,
-        ]
-        metrics.extend([acc * 100 for acc in policy_thresholded_accuracies])
         return metrics, tape.gradient(total_loss, self.model.trainable_weights)
 
     @tf.function()
@@ -1680,8 +1680,6 @@ class TFProcess:
         out2 = self.encoder_norm(
             name=name+"/ln2")(out1 + ffn_output * alpha)
 
-            
-
         return out2, attn_wts
 
     def smolgen_weights(self, inputs, heads: int, hidden_channels: int, hidden_sz: int, gen_sz: int, name: str, activation="swish"):
@@ -1930,6 +1928,17 @@ class TFProcess:
 
         for key in none_keys:
             del outputs[key]
+        
+        for key in outputs:
+            try:
+                outputs[key] = tf.cast(outputs[key], tf.float32)
+            except:
+                assert key == "attn_wts"
+                # don't want to cast since the memory will jump
+                # out = []
+                # for t in outputs[key]:
+                #     out.append(tf.cast(t, tf.float32))
+                # outputs[key] = out
         
         return outputs
 
