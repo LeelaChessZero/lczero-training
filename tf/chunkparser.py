@@ -74,6 +74,7 @@ V5_VERSION = struct.pack("i", 5)
 CLASSICAL_INPUT = struct.pack("i", 1)
 V4_VERSION = struct.pack("i", 4)
 V3_VERSION = struct.pack("i", 3)
+
 V6_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff"
 V5_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffff"
 V4_STRUCT_STRING = "4s7432s832sBBBBBBBbffff"

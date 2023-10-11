@@ -324,6 +324,10 @@ class Net:
                 w = w.split(':')[0]
                 d = {'kernel': 'ip_val_err_w', 'bias': 'ip_val_err_b'}
                 return d[w]
+            elif l == 'dense_cat':
+                w = w.split(':')[0]
+                d = {'kernel': 'ip_val_cat_w', 'bias': 'ip_val_cat_b'}
+                return d[w]
             if l == 'embedding':
                 n = ''
             elif l == 'dense1':
@@ -337,7 +341,6 @@ class Net:
             d = {'kernel': 'ip{}_val_w', 'bias': 'ip{}_val_b'}
 
             return d[w].format(n)
-
 
         def conv_policy_to_bp(w):
             w = w.split(':')[0]
