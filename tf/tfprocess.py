@@ -552,6 +552,10 @@ class TFProcess:
         def policy_loss(target, output, weights=None, temperature=1.0):
             if target.dtype == tf.int32:
                 target = tf.one_hot(target, 1858)
+                weights = tf.reduce_sum(target, axis=1, keepdims=False)
+                target = target + (1 - tf.reduce_sum(target, axis=1, keepdims=True)) * (
+                    1.0 / 1858)
+
             else:
                 target, output = correct_policy(target, output, temperature)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
