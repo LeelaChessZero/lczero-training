@@ -330,60 +330,6 @@ class TFProcess:
         assert default_activation == "mish" and self.cfg["model"].get(
             "ffn_activation") in [None, 'mish'], "Only mish is supported for now"
 
-        if policy_head == "attention":
-            self.POLICY_HEAD = pb.NetworkFormat.POLICY_ATTENTION
-            if self.encoder_layers > 0:
-                self.net.set_headcount(self.encoder_heads)
-        else:
-            raise ValueError(
-                "Unknown policy head format: {}".format(policy_head))
-
-        self.net.set_policyformat(self.POLICY_HEAD)
-
-        if value_head == "classical":
-            self.VALUE_HEAD = pb.NetworkFormat.VALUE_CLASSICAL
-            self.wdl = False
-        elif value_head == "wdl":
-            self.VALUE_HEAD = pb.NetworkFormat.VALUE_WDL
-            self.wdl = True
-        else:
-            raise ValueError(
-                "Unknown value head format: {}".format(value_head))
-
-        self.net.set_valueformat(self.VALUE_HEAD)
-
-        if moves_left_head == "none":
-            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_NONE
-            self.moves_left = False
-        elif moves_left_head == "v1":
-            self.MOVES_LEFT_HEAD = pb.NetworkFormat.MOVES_LEFT_V1
-            self.moves_left = True
-        else:
-            raise ValueError(
-                "Unknown moves left head format: {}".format(moves_left_head))
-
-        self.net.set_movesleftformat(self.MOVES_LEFT_HEAD)
-
-        if input_mode == "classic":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_CLASSICAL_112_PLANE
-        elif input_mode == "frc_castling":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CASTLING_PLANE
-        elif input_mode == "canonical":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION
-        elif input_mode == "canonical_100":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES
-        elif input_mode == "canonical_armageddon":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON
-        elif input_mode == "canonical_v2":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2
-        elif input_mode == "canonical_v2_armageddon":
-            self.INPUT_MODE = pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON
-        else:
-            raise ValueError(
-                "Unknown input mode format: {}".format(input_mode))
-
-        self.net.set_input(self.INPUT_MODE)
-
         self.swa_enabled = self.cfg["training"].get("swa", False)
 
         self.embedding_dense_sz = self.cfg["model"].get(
