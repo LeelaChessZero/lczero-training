@@ -57,11 +57,19 @@ def get_latest_chunks(path, num_chunks, allow_less, sort_key_fn):
             print("sorting {} chunks...".format(len(chunks)),
                   end="",
                   flush=True)
-            chunks.sort(key=sort_key_fn, reverse=True)
+            if True:
+                print("sorting disabled")
+            else:
+                chunks.sort(key=sort_key_fn, reverse=True)
             print("[done]")
             print("{} - {}".format(os.path.basename(chunks[-1]),
                                    os.path.basename(chunks[0])))
-            random.shuffle(chunks)
+            print("shuffling chunks", end="")
+            if False:
+                print("shuffling disabled")
+            else:
+                random.shuffle(chunks)
+            print("[done]")
             return chunks
         else:
             print("Not enough chunks {}".format(len(chunks)))
@@ -177,6 +185,8 @@ def main(cmd):
                               sample=SKIP,
                               batch_size=split_batch_size,
                               workers=test_workers)
+    
+    
     if "input_validation" in cfg["dataset"]:
         valid_chunks = get_all_chunks(cfg["dataset"]["input_validation"])
         validation_parser = ChunkParser(valid_chunks,

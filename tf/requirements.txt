@@ -1,4 +1,6 @@
-numpy==1.13.3
-tensorflow==2.5.1
-tensorflow-tensorboard==0.4.0rc2
-protobuf==3.12.1
+numpy
+protobuf
+pyyaml
+rich
+tensorflow-addons
+tensorflow[and-cuda]==2.14

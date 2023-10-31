@@ -3,26 +3,24 @@
 name: 'example'
 gpu:  0
 dataset:
-  num_chunks: 50_000_000
+  num_chunks: 500_000_000
   allow_less_chunks: true
   train_ratio: 0.95
-  sort_type: name
-  input: 
-    - '/mnt/leeladata2/*/'
-
-  experimental_v5_only_dataset: false
-  train_workers: 4
-  test_workers: 2
+  input_train: 
+    - '/mnt/t82data/training-run1-test80-202308*/'
+  input_test:
+    - "/mnt/testdata/*/"
+  train_workers: 8
+  test_workers: 4
 training:
     precision: half 
     swa: true
-    swa_output: true    
+    swa_output: true  
     swa_max_n: 10
     swa_steps: 100
     max_grad_norm: 1.0
-    batch_size: 512
+    batch_size: 2048
     num_batch_splits: 1
-    q_ratio: 0
     value_focus_min: 1.0
     value_focus_slope: 0.0
     lookahead_optimizer: false
@@ -32,49 +30,52 @@ training:
     test_steps: 1000
     # validation_steps: 5000
     num_test_positions: 131_072
-    train_avg_report_steps: 500
+    train_avg_report_steps: 1000
     total_steps: 2_000_000
-    checkpoint_steps: 5000
-    shuffle_size: 50_000
+    checkpoint_steps: 50_000
+    shuffle_size: 1_000_000
     warmup_steps: 1000
     mask_legal_moves: true
-    lr_values: # schedule is likely outdated
-        - 0.5
-        - 0.5
+    lr_values: 
+        - 0.001
+        - 0.001
     lr_boundaries:
         - 100
     loss_weights:
         policy: 1.0
-        policy_optimistic_st: 10.0
+        policy_optimistic_st: 1.0
         policy_soft: 8.0 # loss is much smaller at optimum
-        policy_opponent: 0.1
-        policy_next: 0.1
+        policy_opponent: 0.0 # these "future heads" are unstable and not recommended
+        policy_next: 0.0
         value_winner: 1.0
         value_q: 1.0
         value_q_cat: 0.1
-        value_q_err: 20.0 
-        value_st: 2.0 # larger because mse loss
-        value_st_err: 20.0
-        value_st_cat: 1.0
+        value_st: 1.0 # larger because mse loss
+        value_q_err: 10.0  # both error weights should be the same
+        value_st_err: 10.0
+        value_st_cat: 0.1
         moves_left: 1.0
         reg: 1.0
     path: 'networks'
 
-    optimizer: sgd
+    optimizer: nadam # sgd/nadam/rmsprop/adabelief/adam
+    beta_1: 0.9 
+    beta_2: 0.98 
+    epsilon: 0.00000001 # 1e-7
     sparse: false
 
 model:              
-    embedding_size: 128
-    policy_embedding_size: 128
-    value_embedding_size: 64
-    moves_left_embedding_size: 8
-    encoder_layers: 5                   # number of intermediate attention layers in the policy head
-    encoder_heads: 8                    # number of attention heads in encoder layers, emb // (32 or 64) recommended
+    embedding_size: 512
+    policy_embedding_size: 512
+    value_embedding_size: 128
+    moves_left_embedding_size: 32
+    encoder_layers: 10                   # number of intermediate attention layers in the policy head
+    encoder_heads: 16                    # number of attention heads in encoder layers, emb // (32 or 64) recommended
                                          # with 64 memory is same as embedding, with 32 is double
-    encoder_d_model: 128                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
-    encoder_dff: 128                    # size of the expansion layer in encoder layer ffn
-    policy_d_model: 128                  # size of the query and key vectors in final attention layer
-    policy_d_aux: 128                     # size of the query and key vectors for auxiliary layers
+    encoder_d_model: 512                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
+    encoder_dff: 512                    # size of the expansion layer in encoder layer ffn
+    policy_d_model: 512                  # size of the query and key vectors in final attention layer
+    policy_d_aux: 512                     # size of the query and key vectors for auxiliary layers
     dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
                                         # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
 
@@ -86,17 +87,23 @@ model:
     input_type: 'classic'
 
     use_smolgen: true
-    smolgen_hidden_channels: 16
-    smolgen_hidden_sz: 192
-    smolgen_gen_sz: 192
+    smolgen_hidden_channels: 32
+    smolgen_hidden_sz: 256
+    smolgen_gen_sz: 256
     smolgen_activation: 'swish'
 
+
+    omit_qkv_biases: true # these two increases training speed by ~10% on BT4 
+    encoder_rms_norm: true # without quality degradation
+
     policy_optimistic_st: true
-    policy_opponent: true
-    policy_next: true
+    policy_opponent: false
+    policy_next: false
     value_st: true
     value_q: true
     soft_policy: true
     categorical_value_buckets: 32
+
+
 
     soft_policy_temperature: 4.0

@@ -1,3 +1,5 @@
+# WARNING: THIS BRANCH REQUIRES TENSORFLOW 2.13+ AND HAS ONLY BEEN TESTED WITH 2.14
+
 # What's new here?
 
 I've added a few features and modules to the training pipeline. Please direct any questions to the Leela Discord server.

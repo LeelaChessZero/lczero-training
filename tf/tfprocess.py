@@ -35,9 +35,7 @@ from net import Net
 
 
 def get_activation(activation):
-    if activation == "mish":
-        return tfa.activations.mish
-    elif isinstance(activation, str) or activation is None:
+    if isinstance(activation, str) or activation is None:
         return tf.keras.activations.get(activation)
     else:
         return activation
@@ -199,6 +197,7 @@ class TFProcess:
         self.smolgen_activation = self.cfg["model"].get("smolgen_activation")
 
         self.skip_first_ln = self.cfg["model"].get("skip_first_ln", False)
+        self.omit_qkv_biases =  self.cfg["model"].get("omit_qkv_biases", False)
         self.encoder_rms_norm = self.cfg["model"].get(
             "encoder_rms_norm", False)
 
@@ -296,11 +295,7 @@ class TFProcess:
         elif default_activation == "mish":
             self.net.set_defaultactivation(
                 pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            try:
-                self.DEFAULT_ACTIVATION = tf.keras.activations.mish
-            except AttributeError:
-                import tensorflow_addons as tfa
-                self.DEFAULT_ACTIVATION = tfa.activations.mish
+            self.DEFAULT_ACTIVATION = tf.keras.activations.mish
         else:
             raise ValueError("Unknown default activation type: {}".format(
                 default_activation))
@@ -405,6 +400,7 @@ class TFProcess:
         input_var = tf.keras.Input(shape=(112, 8, 8))
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
+        self.model.summary()
 
         # swa_count initialized regardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
@@ -415,9 +411,9 @@ class TFProcess:
                 tf.Variable(w, trainable=False) for w in self.model.weights
             ]
 
-        self.active_lr = tf.Variable(0.01, trainable=False)
+        self.active_lr = tf.Variable(0.000001, trainable=False)
         # All 'new' (TF 2.10 or newer non-legacy) optimizers must have learning_rate updated manually.
-        self.update_lr_manually = False
+        self.update_lr_manually = True
         # Be sure not to set new_optimizer before TF 2.11, or unless you edit the code to specify a new optimizer explicitly.
         if self.optimizer_name == "sgd":
             if self.cfg['training'].get('new_optimizer'):
@@ -461,7 +457,7 @@ class TFProcess:
             self.aggregator = self.orig_optimizer.gradient_aggregator
         if self.loss_scale != 1:
             self.optimizer = tf.keras.mixed_precision.LossScaleOptimizer(
-                self.optimizer, dynamic=True, initial_scale=self.loss_scale)
+                self.optimizer, dynamic=True)
         if self.cfg['training'].get('lookahead_optimizer'):
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
@@ -621,15 +617,9 @@ class TFProcess:
             return accuracies
 
         self.policy_thresholded_accuracy_fn = policy_thresholded_accuracy
-
-        q_ratio = self.cfg["training"].get("q_ratio", 0)
-        assert 0 <= q_ratio <= 1
-
+        
         # Linear conversion to scalar to compute MSE with, for comparison to old values
         wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
-
-        self.qMix = lambda z, q: q * q_ratio + z * (1 - q_ratio)
-        # Loss on value head
 
         def unreduced_mse_loss(target, output):
             assert target.shape[-1] == output.shape[-1]
@@ -661,9 +651,12 @@ class TFProcess:
             if output.shape[-1] == 1:
                 return mse_loss(target, output)
             else:
+                # subtract target entropy for consistency across value heads
                 value_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                     labels=tf.stop_gradient(target), logits=output)
-                return tf.reduce_mean(input_tensor=value_cross_entropy)
+                target_entropy = tf.math.negative(
+                    tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
+                return tf.reduce_mean(input_tensor=value_cross_entropy - target_entropy)
 
         self.value_loss_fn = value_loss
 
@@ -1123,12 +1116,13 @@ class TFProcess:
         ]
         return metrics, new_grads
 
+    @tf.function()
     def apply_grads(self, grads, effective_batch_splits: int):
 
-        grads = [
-            g[0] for g in self.aggregator(
-                zip(grads, self.model.trainable_weights))
-        ]
+        # grads = [
+        #     g[0] for g in self.aggregator(
+        #         zip(grads, self.model.trainable_weights))
+        # ]
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
         max_grad_norm = self.cfg["training"].get(
@@ -1136,8 +1130,7 @@ class TFProcess:
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
 
         self.optimizer.apply_gradients(zip(grads,
-                                           self.model.trainable_weights),
-                                       experimental_aggregate_gradients=False)
+                                           self.model.trainable_weights))
         return grad_norm
 
     @tf.function()
@@ -1632,12 +1625,14 @@ class TFProcess:
         # query, key, and value vectors for self-attention
         # inputs b, 64, sz
 
+        use_bias = not self.omit_qkv_biases
+
         q = tf.keras.layers.Dense(
-            d_model, name=name+"/wq", kernel_initializer="glorot_normal")(inputs)
+            d_model, name=name+"/wq", kernel_initializer="glorot_normal", use_bias=use_bias)(inputs)
         k = tf.keras.layers.Dense(
-            d_model, name=name+"/wk", kernel_initializer="glorot_normal")(inputs)
+            d_model, name=name+"/wk", kernel_initializer="glorot_normal", use_bias=use_bias)(inputs)
         v = tf.keras.layers.Dense(
-            d_model, name=name+"/wv", kernel_initializer=initializer)(inputs)
+            d_model, name=name+"/wv", kernel_initializer=initializer, use_bias=use_bias)(inputs)
 
         # split q, k and v into smaller vectors of size "depth" -- one for each head in multi-head attention
         batch_size = tf.shape(q)[0]
@@ -1663,9 +1658,7 @@ class TFProcess:
 
     # 2-layer dense feed-forward network in encoder blocks
     def ffn(self, inputs, emb_size: int, dff: int, initializer, name: str):
-        if self.ffn_activation == "mish":
-            activation = tfa.activations.mish
-        elif isinstance(self.ffn_activation, str):
+        if isinstance(self.ffn_activation, str):
             activation = tf.keras.activations.get(self.ffn_activation)
         else:
             activation = self.ffn_activation
@@ -1749,13 +1742,13 @@ class TFProcess:
                 64*self.embedding_dense_sz, name=name+"embedding/preprocess")(pos_info_flat)
             pos_info = tf.reshape(pos_info_processed,
                                   [-1, 64, self.embedding_dense_sz])
-            flow = tf.concat([flow, pos_info], axis=2)
+            flow = tf.keras.layers.Concatenate()([flow, pos_info])
 
             # square embedding
             flow = tf.keras.layers.Dense(self.embedding_size, kernel_initializer="glorot_normal",
                                          kernel_regularizer=self.l2reg, activation=self.DEFAULT_ACTIVATION,
                                          name=name+"embedding")(flow)
-            flow = tf.keras.layers.LayerNormalization(
+            flow = self.encoder_norm(
                 name=name+"embedding/ln")(flow)
             flow = ma_gating(flow, name=name+'embedding')
 

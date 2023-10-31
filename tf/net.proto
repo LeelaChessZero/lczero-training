@@ -144,6 +144,8 @@ message Weights {
     optional PolicyHead vanilla = 3;
     optional PolicyHead optimistic_st = 4;
     optional PolicyHead soft = 5;
+    optional PolicyHead opponent = 6;
+    optional PolicyHead next = 7;
   }
 
   message ValueHeads {
