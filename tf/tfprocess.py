@@ -198,6 +198,7 @@ class TFProcess:
 
         self.skip_first_ln = self.cfg["model"].get("skip_first_ln", False)
         self.omit_qkv_biases =  self.cfg["model"].get("omit_qkv_biases", False)
+        self.omit_other_biases = self.cfg["model"].get("omit_other_biases", False)
         self.encoder_rms_norm = self.cfg["model"].get(
             "encoder_rms_norm", False)
 
@@ -400,7 +401,6 @@ class TFProcess:
         input_var = tf.keras.Input(shape=(112, 8, 8))
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
-        self.model.summary()
 
         # swa_count initialized regardless to make checkpoint code simpler.
         self.swa_count = tf.Variable(0., name='swa_count', trainable=False)
@@ -433,19 +433,19 @@ class TFProcess:
                         nesterov=True)
         elif self.optimizer_name == "rmsprop":
             self.optimizer = tf.keras.optimizers.RMSprop(
-                learning_rate=lambda: self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
+                learning_rate=self.active_lr, rho=0.9, momentum=0.0, epsilon=1e-07, centered=True)
         elif self.optimizer_name == "nadam":
             self.optimizer = tf.keras.optimizers.Nadam(
-                learning_rate=lambda: self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
+                learning_rate=self.active_lr, beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
             if self.weight_decay > 0:
                 print("using DecoupledWeightDecayExtension")
 
                 MyNadamW = extend_with_decoupled_weight_decay(
                     tf.keras.optimizers.Nadam)
-                self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
+                self.optimizer = MyNadamW(weight_decay=self.weight_decay, learning_rate=self.active_lr,
                                           beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         elif self.optimizer_name == "adabelief":
-            self.optimizer = tfa.optimizers.AdaBelief(weight_decay=self.weight_decay, learning_rate=lambda: self.active_lr,
+            self.optimizer = tfa.optimizers.AdaBelief(weight_decay=self.weight_decay, learning_rate=self.active_lr,
                                                       beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon)
         else:
             raise ValueError("Unknown optimizer: " + self.optimizer_name)
@@ -617,7 +617,7 @@ class TFProcess:
             return accuracies
 
         self.policy_thresholded_accuracy_fn = policy_thresholded_accuracy
-        
+
         # Linear conversion to scalar to compute MSE with, for comparison to old values
         wdl = tf.expand_dims(tf.constant([1.0, 0.0, -1.0]), 1)
 
@@ -654,9 +654,7 @@ class TFProcess:
                 # subtract target entropy for consistency across value heads
                 value_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                     labels=tf.stop_gradient(target), logits=output)
-                target_entropy = tf.math.negative(
-                    tf.reduce_sum(tf.math.xlogy(target, target), axis=1))
-                return tf.reduce_mean(input_tensor=value_cross_entropy - target_entropy)
+                return tf.reduce_mean(input_tensor=value_cross_entropy)
 
         self.value_loss_fn = value_loss
 
@@ -1652,8 +1650,10 @@ class TFProcess:
                 (batch_size, -1, d_model))  # concatenate heads
 
         # final dense layer
+
+
         output = tf.keras.layers.Dense(
-            emb_size, name=name + "/dense", kernel_initializer=initializer)(scaled_attention)
+            emb_size, name=name + "/dense", kernel_initializer=initializer, use_bias=not self.omit_other_biases)(scaled_attention)
         return output, attention_weights
 
     # 2-layer dense feed-forward network in encoder blocks
@@ -1664,10 +1664,10 @@ class TFProcess:
             activation = self.ffn_activation
 
         dense1 = tf.keras.layers.Dense(
-            dff, name=name + "/dense1", kernel_initializer=initializer, activation=activation)(inputs)
+            dff, name=name + "/dense1", kernel_initializer=initializer, activation=activation, use_bias=not self.omit_other_biases)(inputs)
 
         out = tf.keras.layers.Dense(
-            emb_size, name=name + "/dense2", kernel_initializer=initializer)(dense1)
+            emb_size, name=name + "/dense2", kernel_initializer=initializer, use_bias=not self.omit_other_biases)(dense1)
         return out
 
     def encoder_layer(self, inputs, emb_size: int, d_model: int, num_heads: int, dff: int, name: str, training: bool):
