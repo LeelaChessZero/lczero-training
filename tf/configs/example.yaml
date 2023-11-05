@@ -95,7 +95,6 @@ model:
 
     omit_qkv_biases: true # these two increases training speed by ~10% on BT4 
     encoder_rms_norm: true # without quality degradation
-    omit_other_biases: true # another 5% maybe, haven't seen degradation yet
 
     policy_optimistic_st: true
     policy_opponent: false

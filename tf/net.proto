@@ -113,7 +113,10 @@ message Weights {
     // Extra convolution for AZ-style policy head
     optional ConvBlock policy1 = 100;
     optional ConvBlock policy = 101;
-    optional Layer ip_pol_w = 1;    // "embedding" in policy attention
+    // Add policy encoders for legacy support
+    repeated EncoderLayer pol_encoder = 102;
+    optional uint32 pol_headcount = 103;
+    optional Layer ip_pol_w = 1;
     optional Layer ip_pol_b = 2;
     // For policy attention, up to and including NETWORK_SE_WITH_HEADFORMAT the
     // "embedding" activation is SELU, otherwise it is the default activation.
@@ -125,8 +128,8 @@ message Weights {
   }
 
   message ValueHead {
-
     // Value head
+    optional ConvBlock value = 100;
     optional Layer ip_val_w = 1;  // "embedding" for attention body value
     optional Layer ip_val_b = 2;
     optional Layer ip1_val_w = 3;
@@ -137,7 +140,6 @@ message Weights {
     optional Layer ip_val_err_b = 8;
   }
 
-  
   message PolicyHeads {
     optional Layer ip_pol_w = 1;    // "embedding" in policy attention
     optional Layer ip_pol_b = 2;
@@ -145,7 +147,6 @@ message Weights {
     optional PolicyHead optimistic_st = 4;
     optional PolicyHead soft = 5;
     optional PolicyHead opponent = 6;
-    optional PolicyHead next = 7;
   }
 
   message ValueHeads {
@@ -274,6 +275,9 @@ message NetworkFormat {
     NETWORK_SE_WITH_HEADFORMAT = 4;
     NETWORK_ONNX = 5;
     NETWORK_ATTENTIONBODY_WITH_HEADFORMAT = 6;
+    NETWORK_CLASSICAL_WITH_MULTIHEADFORMAT = 131;
+    NETWORK_SE_WITH_MULTIHEADFORMAT = 132;
+    NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT = 134;
   }
   optional NetworkStructure network = 3;
 
@@ -324,6 +328,13 @@ message NetworkFormat {
 
   optional ActivationFunction smolgen_activation = 8;
   optional ActivationFunction ffn_activation = 9;
+
+  enum InputEmbeddingFormat {
+    INPUT_EMBEDDING_NONE = 0;
+    INPUT_EMBEDDING_PE_MAP = 1;
+    INPUT_EMBEDDING_PE_DENSE = 2;
+  }
+  optional InputEmbeddingFormat input_embedding = 10;
 }
 
 message Format {

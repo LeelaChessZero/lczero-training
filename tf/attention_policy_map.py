@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 
 move = np.arange(1, 8)
@@ -27,6 +28,7 @@ knight = np.array([
     [-1 + 2*8],
     [1 + 2*8]
 ])
+
 
 promos = np.array([2*8, 3*8, 4*8])
 pawn_promotion = np.array([
@@ -65,12 +67,17 @@ def make_map():
                 )
             )
     z = np.zeros((64*64+8*24, 1858), dtype=np.int32)
+    apm_out = np.zeros((1858,), dtype=np.int32)
+    apm_in = np.zeros((64*64+8*24), dtype=np.int32)
     # first loop for standard moves (for i in 0:1858, stride by 1)
     i = 0
     for pickup_index, putdown_indices in enumerate(traversable):
         for putdown_index in putdown_indices:
             if putdown_index < 64:
-                z[putdown_index + (64*pickup_index), i] = 1
+                du_idx = putdown_index + (64*pickup_index)
+                z[du_idx, i] = 1
+                apm_out[i] = du_idx
+                apm_in[du_idx] = i
                 i += 1
     # second loop for promotions (for i in 1792:1858, stride by ls[j])
     j = 0
@@ -87,114 +94,29 @@ def make_map():
                 pickup_file = pickup_index % 8
                 promotion_file = putdown_index % 8
                 promotion_rank = (putdown_index // 8) - 8
-                z[4096 + pickup_file*24 + (promotion_file*3+promotion_rank), i] = 1
+                du_idx = 4096 + pickup_file*24 + (promotion_file*3+promotion_rank)
+                z[du_idx, i] = 1
+                apm_out[i] = du_idx
+                apm_in[du_idx] = i
                 i += ls[j]
                 j += 1
 
-    return z
+    return z, apm_out, apm_in
 
+apm_map, apm_out, apm_in = make_map()
 
-def six_digit_bin():
-    return np.array(
-        [[
-            [0., 0., 0., 0., 0., 0.],
-            [0., 0., 0., 0., 0., 1.],
-            [0., 0., 0., 0., 1., 0.],
-            [0., 0., 0., 0., 1., 1.],
-            [0., 0., 0., 1., 0., 0.],
-            [0., 0., 0., 1., 0., 1.],
-            [0., 0., 0., 1., 1., 0.],
-            [0., 0., 0., 1., 1., 1.],
-            [0., 0., 1., 0., 0., 0.],
-            [0., 0., 1., 0., 0., 1.],
-            [0., 0., 1., 0., 1., 0.],
-            [0., 0., 1., 0., 1., 1.],
-            [0., 0., 1., 1., 0., 0.],
-            [0., 0., 1., 1., 0., 1.],
-            [0., 0., 1., 1., 1., 0.],
-            [0., 0., 1., 1., 1., 1.],
-            [0., 1., 0., 0., 0., 0.],
-            [0., 1., 0., 0., 0., 1.],
-            [0., 1., 0., 0., 1., 0.],
-            [0., 1., 0., 0., 1., 1.],
-            [0., 1., 0., 1., 0., 0.],
-            [0., 1., 0., 1., 0., 1.],
-            [0., 1., 0., 1., 1., 0.],
-            [0., 1., 0., 1., 1., 1.],
-            [0., 1., 1., 0., 0., 0.],
-            [0., 1., 1., 0., 0., 1.],
-            [0., 1., 1., 0., 1., 0.],
-            [0., 1., 1., 0., 1., 1.],
-            [0., 1., 1., 1., 0., 0.],
-            [0., 1., 1., 1., 0., 1.],
-            [0., 1., 1., 1., 1., 0.],
-            [0., 1., 1., 1., 1., 1.],
-            [1., 0., 0., 0., 0., 0.],
-            [1., 0., 0., 0., 0., 1.],
-            [1., 0., 0., 0., 1., 0.],
-            [1., 0., 0., 0., 1., 1.],
-            [1., 0., 0., 1., 0., 0.],
-            [1., 0., 0., 1., 0., 1.],
-            [1., 0., 0., 1., 1., 0.],
-            [1., 0., 0., 1., 1., 1.],
-            [1., 0., 1., 0., 0., 0.],
-            [1., 0., 1., 0., 0., 1.],
-            [1., 0., 1., 0., 1., 0.],
-            [1., 0., 1., 0., 1., 1.],
-            [1., 0., 1., 1., 0., 0.],
-            [1., 0., 1., 1., 0., 1.],
-            [1., 0., 1., 1., 1., 0.],
-            [1., 0., 1., 1., 1., 1.],
-            [1., 1., 0., 0., 0., 0.],
-            [1., 1., 0., 0., 0., 1.],
-            [1., 1., 0., 0., 1., 0.],
-            [1., 1., 0., 0., 1., 1.],
-            [1., 1., 0., 1., 0., 0.],
-            [1., 1., 0., 1., 0., 1.],
-            [1., 1., 0., 1., 1., 0.],
-            [1., 1., 0., 1., 1., 1.],
-            [1., 1., 1., 0., 0., 0.],
-            [1., 1., 1., 0., 0., 1.],
-            [1., 1., 1., 0., 1., 0.],
-            [1., 1., 1., 0., 1., 1.],
-            [1., 1., 1., 1., 0., 0.],
-            [1., 1., 1., 1., 0., 1.],
-            [1., 1., 1., 1., 1., 0.],
-            [1., 1., 1., 1., 1., 1.]
-        ]],
-        dtype=np.float32)
+def set_zero_sum(x):
+    x = x + (1 - tf.reduce_sum(x, axis=1, keepdims=True)) * (
+                    1.0 / 64)
+    return x
 
+def get_up_down(moves):
 
-def make_pos_enc():
-    traversable = []
-    for i in range(8):
-        for j in range(8):
-            sq = (8*i + j)
-            traversable.append(
-                sq +
-                np.sort(
-                    np.int32(
-                        np.concatenate((
-                            orthog[0][:7-j], orthog[2][:j], orthog[1][:i], orthog[3][:7-i],
-                            diag[0][:np.min((7-i, 7-j))], diag[3][:np.min((7-i, j))],
-                            diag[1][:np.min((i, 7-j))], diag[2][:np.min((i, j))],
-                            knight[0] if i < 7 and j < 6 else [], knight[1] if i > 0 and j < 6 else [],
-                            knight[2] if i > 1 and j < 7 else [], knight[3] if i > 1 and j > 0 else [],
-                            knight[4] if i > 0 and j > 1 else [], knight[5] if i < 7 and j > 1 else [],
-                            knight[6] if i < 6 and j > 0 else [], knight[7] if i < 6 and j < 7 else [],
-                            # pawn_promotion[0] if i == 6 and j > 0 else [],
-                            # pawn_promotion[1] if i == 6           else [],
-                            # pawn_promotion[2] if i == 6 and j < 7 else [],
-                        ))
-                    )
-                )
-            )
+    out = tf.matmul(moves, apm_map, transpose_b=True)
+    out = out[..., :64*64]
+    out = tf.reshape(out, [-1, 64, 64])
+    pu = set_zero_sum(tf.reduce_sum(out, axis=-1))
+    pd = set_zero_sum(tf.reduce_sum(out, axis=-2))
+    print(pu.shape, pd.shape)
+    return pu, pd
 
-    # pos_enc = np.zeros((1, 64, 88), dtype=np.float32)
-    pos_enc = np.zeros((1, 64, 64), dtype=np.float32)
-    for i, k in enumerate(traversable):
-        pos_enc[0][i][i] = -1.
-        for j in k:
-            pos_enc[0][i][j] = 1.
-
-    return pos_enc

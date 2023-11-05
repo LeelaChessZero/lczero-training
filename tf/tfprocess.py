@@ -33,10 +33,15 @@ import operator
 import functools
 from net import Net
 
-
 def get_activation(activation):
     if isinstance(activation, str) or activation is None:
-        return tf.keras.activations.get(activation)
+        try:
+            return tf.keras.activations.get(activation)
+        except:
+            if activation == "mish":
+                return tfa.activations.mish
+            else:
+                raise ValueError(f"{activation=} not recognized")
     else:
         return activation
 
@@ -94,13 +99,19 @@ class RMSNorm(tf.keras.layers.Layer):
 class ApplyAttentionPolicyMap(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
         super(ApplyAttentionPolicyMap, self).__init__(**kwargs)
-        self.fc1 = tf.constant(apm.make_map())
+        self.fc1 = tf.constant(apm.apm_map)
+        self.idx = tf.constant(apm.apm_out, dtype=tf.int32)
 
     def call(self, logits, pp_logits):
         logits = tf.concat([tf.reshape(logits, [-1, 64 * 64]),
                             tf.reshape(pp_logits, [-1, 8 * 24])],
                            axis=1)
+        idx = tf.repeat(tf.reshape(self.idx, [1, -1]), tf.shape(logits)[0], axis=0)
+        return tf.gather(logits, idx, batch_dims=1)
         return tf.matmul(logits, tf.cast(self.fc1, logits.dtype))
+
+
+
 
 
 class Metric:
@@ -296,7 +307,10 @@ class TFProcess:
         elif default_activation == "mish":
             self.net.set_defaultactivation(
                 pb.NetworkFormat.DEFAULT_ACTIVATION_MISH)
-            self.DEFAULT_ACTIVATION = tf.keras.activations.mish
+            try:
+                self.DEFAULT_ACTIVATION = tfa.activations.mish
+            except:
+                self.DEFAULT_ACTIVATION = tf.keras.activations.mish
         else:
             raise ValueError("Unknown default activation type: {}".format(
                 default_activation))
@@ -511,6 +525,23 @@ class TFProcess:
             return tf.reduce_mean(policy_kld)
 
         self.policy_loss_fn = policy_loss
+
+        def future_loss(target, output, opponent=False):
+            target = tf.one_hot(target, 1858)
+            target_u, target_d = apm.get_up_down(target)
+            if opponent:
+                target_u = tf.reverse(target_u, axis=[-1])
+                target_d = tf.reverse(target_d, axis=[-1])
+            output_u, output_d = tf.split(output, 2, axis=-1)
+            output_u, output_d = tf.squeeze(output_u), tf.squeeze(output_d)
+            print(output_u.shape, output_d.shape, target_u.shape, target_d.shape)
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target_u), logits=output_u)
+                + tf.nn.softmax_cross_entropy_with_logits(labels=tf.stop_gradient(target_d), logits=output_d))
+            return loss
+
+        self.future_loss_fn = future_loss
+        
+
 
         def policy_divergence(y1, y2, target):
             _, y1 = correct_policy(target, y1)
@@ -1025,9 +1056,9 @@ class TFProcess:
             else:
                 policy_soft_loss = tf.constant(0.)
 
-            policy_opponent_loss = self.policy_loss_fn(
-                opp_idx, policy_opponent) if policy_opponent is not None else tf.constant(0.)
-            policy_next_loss = self.policy_loss_fn(
+            policy_opponent_loss = self.future_loss_fn(
+                opp_idx, policy_opponent, opponent=True) if policy_opponent is not None else tf.constant(0.)
+            policy_next_loss = self.future_loss_fn(
                 next_idx, policy_next) if policy_next is not None else tf.constant(0.)
 
             # Value losses
@@ -1115,20 +1146,19 @@ class TFProcess:
         return metrics, new_grads
 
     @tf.function()
-    def apply_grads(self, grads, effective_batch_splits: int):
-
-        # grads = [
-        #     g[0] for g in self.aggregator(
-        #         zip(grads, self.model.trainable_weights))
-        # ]
+    def apply_grads(self, grads, effective_batch_splits):
+        grads = [
+            g[0]
+            for g in self.aggregator(zip(grads, self.model.trainable_weights))
+        ]
         if self.loss_scale != 1:
             grads = self.optimizer.get_unscaled_gradients(grads)
-        max_grad_norm = self.cfg["training"].get(
-            "max_grad_norm", 10000.0) * effective_batch_splits
+        max_grad_norm = self.cfg['training'].get(
+            'max_grad_norm', 10000.0) * effective_batch_splits
         grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-
         self.optimizer.apply_gradients(zip(grads,
-                                           self.model.trainable_weights))
+                                           self.model.trainable_weights),
+                                       experimental_aggregate_gradients=False)
         return grad_norm
 
     @tf.function()
@@ -1147,6 +1177,7 @@ class TFProcess:
     @tf.function()
     def strategy_merge_grads(self, grads, new_grads):
         return self.strategy.run(self.merge_grads, args=(grads, new_grads))
+
 
     def train_step(self, steps: int, batch_size: int, batch_splits: int):
         # need to add 1 to steps because steps will be incremented after gradient update
@@ -1260,7 +1291,7 @@ class TFProcess:
                              "leelalogs/{}-profile".format(self.cfg["name"])))
 
         # Run test before first step to see delta since end of last run.
-        if steps % self.cfg["training"]["total_steps"] == 0:
+        if False and steps % self.cfg["training"]["total_steps"] == 0:
             with tf.profiler.experimental.Trace("Test", step_num=steps + 1):
                 # Steps is given as one higher than current in order to avoid it
                 # being equal to the value the end of a run is stored against.
@@ -1398,9 +1429,9 @@ class TFProcess:
                 y, policy_soft, temperature=self.soft_policy_temperature)
         else:
             policy_soft_loss = tf.constant(0.)
-        policy_opponent_loss = self.policy_loss_fn(
-            opp_idx, policy_opponent) if policy_opponent is not None else tf.constant(0.)
-        policy_next_loss = self.policy_loss_fn(
+        policy_opponent_loss = self.future_loss_fn(
+            opp_idx, policy_opponent, opponent=True) if policy_opponent is not None else tf.constant(0.)
+        policy_next_loss = self.future_loss_fn(
             next_idx, policy_next) if policy_next is not None else tf.constant(0.)
 
         # Value losses
@@ -1604,7 +1635,6 @@ class TFProcess:
         if self.use_smolgen:
             smolgen_weights = self.smolgen_weights(inputs, heads, self.smolgen_hidden_channels, self.smolgen_hidden_sz,
                                                    self.smolgen_gen_sz, name=name+"/smolgen", activation=self.smolgen_activation)
-            # smolgen_weights = SmolgenEater(name=name+"/smolgen_eater")(smolgen_weights)
             scaled_attention_logits = scaled_attention_logits + smolgen_weights
 
         # 0 h 64 64
@@ -1868,6 +1898,11 @@ class TFProcess:
 
             return h_fc1
 
+        def future_head(name):
+            # hack so checkpointing works
+            return tf.keras.layers.Dense(2, name=name+"/attention/wq")(policy_tokens)
+
+
         aux_depth = self.cfg['model'].get('policy_d_aux', self.policy_d_model)
 
         policy = policy_head(name="policy/vanilla")
@@ -1877,9 +1912,9 @@ class TFProcess:
 
         policy_soft = policy_head(
             name="policy/soft", depth=aux_depth) if self.cfg['model'].get('soft_policy', False) else None
-        policy_opponent = policy_head(name="policy/opponent", depth=aux_depth, opponent=True) if self.cfg['model'].get(
+        policy_opponent = future_head(name="policy/opponent") if self.cfg['model'].get(
             'policy_opponent', False) else None
-        policy_next = policy_head(name="policy/next", depth=aux_depth, opponent=False) if self.cfg['model'].get(
+        policy_next = future_head(name="policy/next") if self.cfg['model'].get(
             'policy_next', False) else None
 
         def value_head(name, wdl=True, use_err=True, use_cat=True):
