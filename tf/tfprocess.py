@@ -1291,7 +1291,7 @@ class TFProcess:
                              "leelalogs/{}-profile".format(self.cfg["name"])))
 
         # Run test before first step to see delta since end of last run.
-        if False and steps % self.cfg["training"]["total_steps"] == 0:
+        if steps % self.cfg["training"]["total_steps"] == 0:
             with tf.profiler.experimental.Trace("Test", step_num=steps + 1):
                 # Steps is given as one higher than current in order to avoid it
                 # being equal to the value the end of a run is stored against.
