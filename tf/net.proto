@@ -138,6 +138,8 @@ message Weights {
     optional Layer ip2_val_b = 6;
     optional Layer ip_val_err_w = 7;
     optional Layer ip_val_err_b = 8;
+    optional Layer ip_val_cat_w = 9;
+    optional Layer ip_val_cat_b = 10;
   }
 
   message PolicyHeads {
@@ -147,6 +149,8 @@ message Weights {
     optional PolicyHead optimistic_st = 4;
     optional PolicyHead soft = 5;
     optional PolicyHead opponent = 6;
+    optional PolicyHead next = 7;
+
   }
 
   message ValueHeads {
