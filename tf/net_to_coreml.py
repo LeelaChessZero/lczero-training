@@ -32,7 +32,7 @@ if __name__ == "__main__":
     START_FROM = args.start
 
     tfp = tfprocess.TFProcess(cfg)
-    tfp.init_net()
+    tfp.init_net(include_attn_wts_output=False)
     tfp.replace_weights(args.net, args.ignore_errors)
     tfp.global_step.assign(START_FROM)
 
