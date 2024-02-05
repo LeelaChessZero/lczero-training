@@ -6,7 +6,7 @@ import coremltools as ct
 if __name__ == "__main__":
     ##############
     # NET TO MODEL
-    args, root_dir, tfp = convert(include_attn_wts_output=False)
+    args, root_dir, tfp = convert(include_attn_wts_output=False, rescale_rule50=False)
 
     #################
     # MODEL TO COREML
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     input_names = [input.name for input in spec.description.input]
 
     # Print the input names
-    print(f"Input names: {input_names}")
+    print(f"Renamed input: {input_names}")
 
     # Set output names
     output_names = ["output_policy", "output_value"]
@@ -43,7 +43,7 @@ if __name__ == "__main__":
         ct.utils.rename_feature(spec, spec.description.output[i].name, name)
 
     # Print the output names
-    print(f"Output names: {[output_i.name for output_i in spec.description.output]}")
+    print(f"Renamed output: {[output_i.name for output_i in spec.description.output]}")
 
     # Set model description
     coreml_model.short_description = f"Lc0 converted from {args.net}"

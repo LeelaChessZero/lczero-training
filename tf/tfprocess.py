@@ -628,7 +628,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename, ignore_errors=False):
+    def replace_weights(self, proto_filename, ignore_errors=False, rescale_rule50=True):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -676,7 +676,7 @@ class TFProcess:
 
             if weight.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
-                if weight.name == 'input/conv2d/kernel:0' and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if rescale_rule50 and weight.name == 'input/conv2d/kernel:0' and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
                     num_inputs = 112
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109

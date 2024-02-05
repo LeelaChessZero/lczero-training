@@ -4,7 +4,7 @@ import os
 import yaml
 import tfprocess
 
-def convert(include_attn_wts_output=True):
+def convert(include_attn_wts_output=True, rescale_rule50=True):
     argparser = argparse.ArgumentParser(description='Convert net to model.')
     argparser.add_argument('net',
                         type=str,
@@ -27,7 +27,7 @@ def convert(include_attn_wts_output=True):
 
     tfp = tfprocess.TFProcess(cfg)
     tfp.init_net(include_attn_wts_output)
-    tfp.replace_weights(args.net, args.ignore_errors)
+    tfp.replace_weights(args.net, args.ignore_errors, rescale_rule50)
     tfp.global_step.assign(START_FROM)
 
     root_dir = os.path.join(cfg['training']['path'], cfg['name'])
