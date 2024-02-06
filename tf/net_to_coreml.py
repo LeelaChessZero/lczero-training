@@ -12,11 +12,16 @@ if __name__ == "__main__":
     # MODEL TO COREML
     input_shape = ct.Shape(shape=(1, 112, 8, 8))
 
+    # Set the compute precision
+    compute_precision = ct.precision.FLOAT16
+    # compute_precision = ct.precision.FLOAT32
+
     # Convert the model to CoreML
     coreml_model = ct.convert(
         tfp.model,
         convert_to="mlprogram",
         inputs=[ct.TensorType(shape=input_shape, name="input_1")],
+        compute_precision=compute_precision,
     )
 
     # Get the protobuf spec
