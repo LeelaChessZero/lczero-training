@@ -377,10 +377,10 @@ class TFProcess:
         else:
             self.init_net()
 
-    def init_net(self):
+    def init_net(self, include_attn_wts_output=True):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8, 8))
-        outputs = self.construct_net(input_var)
+        outputs = self.construct_net(input_var, include_attn_wts_output=include_attn_wts_output)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
 
         # swa_count initialized regardless to make checkpoint code simpler.
@@ -628,7 +628,7 @@ class TFProcess:
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
 
-    def replace_weights(self, proto_filename, ignore_errors=False):
+    def replace_weights(self, proto_filename, ignore_errors=False, rescale_rule50=True):
         self.net.parse_proto(proto_filename)
 
         filters, blocks = self.net.filters(), self.net.blocks()
@@ -676,7 +676,7 @@ class TFProcess:
 
             if weight.shape.ndims == 4:
                 # Rescale rule50 related weights as clients do not normalize the input.
-                if weight.name == 'input/conv2d/kernel:0' and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
+                if rescale_rule50 and weight.name == 'input/conv2d/kernel:0' and self.net.pb.format.network_format.input < pb.NetworkFormat.INPUT_112_WITH_CANONICALIZATION_HECTOPLIES:
                     num_inputs = 112
                     # 50 move rule is the 110th input, or 109 starting from 0.
                     rule50_input = 109
@@ -1520,7 +1520,7 @@ class TFProcess:
         h_fc1 = ApplyAttentionPolicyMap()(policy_attn_logits, promotion_logits)
         return h_fc1
 
-    def construct_net(self, inputs, name=''):
+    def construct_net(self, inputs, name='', include_attn_wts_output=True):
 
         if self.encoder_layers > 0:
             flow, attn_wts = self.create_encoder_body(inputs,
@@ -1665,9 +1665,11 @@ class TFProcess:
         # attention weights added as optional output for analysis -- ignored by backend
         if self.POLICY_HEAD == pb.NetworkFormat.POLICY_ATTENTION:
             if self.moves_left:
-                outputs = [h_fc1, h_fc3, h_fc5, attn_wts]
+                outputs = [h_fc1, h_fc3, h_fc5]
             else:
-                outputs = [h_fc1, h_fc3, attn_wts]
+                outputs = [h_fc1, h_fc3]
+            if include_attn_wts_output:
+                outputs.append(attn_wts)
         elif self.moves_left:
             outputs = [h_fc1, h_fc3, h_fc5]
         else:
