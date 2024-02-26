@@ -146,7 +146,7 @@ class Metric:
 
 class TFProcess:
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, is_teacher=False):
         self.cfg = cfg
         self.net = Net()
         self.root_dir = os.path.join(self.cfg['training']['path'],
@@ -329,21 +329,21 @@ class TFProcess:
         self.renorm_max_d = self.cfg['training'].get('renorm_max_d', 0)
         self.renorm_momentum = self.cfg['training'].get(
             'renorm_momentum', 0.99)
-
-        if self.cfg['gpu'] == 'all':
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            self.strategy = tf.distribute.MirroredStrategy()
-            tf.distribute.experimental_set_strategy(self.strategy)
-        else:
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            print(gpus)
-            tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
-                                                       'GPU')
-            tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
-                                                     True)
-            self.strategy = None
+        if not is_teacher:
+            if self.cfg['gpu'] == 'all':
+                gpus = tf.config.experimental.list_physical_devices('GPU')
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                self.strategy = tf.distribute.MirroredStrategy()
+                tf.distribute.experimental_set_strategy(self.strategy)
+            else:
+                gpus = tf.config.experimental.list_physical_devices('GPU')
+                print(gpus)
+                tf.config.experimental.set_visible_devices(gpus[self.cfg['gpu']],
+                                                        'GPU')
+                tf.config.experimental.set_memory_growth(gpus[self.cfg['gpu']],
+                                                        True)
+                self.strategy = None
         if self.model_dtype == tf.float16:
             tf.keras.mixed_precision.experimental.set_policy('mixed_float16')
 
@@ -377,7 +377,10 @@ class TFProcess:
         else:
             self.init_net()
 
-    def init_net(self):
+    def set_teacher(self, teacher):
+        self.teacher = teacher
+
+    def init_net(self, is_teacher=False):
         self.l2reg = tf.keras.regularizers.l2(l=0.5 * (0.0001))
         input_var = tf.keras.Input(shape=(112, 8, 8))
         outputs = self.construct_net(input_var)
@@ -423,21 +426,25 @@ class TFProcess:
             import tensorflow_addons as tfa
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
 
-        def correct_policy(target, output):
+        def correct_policy(target, output, teacher_output=None):
             output = tf.cast(output, tf.float32)
             # Calculate loss on policy head
             if self.cfg['training'].get('mask_legal_moves'):
                 # extract mask for legal moves from target policy
                 move_is_legal = tf.greater_equal(target, 0)
                 # replace logits of illegal moves with large negative value (so that it doesn't affect policy of legal moves) without gradient
+                if teacher_output is not None:
+                    illegal_filler = tf.zeros_like(teacher_output) - 1.0e10
+                    target = tf.nn.softmax(tf.where(move_is_legal, teacher_output, illegal_filler))
                 illegal_filler = tf.zeros_like(output) - 1.0e10
                 output = tf.where(move_is_legal, output, illegal_filler)
             # y_ still has -1 on illegal moves, flush them to 0
-            target = tf.nn.relu(target)
+            if teacher_output is None:
+                target = tf.nn.relu(target)
             return target, output
 
-        def policy_loss(target, output):
-            target, output = correct_policy(target, output)
+        def policy_loss(target, output, teacher_output=None):
+            target, output = correct_policy(target, output, teacher_output)
             policy_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                 labels=tf.stop_gradient(target), logits=output)
             return tf.reduce_mean(input_tensor=policy_cross_entropy)
@@ -597,25 +604,26 @@ class TFProcess:
         self.cfg['training']['lr_boundaries'].sort()
         self.warmup_steps = self.cfg['training'].get('warmup_steps', 0)
         self.lr = self.cfg['training']['lr_values'][0]
-        self.test_writer = tf.summary.create_file_writer(
-            os.path.join(os.getcwd(),
-                         "leelalogs/{}-test".format(self.cfg['name'])))
-        self.train_writer = tf.summary.create_file_writer(
-            os.path.join(os.getcwd(),
-                         "leelalogs/{}-train".format(self.cfg['name'])))
-        if vars(self).get('validation_dataset', None) is not None:
-            self.validation_writer = tf.summary.create_file_writer(
-                os.path.join(
-                    os.getcwd(),
-                    "leelalogs/{}-validation".format(self.cfg['name'])))
-        if self.swa_enabled:
-            self.swa_writer = tf.summary.create_file_writer(
+        if not is_teacher:
+            self.test_writer = tf.summary.create_file_writer(
                 os.path.join(os.getcwd(),
-                             "leelalogs/{}-swa-test".format(self.cfg['name'])))
-            self.swa_validation_writer = tf.summary.create_file_writer(
-                os.path.join(
-                    os.getcwd(),
-                    "leelalogs/{}-swa-validation".format(self.cfg['name'])))
+                            "leelalogs/{}-test".format(self.cfg['name'])))
+            self.train_writer = tf.summary.create_file_writer(
+                os.path.join(os.getcwd(),
+                            "leelalogs/{}-train".format(self.cfg['name'])))
+            if vars(self).get('validation_dataset', None) is not None:
+                self.validation_writer = tf.summary.create_file_writer(
+                    os.path.join(
+                        os.getcwd(),
+                        "leelalogs/{}-validation".format(self.cfg['name'])))
+            if self.swa_enabled:
+                self.swa_writer = tf.summary.create_file_writer(
+                    os.path.join(os.getcwd(),
+                                "leelalogs/{}-swa-test".format(self.cfg['name'])))
+                self.swa_validation_writer = tf.summary.create_file_writer(
+                    os.path.join(
+                        os.getcwd(),
+                        "leelalogs/{}-swa-validation".format(self.cfg['name'])))
         self.checkpoint = tf.train.Checkpoint(optimizer=self.orig_optimizer,
                                               model=self.model,
                                               global_step=self.global_step,
@@ -627,6 +635,10 @@ class TFProcess:
             max_to_keep=50,
             keep_checkpoint_every_n_hours=24,
             checkpoint_name=self.cfg['name'])
+
+        if is_teacher:
+            assert self.manager.latest_checkpoint not is None, "Teacher has no checkpoint"
+
 
     def replace_weights(self, proto_filename, ignore_errors=False):
         self.net.parse_proto(proto_filename)
@@ -749,11 +761,17 @@ class TFProcess:
 
     @tf.function()
     def process_inner_loop(self, x, y, z, q, m):
+        if self.teacher:
+            teacher_outputs = self.teacher.model(x, training=False)
+            teacher_policy = teacher_outputs[0]
+            z = tf.nn.softmax(teacher_outputs[1])
+            m = teacher_outputs[2]
+
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
             policy = outputs[0]
             value = outputs[1]
-            policy_loss = self.policy_loss_fn(y, policy)
+            policy_loss = self.policy_loss_fn(y, policy, teacher_policy)
             reg_term = sum(self.model.losses)
             if self.wdl:
                 value_ce_loss = self.value_loss_fn(self.qMix(z, q), value)
