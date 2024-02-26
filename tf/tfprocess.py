@@ -637,7 +637,7 @@ class TFProcess:
             checkpoint_name=self.cfg['name'])
 
         if is_teacher:
-            assert self.manager.latest_checkpoint not is None, "Teacher has no checkpoint"
+            assert self.manager.latest_checkpoint is not None, "Teacher has no checkpoint"
 
 
     def replace_weights(self, proto_filename, ignore_errors=False):
