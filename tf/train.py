@@ -219,6 +219,17 @@ def main(cmd):
 
     tfprocess.restore()
 
+    if cmd.teacher:
+        teacher_cfg = yaml.safe_load(cmd.teacher.read())
+        print("Creating Teacher")
+        teacher_tfprocess = TFProcess(teacher_cfg, is_teacher=True)
+        teacher_tfprocess.init_net(is_teacher=True)
+        teacher_tfprocess.restore()
+        tfprocess.set_teacher(teacher_tfprocess)
+        print("Teacher Created")
+    else:
+        tfprocess.set_teacher(None)
+
     # If number of test positions is not given
     # sweeps through all test chunks statistically
     # Assumes average of 10 samples per test game.
@@ -252,6 +263,10 @@ if __name__ == "__main__":
     argparser.add_argument('--output',
                            type=str,
                            help='file to store weights in')
+
+    argparser.add_argument('--teacher',
+                           type=argparse.FileType('r'),
+                           help='yaml for teacher')
 
     #mp.set_start_method('spawn')
     main(argparser.parse_args())
