@@ -227,6 +227,8 @@ def main(cmd):
         teacher_tfprocess.restore()
         tfprocess.set_teacher(teacher_tfprocess)
         print("Teacher Created")
+    else:
+        tfprocess.set_teacher(None)
 
     # If number of test positions is not given
     # sweeps through all test chunks statistically
