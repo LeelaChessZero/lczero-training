@@ -766,6 +766,8 @@ class TFProcess:
             teacher_policy = teacher_outputs[0]
             z = tf.nn.softmax(teacher_outputs[1])
             m = teacher_outputs[2]
+        else:
+            teacher_policy = None
 
         with tf.GradientTape() as tape:
             outputs = self.model(x, training=True)
