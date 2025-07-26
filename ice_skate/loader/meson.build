@@ -3,7 +3,7 @@ project(
   'cpp',
   version : '0.1',
   meson_version : '>= 1.3.0',
-  default_options : ['warning_level=3', 'cpp_std=c++20'],
+  default_options : ['warning_level=3', 'cpp_std=c++20', 'werror=true'],
 )
 
 libarchive_dep = dependency('libarchive')
@@ -19,6 +19,7 @@ tar_lib = static_library(
   'tar',
   files,
   dependencies : [libarchive_dep, zlib_dep, absl_log_dep],
+  cpp_args : ['-Werror'],
 )
 
 exe = executable(
@@ -27,6 +28,7 @@ exe = executable(
   install : true,
   dependencies : [],
   link_with : tar_lib,
+  cpp_args : ['-Werror'],
 )
 
 test('basic', exe)

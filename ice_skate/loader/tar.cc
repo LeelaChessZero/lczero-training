@@ -75,7 +75,7 @@ absl::FixedArray<char> TarFile::GetFileContentsByIndex(size_t index) {
   absl::FixedArray<char> content(file_entry.size);
   la_ssize_t bytes_read =
       archive_read_data(archive_, content.data(), file_entry.size);
-  if (bytes_read != file_entry.size) {
+  if (static_cast<size_t>(bytes_read) != file_entry.size) {
     throw std::runtime_error("Failed to read file data: " +
                              std::string(archive_error_string(archive_)));
   }
