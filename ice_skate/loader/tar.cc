@@ -1,10 +1,13 @@
 #include "tar.h"
 
 #include <absl/log/log.h>
+#include <absl/strings/str_cat.h>
 #include <archive.h>
 #include <archive_entry.h>
 
 #include <stdexcept>
+
+#include "gz.h"
 
 namespace lczero {
 namespace ice_skate {
@@ -45,6 +48,10 @@ void TarFile::ScanTarFile(std::string_view filename) {
     file_entry.offset = archive_read_header_position(archive_);
     file_entry.size = archive_entry_size(entry);
 
+    // Check if file has .gz extension
+    std::string_view filename_view(pathname);
+    file_entry.is_gzip = filename_view.ends_with(".gz");
+
     files_.push_back(file_entry);
 
     // Skip the file data to move to next entry
@@ -76,10 +83,12 @@ std::string TarFile::GetFileContentsByIndex(size_t index) {
   la_ssize_t bytes_read =
       archive_read_data(archive_, content.data(), file_entry.size);
   if (static_cast<size_t>(bytes_read) != file_entry.size) {
-    throw std::runtime_error("Failed to read file data: " +
-                             std::string(archive_error_string(archive_)));
+    throw std::runtime_error(absl::StrCat("Failed to read file data: ",
+                                          archive_error_string(archive_)));
   }
 
+  // If the file is gzipped, decompress it
+  if (file_entry.is_gzip) return GunzipBuffer(content);
   return content;
 }
 

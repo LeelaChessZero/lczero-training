@@ -22,6 +22,7 @@ class TarFile {
   struct FileEntry {
     size_t offset;
     size_t size;
+    bool is_gzip;
   };
 
   void ScanTarFile(std::string_view filename);

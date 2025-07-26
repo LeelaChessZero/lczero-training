@@ -9,7 +9,7 @@
 namespace lczero {
 namespace ice_skate {
 
-std::string GunzipBuffer(std::span<char> buffer) {
+std::string GunzipBuffer(std::span<const char> buffer) {
   z_stream strm = {};
   int ret = inflateInit2(&strm, 16 + MAX_WBITS);
   if (ret != Z_OK) {
@@ -17,7 +17,7 @@ std::string GunzipBuffer(std::span<char> buffer) {
   }
 
   strm.avail_in = buffer.size();
-  strm.next_in = reinterpret_cast<Bytef*>(buffer.data());
+  strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(buffer.data()));
 
   constexpr size_t kChunkSize = 16384;
   std::string output;

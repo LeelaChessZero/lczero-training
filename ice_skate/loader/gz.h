@@ -6,7 +6,7 @@
 namespace lczero {
 namespace ice_skate {
 
-std::string GunzipBuffer(std::span<char> buffer);
+std::string GunzipBuffer(std::span<const char> buffer);
 
 }  // namespace ice_skate
 }  // namespace lczero
