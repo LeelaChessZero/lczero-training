@@ -1,6 +1,7 @@
 #pragma once
 
 #include <archive.h>
+#include <absl/container/fixed_array.h>
 
 #include <string>
 #include <string_view>
@@ -16,7 +17,7 @@ class TarFile {
   ~TarFile();
 
   size_t GetFileCount() const;
-  std::string GetFileContentsByIndex(size_t index);
+  absl::FixedArray<char> GetFileContentsByIndex(size_t index);
 
  private:
   struct FileEntry {

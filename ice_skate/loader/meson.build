@@ -7,16 +7,18 @@ project(
 )
 
 libarchive_dep = dependency('libarchive')
+zlib_dep = dependency('zlib')
 absl_log_dep = dependency('absl_log', fallback: ['abseil-cpp', 'absl_log_dep']).as_system()
 
 files = [
   'tar.cc',
+  'gz.cc',
 ]
 
 tar_lib = static_library(
   'tar',
   files,
-  dependencies : [libarchive_dep, absl_log_dep],
+  dependencies : [libarchive_dep, zlib_dep, absl_log_dep],
 )
 
 exe = executable(

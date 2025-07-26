@@ -56,7 +56,7 @@ void TarFile::ScanTarFile(std::string_view filename) {
 
 size_t TarFile::GetFileCount() const { return files_.size(); }
 
-std::string TarFile::GetFileContentsByIndex(size_t index) {
+absl::FixedArray<char> TarFile::GetFileContentsByIndex(size_t index) {
   if (index >= files_.size())
     throw std::out_of_range("File index out of range");
   const auto& file_entry = files_[index];
@@ -72,15 +72,13 @@ std::string TarFile::GetFileContentsByIndex(size_t index) {
     throw std::runtime_error("Failed to seek to file offset");
   }
 
-  std::string content;
-  content.resize(file_entry.size);
+  absl::FixedArray<char> content(file_entry.size);
   la_ssize_t bytes_read =
       archive_read_data(archive_, content.data(), file_entry.size);
-  if (bytes_read < 0) {
+  if (bytes_read != file_entry.size) {
     throw std::runtime_error("Failed to read file data: " +
                              std::string(archive_error_string(archive_)));
   }
-  content.resize(bytes_read);
 
   return content;
 }
