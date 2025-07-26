@@ -1,17 +1,16 @@
 #include "tar.h"
 
+#include <absl/log/log.h>
 #include <archive.h>
 #include <archive_entry.h>
 
 #include <stdexcept>
 
-#include <absl/log/log.h>
-
 namespace lczero {
 namespace ice_skate {
 
 TarFile::TarFile(const std::string_view filename)
-    : archive_(archive_read_new()) {
+    : archive_(archive_read_new()), filename_(filename) {
   if (!archive_) throw std::runtime_error("Failed to create archive reader");
   ScanTarFile(filename);
 }
@@ -44,6 +43,7 @@ void TarFile::ScanTarFile(std::string_view filename) {
 
     FileEntry file_entry;
     file_entry.offset = archive_read_header_position(archive_);
+    file_entry.size = archive_entry_size(entry);
 
     files_.push_back(file_entry);
 
@@ -52,6 +52,37 @@ void TarFile::ScanTarFile(std::string_view filename) {
   }
 
   LOG(INFO) << "Read " << files_.size() << " entries from " << filename;
+}
+
+size_t TarFile::GetFileCount() const { return files_.size(); }
+
+std::string TarFile::GetFileContentsByIndex(size_t index) {
+  if (index >= files_.size())
+    throw std::out_of_range("File index out of range");
+  const auto& file_entry = files_[index];
+
+  // A filter count > 1 indicates a compressed archive (e.g., tar + gzip).
+  // Seeking is not supported on compressed archives.
+  if (archive_filter_count(archive_) > 1) {
+    throw std::runtime_error("Cannot seek in compressed archive");
+  }
+
+  int r = archive_seek_data(archive_, file_entry.offset, SEEK_SET);
+  if (r != ARCHIVE_OK) {
+    throw std::runtime_error("Failed to seek to file offset");
+  }
+
+  std::string content;
+  content.resize(file_entry.size);
+  la_ssize_t bytes_read =
+      archive_read_data(archive_, content.data(), file_entry.size);
+  if (bytes_read < 0) {
+    throw std::runtime_error("Failed to read file data: " +
+                             std::string(archive_error_string(archive_)));
+  }
+  content.resize(bytes_read);
+
+  return content;
 }
 
 }  // namespace ice_skate

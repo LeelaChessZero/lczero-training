@@ -15,15 +15,20 @@ class TarFile {
   TarFile(const std::string_view filename);
   ~TarFile();
 
+  size_t GetFileCount() const;
+  std::string GetFileContentsByIndex(size_t index);
+
  private:
   struct FileEntry {
     size_t offset;
+    size_t size;
   };
 
   void ScanTarFile(std::string_view filename);
 
   archive* archive_ = nullptr;
   std::vector<FileEntry> files_;
+  std::string filename_;
 };
 
 }  // namespace ice_skate
