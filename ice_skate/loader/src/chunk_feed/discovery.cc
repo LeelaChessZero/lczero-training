@@ -54,38 +54,60 @@ void FileDiscovery::UnregisterObserver(Token token) {
   observers_.erase(token);
 }
 
-std::vector<FileDiscovery::File> FileDiscovery::AddDirectory(
-    const std::string& directory) {
-  absl::MutexLock lock(&mutex_);
-
+size_t FileDiscovery::AddDirectory(const std::string& directory) {
+  size_t directory_idx;
   std::vector<File> existing_files;
+  
+  {
+    absl::MutexLock lock(&mutex_);
+    // Add directory to our list and get its index
+    directory_idx = directories_.size();
+    directories_.push_back(directory);
+    
+    // Add inotify watches recursively
+    AddWatchRecursive(directory, directory_idx);
+    
+    // Scan existing files using recursive directory iterator
+    std::error_code ec;
+    auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+    if (ec) {
+      LOG(ERROR) << "Failed to scan directory " << directory << ": "
+                 << ec.message();
+      return directory_idx;
+    }
 
-  // Scan existing files using recursive directory iterator
-  std::error_code ec;
-  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
-  if (ec) {
-    LOG(ERROR) << "Failed to scan directory " << directory << ": "
-               << ec.message();
-    return existing_files;
-  }
-
-  for (const auto& entry : iterator) {
-    if (entry.is_regular_file(ec) && !ec) {
-      std::filesystem::path relative_path =
-          std::filesystem::relative(entry.path(), directory, ec);
-      if (!ec) {
-        existing_files.push_back({directory, relative_path.string()});
+    for (const auto& entry : iterator) {
+      if (entry.is_regular_file(ec) && !ec) {
+        std::filesystem::path relative_path =
+            std::filesystem::relative(entry.path(), directory, ec);
+        if (!ec) {
+          existing_files.push_back({directory_idx, relative_path.string(), FileType::kInitial});
+        }
       }
     }
   }
-
-  // Add inotify watches recursively
-  AddWatchRecursive(directory);
-
-  return existing_files;
+  
+  // Notify observers in batches without holding mutex
+  const size_t batch_size = 10000;
+  for (size_t i = 0; i < existing_files.size(); i += batch_size) {
+    size_t end = std::min(i + batch_size, existing_files.size());
+    std::span<const File> batch(existing_files.data() + i, end - i);
+    NotifyObservers(batch);
+  }
+  
+  return directory_idx;
 }
 
-void FileDiscovery::AddWatchRecursive(const std::string& path) {
+const std::string& FileDiscovery::GetDirectory(size_t idx) const {
+  absl::MutexLock lock(&mutex_);
+  if (idx >= directories_.size()) {
+    static const std::string empty;
+    return empty;
+  }
+  return directories_[idx];
+}
+
+void FileDiscovery::AddWatchRecursive(const std::string& path, size_t directory_idx) {
   // Add watch for current directory
   int wd = inotify_add_watch(
       inotify_fd_, path.c_str(),
@@ -110,7 +132,7 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
 
   for (const auto& entry : iterator) {
     if (entry.is_directory(ec) && !ec) {
-      AddWatchRecursive(entry.path().string());
+      AddWatchRecursive(entry.path().string(), directory_idx);
     }
   }
 }
@@ -161,30 +183,59 @@ std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
         reinterpret_cast<struct inotify_event*>(buffer + offset);
     
     if (event->len > 0) {
-      absl::MutexLock lock(&mutex_);
-      auto it = watch_descriptors_.find(event->wd);
-      if (it != watch_descriptors_.end()) {
-        const std::string& directory = it->second;
-        std::string filename = event->name;
-        
-        // Handle different event types
-        if (event->mask & IN_CLOSE_WRITE) {
-          // File finished writing
-          files.push_back({directory, filename});
-        } else if (event->mask & IN_MOVED_TO) {
-          // File moved into directory
-          files.push_back({directory, filename});
-        } else if ((event->mask & IN_CREATE) && (event->mask & IN_ISDIR)) {
-          // New subdirectory created - add watch for it
-          std::filesystem::path new_dir = 
-              std::filesystem::path(directory) / filename;
-          AddWatchRecursive(new_dir.string());
-        } else if ((event->mask & IN_DELETE) && (event->mask & IN_ISDIR)) {
-          // Directory deleted - remove all watches for it and subdirectories
-          std::filesystem::path deleted_dir = 
-              std::filesystem::path(directory) / filename;
-          RemoveWatchRecursive(deleted_dir.string());
+      size_t directory_idx;
+      std::string directory;
+      {
+        absl::MutexLock lock(&mutex_);
+        auto it = watch_descriptors_.find(event->wd);
+        if (it == watch_descriptors_.end()) {
+          offset += sizeof(struct inotify_event) + event->len;
+          continue;
         }
+        directory = it->second;
+        
+        // Find the root directory index for this path
+        directory_idx = 0;
+        for (size_t i = 0; i < directories_.size(); ++i) {
+          if (directory.starts_with(directories_[i])) {
+            directory_idx = i;
+            break;
+          }
+        }
+      }
+      
+      // Calculate the relative filename from the root directory
+      std::string root_directory = directories_[directory_idx];
+      std::filesystem::path relative_dir = std::filesystem::relative(directory, root_directory);
+      std::string filename;
+      if (relative_dir == ".") {
+        // Event is in the root directory
+        filename = event->name;
+      } else {
+        // Event is in a subdirectory, construct relative path
+        filename = (relative_dir / event->name).string();
+      }
+      
+      // Handle different event types
+      if (event->mask & IN_CLOSE_WRITE) {
+        // File finished writing
+        files.push_back({directory_idx, filename, FileType::kDiscovered});
+      } else if (event->mask & IN_MOVED_TO) {
+        // File moved into directory
+        files.push_back({directory_idx, filename, FileType::kDiscovered});
+      } else if ((event->mask & IN_CREATE) && (event->mask & IN_ISDIR)) {
+        // New subdirectory created - add watch for it
+        // Note: directory here is the actual path from watch_descriptors_ mapping
+        std::filesystem::path new_dir = 
+            std::filesystem::path(directory) / filename;
+        absl::MutexLock lock(&mutex_);
+        AddWatchRecursive(new_dir.string(), directory_idx);
+      } else if ((event->mask & IN_DELETE) && (event->mask & IN_ISDIR)) {
+        // Directory deleted - remove all watches for it and subdirectories
+        std::filesystem::path deleted_dir = 
+            std::filesystem::path(directory) / filename;
+        absl::MutexLock lock(&mutex_);
+        RemoveWatchRecursive(deleted_dir.string());
       }
     } else if (event->mask & IN_DELETE_SELF) {
       // The watched directory itself was deleted
@@ -270,7 +321,13 @@ void FileDiscovery::MonitorThread() {
       // Process inotify events
       auto discovered_files = ProcessInotifyEvents();
       if (!discovered_files.empty()) {
-        NotifyObservers(discovered_files);
+        // Notify observers in batches without holding mutex
+        const size_t batch_size = 10000;
+        for (size_t i = 0; i < discovered_files.size(); i += batch_size) {
+          size_t end = std::min(i + batch_size, discovered_files.size());
+          std::span<const File> batch(discovered_files.data() + i, end - i);
+          NotifyObservers(batch);
+        }
       }
     }
   }
