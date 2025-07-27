@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "tar.h"
+#include "reader/tar.h"
 
 namespace lczero {
 namespace ice_skate {

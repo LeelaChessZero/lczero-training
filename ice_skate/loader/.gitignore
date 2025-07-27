@@ -1,5 +1,6 @@
 builddir/
 build/
 subprojects/
+.claude/
 
 CLAUDE.local.md

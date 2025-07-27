@@ -1,4 +1,4 @@
-#include "tar.h"
+#include "reader/tar.h"
 
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
@@ -7,7 +7,7 @@
 
 #include <stdexcept>
 
-#include "gz.h"
+#include "reader/gz.h"
 
 namespace lczero {
 namespace ice_skate {

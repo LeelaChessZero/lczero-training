@@ -1,4 +1,4 @@
-#include "gz.h"
+#include "reader/gz.h"
 
 #include <absl/log/log.h>
 #include <zlib.h>
