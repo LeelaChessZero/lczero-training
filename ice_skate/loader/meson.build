@@ -15,6 +15,7 @@ inc = include_directories('src')
 files = [
   'src/reader/tar.cc',
   'src/reader/gz.cc',
+  'src/misc/stream_shuffler.cc',
 ]
 
 loader_lib = static_library(
