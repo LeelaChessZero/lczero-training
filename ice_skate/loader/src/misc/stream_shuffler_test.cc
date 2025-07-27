@@ -101,64 +101,77 @@ TEST_F(StreamShufflerTest, TailAdvancesByBucketMultiples) {
   shuffler_.SetHeadBound(12);
   shuffler_.SetTailBound(0);
 
-  std::set<size_t> received;
+  std::set<size_t> all_received;
   for (int i = 0; i < 4; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
-    received.insert(item.value());
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
   shuffler_.SetTailBound(4);
-  std::set<size_t> remaining_received;
   std::optional<size_t> item;
   while ((item = shuffler_.GetNextItem()).has_value()) {
     EXPECT_GE(item.value(), 4);
     EXPECT_LT(item.value(), 12);
-    EXPECT_TRUE(remaining_received.insert(item.value()).second);
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  EXPECT_EQ(remaining_received.size(), 8);
+  
+  // Verify all items in range [4, 12) were eventually fetched
+  for (size_t i = 4; i < 12; ++i) {
+    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+  }
 }
 
 TEST_F(StreamShufflerTest, TailAdvancesByNonMultiples) {
   shuffler_.SetHeadBound(10);
   shuffler_.SetTailBound(0);
 
+  std::set<size_t> all_received;
   for (int i = 0; i < 3; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
   shuffler_.SetTailBound(3);
-  std::set<size_t> remaining_received;
   std::optional<size_t> item;
   while ((item = shuffler_.GetNextItem()).has_value()) {
     EXPECT_GE(item.value(), 3);
     EXPECT_LT(item.value(), 10);
-    EXPECT_TRUE(remaining_received.insert(item.value()).second);
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  EXPECT_EQ(remaining_received.size(), 7);
+  
+  // Verify all items in range [3, 10) were eventually fetched
+  for (size_t i = 3; i < 10; ++i) {
+    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+  }
 }
 
 TEST_F(StreamShufflerTest, BothBoundsSlideSimultaneously) {
   shuffler_.SetHeadBound(10);
   shuffler_.SetTailBound(0);
 
+  std::set<size_t> all_received;
   for (int i = 0; i < 5; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
   shuffler_.SetHeadBound(15);
   shuffler_.SetTailBound(5);
 
-  std::set<size_t> remaining_received;
   std::optional<size_t> item;
   while ((item = shuffler_.GetNextItem()).has_value()) {
     EXPECT_GE(item.value(), 5);
     EXPECT_LT(item.value(), 15);
-    EXPECT_TRUE(remaining_received.insert(item.value()).second);
+    EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  EXPECT_EQ(remaining_received.size(), 10);
+  
+  // Verify all items in range [5, 15) were eventually fetched
+  for (size_t i = 5; i < 15; ++i) {
+    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+  }
 }
 
 TEST_F(StreamShufflerTest, ComplexSlidingWindow) {
