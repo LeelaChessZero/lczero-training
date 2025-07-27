@@ -105,6 +105,8 @@ TEST_F(StreamShufflerTest, TailAdvancesByBucketMultiples) {
   for (int i = 0; i < 4; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
+    EXPECT_GE(item.value(), 0);
+    EXPECT_LT(item.value(), 12);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
@@ -130,6 +132,8 @@ TEST_F(StreamShufflerTest, TailAdvancesByNonMultiples) {
   for (int i = 0; i < 3; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
+    EXPECT_GE(item.value(), 0);
+    EXPECT_LT(item.value(), 10);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
@@ -155,6 +159,8 @@ TEST_F(StreamShufflerTest, BothBoundsSlideSimultaneously) {
   for (int i = 0; i < 5; ++i) {
     auto item = shuffler_.GetNextItem();
     ASSERT_TRUE(item.has_value());
+    EXPECT_GE(item.value(), 0);
+    EXPECT_LT(item.value(), 10);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
 
