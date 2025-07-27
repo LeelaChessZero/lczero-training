@@ -54,17 +54,19 @@ void FileDiscovery::UnregisterObserver(Token token) {
   observers_.erase(token);
 }
 
-void FileDiscovery::AddDirectory(const std::string& directory, Observer initial_observer) {
+void FileDiscovery::AddDirectory(const std::string& directory,
+                                 Observer initial_observer) {
   std::vector<File> existing_files;
-  
+
   {
     absl::MutexLock lock(&mutex_);
     // Add inotify watches recursively
     AddWatchRecursive(directory);
-    
+
     // Scan existing files using recursive directory iterator
     std::error_code ec;
-    auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+    auto iterator =
+        std::filesystem::recursive_directory_iterator(directory, ec);
     if (ec) {
       LOG(ERROR) << "Failed to scan directory " << directory << ": "
                  << ec.message();
@@ -77,7 +79,7 @@ void FileDiscovery::AddDirectory(const std::string& directory, Observer initial_
       }
     }
   }
-  
+
   // Notify initial observer in batches without holding mutex
   const size_t batch_size = 10000;
   for (size_t i = 0; i < existing_files.size(); i += batch_size) {
@@ -91,15 +93,13 @@ void FileDiscovery::AddDirectory(const std::string& directory, Observer initial_
       LOG(ERROR) << "Initial observer threw unknown exception";
     }
   }
-  
 }
-
 
 void FileDiscovery::AddWatchRecursive(const std::string& path) {
   // Add watch for current directory
-  int wd = inotify_add_watch(
-      inotify_fd_, path.c_str(),
-      IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE);
+  int wd = inotify_add_watch(inotify_fd_, path.c_str(),
+                             IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
+                                 IN_DELETE | IN_DELETE_SELF | IN_MOVE);
   if (wd == -1) {
     LOG(ERROR) << "Failed to add inotify watch for " << path;
     return;
@@ -131,12 +131,12 @@ void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
   if (dir_it != directory_watches_.end()) {
     int wd = dir_it->second;
     inotify_rm_watch(inotify_fd_, wd);
-    
+
     // Remove from both maps
     directory_watches_.erase(dir_it);
     watch_descriptors_.erase(wd);
   }
-  
+
   // Remove watches for all subdirectories that start with this path
   std::vector<std::string> dirs_to_remove;
   for (const auto& [dir_path, wd] : directory_watches_) {
@@ -144,7 +144,7 @@ void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
       dirs_to_remove.push_back(dir_path);
     }
   }
-  
+
   for (const std::string& dir_path : dirs_to_remove) {
     auto it = directory_watches_.find(dir_path);
     if (it != directory_watches_.end()) {
@@ -159,7 +159,7 @@ void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
 std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
   std::vector<File> files;
   char buffer[4096];
-  
+
   ssize_t length = read(inotify_fd_, buffer, sizeof(buffer));
   if (length <= 0) {
     return files;
@@ -167,9 +167,9 @@ std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
 
   size_t offset = 0;
   while (offset < static_cast<size_t>(length)) {
-    struct inotify_event* event = 
+    struct inotify_event* event =
         reinterpret_cast<struct inotify_event*>(buffer + offset);
-    
+
     if (event->len > 0) {
       std::string directory;
       {
@@ -181,10 +181,11 @@ std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
         }
         directory = it->second;
       }
-      
+
       // Create full file path
-      std::filesystem::path filepath = std::filesystem::path(directory) / event->name;
-      
+      std::filesystem::path filepath =
+          std::filesystem::path(directory) / event->name;
+
       // Handle different event types
       if (event->mask & IN_CLOSE_WRITE) {
         // File finished writing
@@ -210,10 +211,10 @@ std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
         RemoveWatchRecursive(directory);
       }
     }
-    
+
     offset += sizeof(struct inotify_event) + event->len;
   }
-  
+
   return files;
 }
 
@@ -221,7 +222,7 @@ void FileDiscovery::NotifyObservers(std::span<const File> files) {
   if (files.empty()) {
     return;
   }
-  
+
   // Get snapshot of observers while holding lock
   std::vector<Observer> observer_snapshot;
   {
@@ -231,7 +232,7 @@ void FileDiscovery::NotifyObservers(std::span<const File> files) {
       observer_snapshot.push_back(observer);
     }
   }
-  
+
   // Call observers without holding lock
   for (const auto& observer : observer_snapshot) {
     try {
@@ -260,42 +261,68 @@ void FileDiscovery::MonitorThread() {
     return;
   }
 
-  const int timeout_ms = 100; // 100ms timeout for checking stop condition
-  
-  while (true) {
-    // Check stop condition
-    {
-      absl::MutexLock lock(&mutex_);
-      if (should_stop_) {
-        break;
-      }
+  // Use efficient condition variable waiting instead of polling
+  absl::MutexLock lock(&mutex_);
+  while (!should_stop_) {
+    // Wait for either stop condition or short timeout for event processing
+    if (mutex_.AwaitWithTimeout(stop_condition_, absl::Milliseconds(50))) {
+      break;
     }
-    
+
+    // Release mutex before doing I/O operations
+    mutex_.Unlock();
+
     struct epoll_event events[1];
-    int nfds = epoll_wait(epoll_fd, events, 1, timeout_ms);
-    
+    int nfds = epoll_wait(epoll_fd, events, 1, 0);  // Non-blocking check
+
     if (nfds == -1) {
       if (errno != EINTR) {
         LOG(ERROR) << "epoll_wait failed: " << strerror(errno);
       }
+      mutex_.Lock();
       continue;
     }
-    
+
     if (nfds > 0 && events[0].data.fd == inotify_fd_) {
-      // Process inotify events
-      auto discovered_files = ProcessInotifyEvents();
-      if (!discovered_files.empty()) {
+      // Accumulate multiple event processing cycles to handle high-frequency
+      // events
+      std::vector<File> all_discovered_files;
+      const int max_cycles =
+          10;  // Process up to 10 cycles to batch high-frequency events
+
+      for (int cycle = 0; cycle < max_cycles; ++cycle) {
+        auto discovered_files = ProcessInotifyEvents();
+        if (discovered_files.empty()) {
+          break;  // No more events to process
+        }
+
+        // Accumulate files from this cycle
+        all_discovered_files.insert(all_discovered_files.end(),
+                                    discovered_files.begin(),
+                                    discovered_files.end());
+
+        // Check if there are more events immediately available
+        nfds = epoll_wait(epoll_fd, events, 1, 0);
+        if (nfds <= 0) {
+          break;
+        }
+      }
+
+      if (!all_discovered_files.empty()) {
         // Notify observers in batches without holding mutex
         const size_t batch_size = 10000;
-        for (size_t i = 0; i < discovered_files.size(); i += batch_size) {
-          size_t end = std::min(i + batch_size, discovered_files.size());
-          std::span<const File> batch(discovered_files.data() + i, end - i);
+        for (size_t i = 0; i < all_discovered_files.size(); i += batch_size) {
+          size_t end = std::min(i + batch_size, all_discovered_files.size());
+          std::span<const File> batch(all_discovered_files.data() + i, end - i);
           NotifyObservers(batch);
         }
       }
     }
+
+    // Re-acquire mutex for next iteration
+    mutex_.Lock();
   }
-  
+
   close(epoll_fd);
 }
 

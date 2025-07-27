@@ -33,7 +33,6 @@ class StreamShuffler {
     size_t size() const { return items_count_; }
 
    private:
-    size_t lower_bound_ = 0;
     size_t upper_bound_ = 0;
     size_t items_count_ = 0;
     absl::FixedArray<size_t> items_;

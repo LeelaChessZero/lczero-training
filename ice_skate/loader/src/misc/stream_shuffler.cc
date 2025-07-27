@@ -50,7 +50,7 @@ std::optional<size_t> StreamShuffler::GetNextItem() {
 }
 
 StreamShuffler::Bucket::Bucket(size_t lower_bound, size_t capacity)
-    : lower_bound_(lower_bound), upper_bound_(lower_bound), items_(capacity) {}
+    : upper_bound_(lower_bound), items_(capacity) {}
 
 size_t StreamShuffler::Bucket::GetRemainingCapacity() const {
   return items_.size() - items_count_;
