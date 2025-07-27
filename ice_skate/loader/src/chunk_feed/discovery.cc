@@ -89,7 +89,7 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
   // Add watch for current directory
   int wd = inotify_add_watch(
       inotify_fd_, path.c_str(),
-      IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_MOVE);
+      IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE);
   if (wd == -1) {
     LOG(ERROR) << "Failed to add inotify watch for " << path;
     return;
@@ -111,6 +111,37 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
   for (const auto& entry : iterator) {
     if (entry.is_directory(ec) && !ec) {
       AddWatchRecursive(entry.path().string());
+    }
+  }
+}
+
+void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
+  // Remove watch for this directory
+  auto dir_it = directory_watches_.find(path);
+  if (dir_it != directory_watches_.end()) {
+    int wd = dir_it->second;
+    inotify_rm_watch(inotify_fd_, wd);
+    
+    // Remove from both maps
+    directory_watches_.erase(dir_it);
+    watch_descriptors_.erase(wd);
+  }
+  
+  // Remove watches for all subdirectories that start with this path
+  std::vector<std::string> dirs_to_remove;
+  for (const auto& [dir_path, wd] : directory_watches_) {
+    if (dir_path.starts_with(path + "/")) {
+      dirs_to_remove.push_back(dir_path);
+    }
+  }
+  
+  for (const std::string& dir_path : dirs_to_remove) {
+    auto it = directory_watches_.find(dir_path);
+    if (it != directory_watches_.end()) {
+      int wd = it->second;
+      inotify_rm_watch(inotify_fd_, wd);
+      directory_watches_.erase(it);
+      watch_descriptors_.erase(wd);
     }
   }
 }
@@ -148,7 +179,20 @@ std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
           std::filesystem::path new_dir = 
               std::filesystem::path(directory) / filename;
           AddWatchRecursive(new_dir.string());
+        } else if ((event->mask & IN_DELETE) && (event->mask & IN_ISDIR)) {
+          // Directory deleted - remove all watches for it and subdirectories
+          std::filesystem::path deleted_dir = 
+              std::filesystem::path(directory) / filename;
+          RemoveWatchRecursive(deleted_dir.string());
         }
+      }
+    } else if (event->mask & IN_DELETE_SELF) {
+      // The watched directory itself was deleted
+      absl::MutexLock lock(&mutex_);
+      auto it = watch_descriptors_.find(event->wd);
+      if (it != watch_descriptors_.end()) {
+        const std::string& directory = it->second;
+        RemoveWatchRecursive(directory);
       }
     }
     

@@ -52,6 +52,7 @@ class FileDiscovery {
 
   void MonitorThread();
   void AddWatchRecursive(const std::string& path);
+  void RemoveWatchRecursive(const std::string& path);
   std::vector<File> ProcessInotifyEvents();
   void NotifyObservers(std::span<const File> files);
 };
