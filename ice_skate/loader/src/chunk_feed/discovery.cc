@@ -2,8 +2,11 @@
 
 #include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
+#include <sys/epoll.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <stdexcept>
 
@@ -112,9 +115,123 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
   }
 }
 
+std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
+  std::vector<File> files;
+  char buffer[4096];
+  
+  ssize_t length = read(inotify_fd_, buffer, sizeof(buffer));
+  if (length <= 0) {
+    return files;
+  }
+
+  size_t offset = 0;
+  while (offset < static_cast<size_t>(length)) {
+    struct inotify_event* event = 
+        reinterpret_cast<struct inotify_event*>(buffer + offset);
+    
+    if (event->len > 0) {
+      absl::MutexLock lock(&mutex_);
+      auto it = watch_descriptors_.find(event->wd);
+      if (it != watch_descriptors_.end()) {
+        const std::string& directory = it->second;
+        std::string filename = event->name;
+        
+        // Handle different event types
+        if (event->mask & IN_CLOSE_WRITE) {
+          // File finished writing
+          files.push_back({directory, filename});
+        } else if (event->mask & IN_MOVED_TO) {
+          // File moved into directory
+          files.push_back({directory, filename});
+        } else if ((event->mask & IN_CREATE) && (event->mask & IN_ISDIR)) {
+          // New subdirectory created - add watch for it
+          std::filesystem::path new_dir = 
+              std::filesystem::path(directory) / filename;
+          AddWatchRecursive(new_dir.string());
+        }
+      }
+    }
+    
+    offset += sizeof(struct inotify_event) + event->len;
+  }
+  
+  return files;
+}
+
+void FileDiscovery::NotifyObservers(std::span<const File> files) {
+  if (files.empty()) {
+    return;
+  }
+  
+  // Get snapshot of observers while holding lock
+  std::vector<Observer> observer_snapshot;
+  {
+    absl::MutexLock lock(&mutex_);
+    observer_snapshot.reserve(observers_.size());
+    for (const auto& [token, observer] : observers_) {
+      observer_snapshot.push_back(observer);
+    }
+  }
+  
+  // Call observers without holding lock
+  for (const auto& observer : observer_snapshot) {
+    try {
+      observer(files);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Observer threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Observer threw unknown exception";
+    }
+  }
+}
+
 void FileDiscovery::MonitorThread() {
-  absl::MutexLock lock(&mutex_);
-  mutex_.Await(stop_condition_);
+  int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+  if (epoll_fd == -1) {
+    LOG(ERROR) << "Failed to create epoll fd";
+    return;
+  }
+
+  struct epoll_event event;
+  event.events = EPOLLIN;
+  event.data.fd = inotify_fd_;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event) == -1) {
+    LOG(ERROR) << "Failed to add inotify fd to epoll";
+    close(epoll_fd);
+    return;
+  }
+
+  const int timeout_ms = 100; // 100ms timeout for checking stop condition
+  
+  while (true) {
+    // Check stop condition
+    {
+      absl::MutexLock lock(&mutex_);
+      if (should_stop_) {
+        break;
+      }
+    }
+    
+    struct epoll_event events[1];
+    int nfds = epoll_wait(epoll_fd, events, 1, timeout_ms);
+    
+    if (nfds == -1) {
+      if (errno != EINTR) {
+        LOG(ERROR) << "epoll_wait failed: " << strerror(errno);
+      }
+      continue;
+    }
+    
+    if (nfds > 0 && events[0].data.fd == inotify_fd_) {
+      // Process inotify events
+      auto discovered_files = ProcessInotifyEvents();
+      if (!discovered_files.empty()) {
+        NotifyObservers(discovered_files);
+      }
+    }
+  }
+  
+  close(epoll_fd);
 }
 
 }  // namespace ice_skate
