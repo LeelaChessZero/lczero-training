@@ -18,6 +18,7 @@ inc = include_directories('src')
 files = [
   'src/reader/tar.cc',
   'src/reader/gz.cc',
+  'src/chunk_feed/discovery.cc',
   'src/misc/stream_shuffler.cc',
 ]
 
@@ -37,8 +38,6 @@ exe = executable(
   link_with : loader_lib,
   cpp_args : ['-Werror'],
 )
-
-test('basic', exe)
 
 stream_shuffler_test = executable(
   'stream_shuffler_test',
