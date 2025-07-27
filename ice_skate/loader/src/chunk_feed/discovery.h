@@ -46,8 +46,6 @@ class FileDiscovery {
   absl::flat_hash_map<Token, Observer> observers_ ABSL_GUARDED_BY(mutex_);
   absl::flat_hash_map<int, std::string> watch_descriptors_
       ABSL_GUARDED_BY(mutex_);  // wd -> directory_path
-  absl::flat_hash_map<std::string, int> directory_watches_
-      ABSL_GUARDED_BY(mutex_);
   std::thread monitor_thread_;
   int inotify_fd_;
   bool should_stop_ ABSL_GUARDED_BY(mutex_);

@@ -105,9 +105,8 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
     return;
   }
 
-  // Store watch descriptor mappings
+  // Store watch descriptor mapping
   watch_descriptors_[wd] = path;
-  directory_watches_[path] = wd;
 
   // Recursively add watches for subdirectories
   std::error_code ec;
@@ -126,33 +125,17 @@ void FileDiscovery::AddWatchRecursive(const std::string& path) {
 }
 
 void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
-  // Remove watch for this directory
-  auto dir_it = directory_watches_.find(path);
-  if (dir_it != directory_watches_.end()) {
-    int wd = dir_it->second;
+  // Find and remove watches for this directory and all subdirectories
+  std::vector<int> wds_to_remove;
+  for (const auto& [wd, dir_path] : watch_descriptors_) {
+    if (dir_path == path || dir_path.starts_with(path + "/")) {
+      wds_to_remove.push_back(wd);
+    }
+  }
+
+  for (int wd : wds_to_remove) {
     inotify_rm_watch(inotify_fd_, wd);
-
-    // Remove from both maps
-    directory_watches_.erase(dir_it);
     watch_descriptors_.erase(wd);
-  }
-
-  // Remove watches for all subdirectories that start with this path
-  std::vector<std::string> dirs_to_remove;
-  for (const auto& [dir_path, wd] : directory_watches_) {
-    if (dir_path.starts_with(path + "/")) {
-      dirs_to_remove.push_back(dir_path);
-    }
-  }
-
-  for (const std::string& dir_path : dirs_to_remove) {
-    auto it = directory_watches_.find(dir_path);
-    if (it != directory_watches_.end()) {
-      int wd = it->second;
-      inotify_rm_watch(inotify_fd_, wd);
-      directory_watches_.erase(it);
-      watch_descriptors_.erase(wd);
-    }
   }
 }
 
