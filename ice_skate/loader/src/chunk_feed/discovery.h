@@ -20,18 +20,9 @@ namespace ice_skate {
 // Uses background thread to monitor the directory.
 class FileDiscovery {
  public:
-  enum class FileType {
-    kInitial,     // File existed when AddDirectory was called
-    kDiscovered   // File was discovered via inotify events
-  };
-
   struct File {
-    // Index to the directory (use GetDirectory(idx) to get path)
-    size_t directory_idx;
-    // The filename is the path relative to the directory.
-    std::string filename;
-    // Whether this was an initial file or discovered later
-    FileType type;
+    // Full path to the file
+    std::string filepath;
   };
   using Token = size_t;
   using Observer = std::function<void(std::span<const File>)>;
@@ -42,12 +33,10 @@ class FileDiscovery {
   FileDiscovery();
   ~FileDiscovery();
 
-  // Starts monitoring the directory. Calls observers with existing files
-  // in batches. Returns the directory index for this directory.
-  size_t AddDirectory(const std::string& directory);
+  // Starts monitoring the directory. Calls initial_observer with existing files
+  // in batches. Newly discovered files will be reported to registered observers.
+  void AddDirectory(const std::string& directory, Observer initial_observer);
 
-  // Returns the directory path for the given index.
-  const std::string& GetDirectory(size_t idx) const;
 
  private:
   mutable absl::Mutex mutex_;
@@ -55,14 +44,13 @@ class FileDiscovery {
   absl::flat_hash_map<Token, Observer> observers_;
   absl::flat_hash_map<int, std::string> watch_descriptors_;  // wd -> directory_path
   absl::flat_hash_map<std::string, int> directory_watches_;
-  std::vector<std::string> directories_;  // directory_idx -> directory_path
   std::thread monitor_thread_;
   int inotify_fd_;
   bool should_stop_;
   Token next_token_;
 
   void MonitorThread();
-  void AddWatchRecursive(const std::string& path, size_t directory_idx);
+  void AddWatchRecursive(const std::string& path);
   void RemoveWatchRecursive(const std::string& path);
   std::vector<File> ProcessInotifyEvents();
   void NotifyObservers(std::span<const File> files);

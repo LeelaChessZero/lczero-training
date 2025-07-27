@@ -27,9 +27,8 @@ The `FileDiscovery` class monitors directories recursively for new files and not
   - [ ] `absl::Mutex mutex_` for thread safety
   - [ ] `absl::CondVar stop_condition_` for thread coordination
   - [ ] `absl::flat_hash_map<Token, Observer> observers_` for observer management
-  - [ ] `absl::flat_hash_map<int, size_t> watch_descriptors_` to map inotify wd to directory index
+  - [ ] `absl::flat_hash_map<int, std::string> watch_descriptors_` to map inotify wd to directory path
   - [ ] `absl::flat_hash_map<std::string, int> directory_watches_` to map directory paths to watch descriptors
-  - [ ] `std::vector<std::string> directories_` to map directory index to directory path
   - [ ] `std::thread monitor_thread_` for background monitoring
   - [ ] `int inotify_fd_` for inotify file descriptor
   - [ ] `bool should_stop_` for shutdown signaling
@@ -58,15 +57,13 @@ The `FileDiscovery` class monitors directories recursively for new files and not
   - [ ] Remove observer from map
 
 ### Phase 4: Directory Monitoring
-- [ ] `AddDirectory(const std::string& directory)`:
-  - [ ] Lock mutex to add directory to index and set up watches
+- [ ] `AddDirectory(const std::string& directory, Observer initial_observer)`:
+  - [ ] Lock mutex to set up watches
   - [ ] Scan existing files using `std::filesystem::recursive_directory_iterator`
   - [ ] Add inotify watch with `inotify_add_watch(fd, path, IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_MOVE)`
-  - [ ] Store watch descriptor mapping to directory index
-  - [ ] Call observers with existing files in batches (10000 files) without holding mutex
-  - [ ] Return directory index
-- [ ] `GetDirectory(size_t idx)`: Return directory path for given index
-- [ ] Helper method `AddWatchRecursive(const std::string& path, size_t directory_idx)`:
+  - [ ] Store watch descriptor mapping to directory path
+  - [ ] Call initial_observer with existing files in batches (10000 files) without holding mutex
+- [ ] Helper method `AddWatchRecursive(const std::string& path)`:
   - [ ] Add watch for current directory
   - [ ] Recursively add watches for subdirectories
 
@@ -90,20 +87,19 @@ The `FileDiscovery` class monitors directories recursively for new files and not
   - [ ] Call each observer with file list
   - [ ] Handle observer exceptions gracefully
 - [ ] File path resolution:
-  - [ ] Map watch descriptor to directory index
-  - [ ] Get directory path from index using directories_ vector
-  - [ ] Create `File` structure with directory_idx, relative filename, and FileType::kDiscovered
+  - [ ] Map watch descriptor to directory path
+  - [ ] Create `File` structure with full filepath
 
 ### Phase 7: Error Handling & Edge Cases
 - [ ] Handle directory deletion (remove watches)
 - [ ] Proper cleanup on destruction
 
 ### Phase 8: Thread Safety & Performance
+- [ ] Add absl thread annotations
 - [ ] Minimize mutex lock duration (observers called without holding mutex)
 - [ ] Use conditions for efficient waiting
 - [ ] Batch file notifications for performance (10000 files per batch)
 - [ ] Handle high-frequency file events efficiently
-- [ ] Directory index system for efficient path lookups
 
 ## Key Implementation Details
 
@@ -120,15 +116,8 @@ The `FileDiscovery` class monitors directories recursively for new files and not
 
 ### File Structure
 ```cpp
-enum class FileType {
-    kInitial,     // File existed when AddDirectory was called
-    kDiscovered   // File was discovered via inotify events
-};
-
 struct File {
-    size_t directory_idx;   // Index to the directory (use GetDirectory(idx) to get path)
-    std::string filename;   // Relative path from directory
-    FileType type;          // Whether this was an initial file or discovered later
+    std::string filepath;   // Full path to the file
 };
 ```
 
