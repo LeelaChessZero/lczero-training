@@ -62,37 +62,12 @@ void FileDiscovery::AddDirectory(const std::string& directory,
     absl::MutexLock lock(&mutex_);
     // Add inotify watches recursively
     AddWatchRecursive(directory);
-
-    // Scan existing files using recursive directory iterator
-    std::error_code ec;
-    auto iterator =
-        std::filesystem::recursive_directory_iterator(directory, ec);
-    if (ec) {
-      LOG(ERROR) << "Failed to scan directory " << directory << ": "
-                 << ec.message();
-      return;
-    }
-
-    for (const auto& entry : iterator) {
-      if (entry.is_regular_file(ec) && !ec) {
-        existing_files.push_back({entry.path().string()});
-      }
-    }
+    // Perform initial scan of existing files
+    existing_files = PerformInitialScan(directory);
   }
 
-  // Notify initial observer in batches without holding mutex
-  const size_t batch_size = 10000;
-  for (size_t i = 0; i < existing_files.size(); i += batch_size) {
-    size_t end = std::min(i + batch_size, existing_files.size());
-    std::span<const File> batch(existing_files.data() + i, end - i);
-    try {
-      initial_observer(batch);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Initial observer threw exception: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Initial observer threw unknown exception";
-    }
-  }
+  // Notify initial observer using the same batching mechanism
+  NotifyObserversInBatches(existing_files, initial_observer);
 }
 
 void FileDiscovery::AddWatchRecursive(const std::string& path) {
@@ -292,12 +267,19 @@ void FileDiscovery::MonitorThread() {
       }
 
       if (!all_discovered_files.empty()) {
-        // Notify observers in batches without holding mutex
-        const size_t batch_size = 10000;
-        for (size_t i = 0; i < all_discovered_files.size(); i += batch_size) {
-          size_t end = std::min(i + batch_size, all_discovered_files.size());
-          std::span<const File> batch(all_discovered_files.data() + i, end - i);
-          NotifyObservers(batch);
+        // Use the generic batching mechanism to notify all observers
+        for (const auto& observer : [this]() {
+          std::vector<Observer> observer_snapshot;
+          {
+            absl::MutexLock lock(&mutex_);
+            observer_snapshot.reserve(observers_.size());
+            for (const auto& [token, observer] : observers_) {
+              observer_snapshot.push_back(observer);
+            }
+          }
+          return observer_snapshot;
+        }()) {
+          NotifyObserversInBatches(all_discovered_files, observer);
         }
       }
     }
@@ -307,6 +289,45 @@ void FileDiscovery::MonitorThread() {
   }
 
   close(epoll_fd);
+}
+
+void FileDiscovery::NotifyObserversInBatches(std::span<const File> files, Observer observer) {
+  if (files.empty()) {
+    return;
+  }
+
+  const size_t batch_size = 10000;
+  for (size_t i = 0; i < files.size(); i += batch_size) {
+    size_t end = std::min(i + batch_size, files.size());
+    std::span<const File> batch(files.data() + i, end - i);
+    try {
+      observer(batch);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Observer threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Observer threw unknown exception";
+    }
+  }
+}
+
+std::vector<FileDiscovery::File> FileDiscovery::PerformInitialScan(const std::string& directory) {
+  std::vector<File> existing_files;
+  
+  // Scan existing files using recursive directory iterator
+  std::error_code ec;
+  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+  if (ec) {
+    LOG(ERROR) << "Failed to scan directory " << directory << ": " << ec.message();
+    return existing_files;
+  }
+
+  for (const auto& entry : iterator) {
+    if (entry.is_regular_file(ec) && !ec) {
+      existing_files.push_back({entry.path().string()});
+    }
+  }
+  
+  return existing_files;
 }
 
 }  // namespace ice_skate
