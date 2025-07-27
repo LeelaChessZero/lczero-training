@@ -9,6 +9,9 @@ project(
 libarchive_dep = dependency('libarchive')
 zlib_dep = dependency('zlib')
 absl_log_dep = dependency('absl_log', fallback: ['abseil-cpp', 'absl_log_dep']).as_system()
+absl_random_dep = dependency('absl_random_random', fallback: ['abseil-cpp', 'absl_random_random_dep']).as_system()
+gtest_dep = dependency('gtest', fallback: ['gtest', 'gtest_dep']).as_system()
+gtest_main_dep = dependency('gtest_main', fallback: ['gtest', 'gtest_main_dep']).as_system()
 
 inc = include_directories('src')
 
@@ -22,7 +25,7 @@ loader_lib = static_library(
   'loader',
   files,
   include_directories : inc,
-  dependencies : [libarchive_dep, zlib_dep, absl_log_dep],
+  dependencies : [libarchive_dep, zlib_dep, absl_log_dep, absl_random_dep],
   cpp_args : ['-Werror'],
 )
 
@@ -36,3 +39,14 @@ exe = executable(
 )
 
 test('basic', exe)
+
+stream_shuffler_test = executable(
+  'stream_shuffler_test',
+  'src/misc/stream_shuffler_test.cc',
+  include_directories : inc,
+  dependencies : [gtest_dep, gtest_main_dep, absl_random_dep],
+  link_with : loader_lib,
+  cpp_args : ['-Werror'],
+)
+
+test('stream_shuffler', stream_shuffler_test)
