@@ -92,15 +92,12 @@ The `FileDiscovery` class monitors directories recursively for new files and not
   - [ ] Create `File` structure with directory and relative filename
 
 ### Phase 7: Error Handling & Edge Cases
-- [ ] Handle inotify watch limit exhaustion
 - [ ] Handle directory deletion (remove watches)
-- [ ] Handle observer exceptions during notification
-- [ ] Handle inotify fd errors and recovery
 - [ ] Proper cleanup on destruction
 
 ### Phase 8: Thread Safety & Performance
 - [ ] Minimize mutex lock duration
-- [ ] Use condition variables for efficient waiting
+- [ ] Use conditions for efficient waiting
 - [ ] Batch file notifications for performance
 - [ ] Handle high-frequency file events efficiently
 

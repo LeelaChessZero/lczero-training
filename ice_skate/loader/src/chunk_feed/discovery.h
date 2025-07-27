@@ -51,6 +51,7 @@ class FileDiscovery {
   Token next_token_;
 
   void MonitorThread();
+  void AddWatchRecursive(const std::string& path);
 };
 
 }  // namespace ice_skate

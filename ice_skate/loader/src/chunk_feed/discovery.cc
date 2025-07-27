@@ -51,6 +51,67 @@ void FileDiscovery::UnregisterObserver(Token token) {
   observers_.erase(token);
 }
 
+std::vector<FileDiscovery::File> FileDiscovery::AddDirectory(
+    const std::string& directory) {
+  absl::MutexLock lock(&mutex_);
+
+  std::vector<File> existing_files;
+
+  // Scan existing files using recursive directory iterator
+  std::error_code ec;
+  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+  if (ec) {
+    LOG(ERROR) << "Failed to scan directory " << directory << ": "
+               << ec.message();
+    return existing_files;
+  }
+
+  for (const auto& entry : iterator) {
+    if (entry.is_regular_file(ec) && !ec) {
+      std::filesystem::path relative_path =
+          std::filesystem::relative(entry.path(), directory, ec);
+      if (!ec) {
+        existing_files.push_back({directory, relative_path.string()});
+      }
+    }
+  }
+
+  // Add inotify watches recursively
+  AddWatchRecursive(directory);
+
+  return existing_files;
+}
+
+void FileDiscovery::AddWatchRecursive(const std::string& path) {
+  // Add watch for current directory
+  int wd = inotify_add_watch(
+      inotify_fd_, path.c_str(),
+      IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_MOVE);
+  if (wd == -1) {
+    LOG(ERROR) << "Failed to add inotify watch for " << path;
+    return;
+  }
+
+  // Store watch descriptor mappings
+  watch_descriptors_[wd] = path;
+  directory_watches_[path] = wd;
+
+  // Recursively add watches for subdirectories
+  std::error_code ec;
+  auto iterator = std::filesystem::directory_iterator(path, ec);
+  if (ec) {
+    LOG(ERROR) << "Failed to iterate directory " << path << ": "
+               << ec.message();
+    return;
+  }
+
+  for (const auto& entry : iterator) {
+    if (entry.is_directory(ec) && !ec) {
+      AddWatchRecursive(entry.path().string());
+    }
+  }
+}
+
 void FileDiscovery::MonitorThread() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(stop_condition_);
