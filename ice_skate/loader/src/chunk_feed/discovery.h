@@ -32,13 +32,16 @@ class FileDiscovery {
   Token RegisterObserver(Observer observer);
   void UnregisterObserver(Token token);
 
+  FileDiscovery();
+  ~FileDiscovery();
+
   // Starts monitoring the directory. Also returns a list of files that
   // already exist in the directory at the time of starting.
   std::vector<File> AddDirectory(const std::string& directory);
 
  private:
   absl::Mutex mutex_;
-  absl::CondVar stop_condition_;
+  absl::Condition stop_condition_;
   absl::flat_hash_map<Token, Observer> observers_;
   absl::flat_hash_map<int, std::string> watch_descriptors_;
   absl::flat_hash_map<std::string, int> directory_watches_;
@@ -46,6 +49,8 @@ class FileDiscovery {
   int inotify_fd_;
   bool should_stop_;
   Token next_token_;
+
+  void MonitorThread();
 };
 
 }  // namespace ice_skate
