@@ -56,18 +56,14 @@ void FileDiscovery::UnregisterObserver(Token token) {
 
 void FileDiscovery::AddDirectory(const std::string& directory,
                                  Observer initial_observer) {
-  std::vector<File> existing_files;
-
   {
     absl::MutexLock lock(&mutex_);
     // Add inotify watches recursively
     AddWatchRecursive(directory);
-    // Perform initial scan of existing files
-    existing_files = PerformInitialScan(directory);
   }
 
-  // Notify initial observer using the same batching mechanism
-  NotifyObserversInBatches(existing_files, initial_observer);
+  // Perform initial scan using streaming batches
+  PerformInitialScanWithBatching(directory, initial_observer);
 }
 
 void FileDiscovery::AddWatchRecursive(const std::string& path) {
@@ -242,11 +238,20 @@ void FileDiscovery::MonitorThread() {
     }
 
     if (nfds > 0 && events[0].data.fd == inotify_fd_) {
-      // Accumulate multiple event processing cycles to handle high-frequency
-      // events
-      std::vector<File> all_discovered_files;
-      const int max_cycles =
-          10;  // Process up to 10 cycles to batch high-frequency events
+      // Process events with streaming batch approach
+      std::vector<File> current_batch;
+      const size_t batch_size = 10000;
+      const int max_cycles = 10;  // Process up to 10 cycles to batch high-frequency events
+
+      // Get snapshot of observers once
+      std::vector<Observer> observer_snapshot;
+      {
+        absl::MutexLock lock(&mutex_);
+        observer_snapshot.reserve(observers_.size());
+        for (const auto& [token, observer] : observers_) {
+          observer_snapshot.push_back(observer);
+        }
+      }
 
       for (int cycle = 0; cycle < max_cycles; ++cycle) {
         auto discovered_files = ProcessInotifyEvents();
@@ -254,10 +259,24 @@ void FileDiscovery::MonitorThread() {
           break;  // No more events to process
         }
 
-        // Accumulate files from this cycle
-        all_discovered_files.insert(all_discovered_files.end(),
-                                    discovered_files.begin(),
-                                    discovered_files.end());
+        // Add files to current batch
+        for (const auto& file : discovered_files) {
+          current_batch.push_back(file);
+          
+          // Flush batch when it reaches the limit
+          if (current_batch.size() >= batch_size) {
+            for (const auto& observer : observer_snapshot) {
+              try {
+                observer(current_batch);
+              } catch (const std::exception& e) {
+                LOG(ERROR) << "Observer threw exception: " << e.what();
+              } catch (...) {
+                LOG(ERROR) << "Observer threw unknown exception";
+              }
+            }
+            current_batch.clear();
+          }
+        }
 
         // Check if there are more events immediately available
         nfds = epoll_wait(epoll_fd, events, 1, 0);
@@ -266,20 +285,16 @@ void FileDiscovery::MonitorThread() {
         }
       }
 
-      if (!all_discovered_files.empty()) {
-        // Use the generic batching mechanism to notify all observers
-        for (const auto& observer : [this]() {
-          std::vector<Observer> observer_snapshot;
-          {
-            absl::MutexLock lock(&mutex_);
-            observer_snapshot.reserve(observers_.size());
-            for (const auto& [token, observer] : observers_) {
-              observer_snapshot.push_back(observer);
-            }
+      // Flush any remaining files in the final batch
+      if (!current_batch.empty()) {
+        for (const auto& observer : observer_snapshot) {
+          try {
+            observer(current_batch);
+          } catch (const std::exception& e) {
+            LOG(ERROR) << "Observer threw exception: " << e.what();
+          } catch (...) {
+            LOG(ERROR) << "Observer threw unknown exception";
           }
-          return observer_snapshot;
-        }()) {
-          NotifyObserversInBatches(all_discovered_files, observer);
         }
       }
     }
@@ -291,15 +306,39 @@ void FileDiscovery::MonitorThread() {
   close(epoll_fd);
 }
 
-void FileDiscovery::NotifyObserversInBatches(std::span<const File> files, Observer observer) {
-  if (files.empty()) {
+
+void FileDiscovery::PerformInitialScanWithBatching(const std::string& directory, Observer observer) {
+  std::vector<File> batch;
+  const size_t batch_size = 10000;
+  
+  // Scan existing files using recursive directory iterator
+  std::error_code ec;
+  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+  if (ec) {
+    LOG(ERROR) << "Failed to scan directory " << directory << ": " << ec.message();
     return;
   }
 
-  const size_t batch_size = 10000;
-  for (size_t i = 0; i < files.size(); i += batch_size) {
-    size_t end = std::min(i + batch_size, files.size());
-    std::span<const File> batch(files.data() + i, end - i);
+  for (const auto& entry : iterator) {
+    if (entry.is_regular_file(ec) && !ec) {
+      batch.push_back({entry.path().string()});
+      
+      // Flush batch when it reaches the limit
+      if (batch.size() >= batch_size) {
+        try {
+          observer(batch);
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "Observer threw exception: " << e.what();
+        } catch (...) {
+          LOG(ERROR) << "Observer threw unknown exception";
+        }
+        batch.clear();
+      }
+    }
+  }
+  
+  // Flush any remaining files in the final batch
+  if (!batch.empty()) {
     try {
       observer(batch);
     } catch (const std::exception& e) {
@@ -308,26 +347,6 @@ void FileDiscovery::NotifyObserversInBatches(std::span<const File> files, Observ
       LOG(ERROR) << "Observer threw unknown exception";
     }
   }
-}
-
-std::vector<FileDiscovery::File> FileDiscovery::PerformInitialScan(const std::string& directory) {
-  std::vector<File> existing_files;
-  
-  // Scan existing files using recursive directory iterator
-  std::error_code ec;
-  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
-  if (ec) {
-    LOG(ERROR) << "Failed to scan directory " << directory << ": " << ec.message();
-    return existing_files;
-  }
-
-  for (const auto& entry : iterator) {
-    if (entry.is_regular_file(ec) && !ec) {
-      existing_files.push_back({entry.path().string()});
-    }
-  }
-  
-  return existing_files;
 }
 
 }  // namespace ice_skate

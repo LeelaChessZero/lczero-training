@@ -58,8 +58,7 @@ class FileDiscovery {
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   std::vector<File> ProcessInotifyEvents() ABSL_LOCKS_EXCLUDED(mutex_);
   void NotifyObservers(std::span<const File> files) ABSL_LOCKS_EXCLUDED(mutex_);
-  void NotifyObserversInBatches(std::span<const File> files, Observer observer) ABSL_LOCKS_EXCLUDED(mutex_);
-  std::vector<File> PerformInitialScan(const std::string& directory) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void PerformInitialScanWithBatching(const std::string& directory, Observer observer) ABSL_LOCKS_EXCLUDED(mutex_);
 };
 
 }  // namespace ice_skate
