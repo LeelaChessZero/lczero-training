@@ -39,6 +39,18 @@ FileDiscovery::~FileDiscovery() {
   }
 }
 
+FileDiscovery::Token FileDiscovery::RegisterObserver(Observer observer) {
+  absl::MutexLock lock(&mutex_);
+  Token token = next_token_++;
+  observers_[token] = std::move(observer);
+  return token;
+}
+
+void FileDiscovery::UnregisterObserver(Token token) {
+  absl::MutexLock lock(&mutex_);
+  observers_.erase(token);
+}
+
 void FileDiscovery::MonitorThread() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(stop_condition_);
