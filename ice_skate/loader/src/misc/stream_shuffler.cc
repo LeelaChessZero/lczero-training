@@ -25,7 +25,7 @@ void StreamShuffler::SetTailBound(size_t tail_bound) {
     buckets_.clear();
     return;
   }
-  while (!buckets_.empty() && buckets_.front().upper_bound() >= tail_bound_) {
+  while (!buckets_.empty() && buckets_.front().upper_bound() <= tail_bound_) {
     stream_size_ -= buckets_.front().size();
     buckets_.pop_front();
   }
@@ -62,6 +62,7 @@ void StreamShuffler::Bucket::Extend(size_t new_upper_bound) {
   assert(increase <= GetRemainingCapacity());
   std::iota(items_.begin() + items_count_,
             items_.begin() + items_count_ + increase, upper_bound_);
+  items_count_ += increase;
   upper_bound_ = new_upper_bound;
 }
 
