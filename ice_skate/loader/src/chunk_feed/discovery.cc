@@ -94,9 +94,9 @@ void FileDiscovery::AddWatchRecursive(const Path& path) {
   }
 }
 
-void FileDiscovery::RemoveWatchRecursive(const Path& path) {
+void FileDiscovery::RemoveWatchRecursive(const Path& base) {
   absl::erase_if(watch_descriptors_, [&](const auto& pair) {
-    const auto& [wd, base] = pair;
+    const auto& [wd, path] = pair;
     const auto mismatch_iter = absl::c_mismatch(base, path).first;
     // If path is not a subdirectory (or equal) of base, skip.
     if (mismatch_iter != base.end()) return false;
@@ -148,8 +148,7 @@ void FileDiscovery::ProcessInotifyEvents() {
 
   while (true) {
     ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
-    CHECK_GE(length, 0) << "Failed to read inotify events: " << strerror(errno);
-    if (length == 0) break;  // No more events to process
+    if (length <= 0) break;  // No more events to process
 
     ssize_t offset = 0;
     while (offset < length) {
@@ -167,8 +166,9 @@ void FileDiscovery::ProcessInotifyEvents() {
 
 auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
     -> std::optional<File> {
-  const Path directory(watch_descriptors_.at(event.wd));
+  if (event.mask & IN_IGNORED) return std::nullopt;
 
+  const Path directory(watch_descriptors_.at(event.wd));
   // Create full file path
   Path filepath = directory / event.name;
 
