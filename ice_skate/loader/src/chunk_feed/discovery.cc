@@ -1,10 +1,13 @@
 #include "chunk_feed/discovery.h"
 
+#include <absl/cleanup/cleanup.h>
+#include <absl/log/check.h>
 #include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -13,340 +16,188 @@
 namespace lczero {
 namespace ice_skate {
 
-FileDiscovery::FileDiscovery()
-    : stop_condition_(&should_stop_), should_stop_(false), next_token_(1) {
+FileDiscovery::FileDiscovery() {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-  if (inotify_fd_ == -1) {
-    throw std::runtime_error("Failed to initialize inotify");
-  }
-
+  CHECK_NE(inotify_fd_, -1)
+      << "Failed to initialize inotify: " << strerror(errno);
   monitor_thread_ = std::thread(&FileDiscovery::MonitorThread, this);
 }
 
 FileDiscovery::~FileDiscovery() {
-  {
-    absl::MutexLock lock(&mutex_);
-    should_stop_ = true;
-  }
-
-  if (monitor_thread_.joinable()) {
-    monitor_thread_.join();
-  }
-
+  stop_condition_.Notify();
+  if (monitor_thread_.joinable()) monitor_thread_.join();
   for (const auto& [wd, path] : watch_descriptors_) {
     inotify_rm_watch(inotify_fd_, wd);
   }
-
-  if (inotify_fd_ != -1) {
-    close(inotify_fd_);
-  }
+  if (inotify_fd_ != -1) close(inotify_fd_);
 }
 
 FileDiscovery::Token FileDiscovery::RegisterObserver(Observer observer) {
-  absl::MutexLock lock(&mutex_);
   Token token = next_token_++;
   observers_[token] = std::move(observer);
   return token;
 }
 
-void FileDiscovery::UnregisterObserver(Token token) {
-  absl::MutexLock lock(&mutex_);
-  observers_.erase(token);
+void FileDiscovery::UnregisterObserver(Token token) { observers_.erase(token); }
+
+void FileDiscovery::AddDirectory(const Path& directory,
+                                 Observer initial_observer) {
+  PerformInitialScan(directory, initial_observer);
+  AddWatchRecursive(directory);
 }
 
-void FileDiscovery::AddDirectory(const std::string& directory,
-                                 Observer initial_observer) {
-  {
-    absl::MutexLock lock(&mutex_);
-    // Add inotify watches recursively
-    AddWatchRecursive(directory);
+void FileDiscovery::PerformInitialScan(const Path& directory,
+                                       Observer observer) {
+  constexpr size_t kBatchSize = 10000;
+  std::vector<File> batch;
+  batch.reserve(kBatchSize);
+
+  // Scan existing files using recursive directory iterator
+  std::error_code ec;
+  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
+  CHECK(!ec) << "Failed to iterate directory " << directory << ": "
+             << ec.message();
+
+  auto flush_batch = [&]() {
+    if (batch.empty()) return;
+    observer(batch);
+    batch.clear();
+  };
+
+  for (const auto& entry : iterator) {
+    if (entry.is_regular_file(ec) && !ec) {
+      batch.push_back({entry.path().string()});
+      // Flush batch when it reaches the limit
+      if (batch.size() >= kBatchSize) flush_batch();
+    }
   }
 
-  // Perform initial scan using streaming batches
-  PerformInitialScanWithBatching(directory, initial_observer);
+  flush_batch();  // Flush any remaining files in the batch
 }
 
-void FileDiscovery::AddWatchRecursive(const std::string& path) {
+void FileDiscovery::AddWatchRecursive(const Path& path) {
   // Add watch for current directory
   int wd = inotify_add_watch(inotify_fd_, path.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
                                  IN_DELETE | IN_DELETE_SELF | IN_MOVE);
-  if (wd == -1) {
-    LOG(ERROR) << "Failed to add inotify watch for " << path;
-    return;
-  }
-
-  // Store watch descriptor mapping
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << path;
   watch_descriptors_[wd] = path;
 
   // Recursively add watches for subdirectories
   std::error_code ec;
   auto iterator = std::filesystem::directory_iterator(path, ec);
-  if (ec) {
-    LOG(ERROR) << "Failed to iterate directory " << path << ": "
-               << ec.message();
-    return;
-  }
+  CHECK(!ec) << "Failed to iterate directory " << path << ": " << ec.message();
 
   for (const auto& entry : iterator) {
-    if (entry.is_directory(ec) && !ec) {
-      AddWatchRecursive(entry.path().string());
-    }
+    if (!entry.is_directory(ec) || ec) continue;
+    AddWatchRecursive(entry.path().string());
   }
 }
 
-void FileDiscovery::RemoveWatchRecursive(const std::string& path) {
-  // Find and remove watches for this directory and all subdirectories
-  std::vector<int> wds_to_remove;
-  for (const auto& [wd, dir_path] : watch_descriptors_) {
-    if (dir_path == path || dir_path.starts_with(path + "/")) {
-      wds_to_remove.push_back(wd);
-    }
-  }
-
-  for (int wd : wds_to_remove) {
+void FileDiscovery::RemoveWatchRecursive(const Path& path) {
+  absl::erase_if(watch_descriptors_, [&](const auto& pair) {
+    const auto& [wd, base] = pair;
+    const auto mismatch_iter = absl::c_mismatch(base, path).first;
+    // If path is not a subdirectory (or equal) of base, skip.
+    if (mismatch_iter != base.end()) return false;
     inotify_rm_watch(inotify_fd_, wd);
-    watch_descriptors_.erase(wd);
-  }
-}
-
-std::vector<FileDiscovery::File> FileDiscovery::ProcessInotifyEvents() {
-  std::vector<File> files;
-  char buffer[4096];
-
-  ssize_t length = read(inotify_fd_, buffer, sizeof(buffer));
-  if (length <= 0) {
-    return files;
-  }
-
-  size_t offset = 0;
-  while (offset < static_cast<size_t>(length)) {
-    struct inotify_event* event =
-        reinterpret_cast<struct inotify_event*>(buffer + offset);
-
-    if (event->len > 0) {
-      std::string directory;
-      {
-        absl::MutexLock lock(&mutex_);
-        auto it = watch_descriptors_.find(event->wd);
-        if (it == watch_descriptors_.end()) {
-          offset += sizeof(struct inotify_event) + event->len;
-          continue;
-        }
-        directory = it->second;
-      }
-
-      // Create full file path
-      std::filesystem::path filepath =
-          std::filesystem::path(directory) / event->name;
-
-      // Handle different event types
-      if (event->mask & IN_CLOSE_WRITE) {
-        // File finished writing
-        files.push_back({filepath.string()});
-      } else if (event->mask & IN_MOVED_TO) {
-        // File moved into directory
-        files.push_back({filepath.string()});
-      } else if ((event->mask & IN_CREATE) && (event->mask & IN_ISDIR)) {
-        // New subdirectory created - add watch for it
-        absl::MutexLock lock(&mutex_);
-        AddWatchRecursive(filepath.string());
-      } else if ((event->mask & IN_DELETE) && (event->mask & IN_ISDIR)) {
-        // Directory deleted - remove all watches for it and subdirectories
-        absl::MutexLock lock(&mutex_);
-        RemoveWatchRecursive(filepath.string());
-      }
-    } else if (event->mask & IN_DELETE_SELF) {
-      // The watched directory itself was deleted
-      absl::MutexLock lock(&mutex_);
-      auto it = watch_descriptors_.find(event->wd);
-      if (it != watch_descriptors_.end()) {
-        const std::string& directory = it->second;
-        RemoveWatchRecursive(directory);
-      }
-    }
-
-    offset += sizeof(struct inotify_event) + event->len;
-  }
-
-  return files;
-}
-
-void FileDiscovery::NotifyObservers(std::span<const File> files) {
-  if (files.empty()) {
-    return;
-  }
-
-  // Get snapshot of observers while holding lock
-  std::vector<Observer> observer_snapshot;
-  {
-    absl::MutexLock lock(&mutex_);
-    observer_snapshot.reserve(observers_.size());
-    for (const auto& [token, observer] : observers_) {
-      observer_snapshot.push_back(observer);
-    }
-  }
-
-  // Call observers without holding lock
-  for (const auto& observer : observer_snapshot) {
-    try {
-      observer(files);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Observer threw exception: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Observer threw unknown exception";
-    }
-  }
+    return true;
+  });
 }
 
 void FileDiscovery::MonitorThread() {
   int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-  if (epoll_fd == -1) {
-    LOG(ERROR) << "Failed to create epoll fd";
-    return;
-  }
+  CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd";
+  absl::Cleanup epoll_cleanup([epoll_fd]() { close(epoll_fd); });
 
   struct epoll_event event;
   event.events = EPOLLIN;
   event.data.fd = inotify_fd_;
-  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event) == -1) {
-    LOG(ERROR) << "Failed to add inotify fd to epoll";
-    close(epoll_fd);
-    return;
+  CHECK_EQ(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event), 0)
+      << "Failed to add inotify fd to epoll";
+
+  while (true) {
+    if (stop_condition_.WaitForNotificationWithTimeout(
+            absl::Milliseconds(50))) {
+      break;  // Exit if stop condition is notified
+    }
+
+    struct epoll_event event;
+    int nfds = epoll_wait(epoll_fd, &event, 1, 0);  // Non-blocking check
+    CHECK_NE(nfds, -1) << "epoll_wait failed: " << strerror(errno);
+    if (nfds == 0) continue;  // No events.
+
+    do {
+      assert(nfds == 1 && event.data.fd == inotify_fd_);
+      ProcessInotifyEvents();
+      nfds = epoll_wait(epoll_fd, &event, 1, 0);
+    } while (nfds > 0);
   }
-
-  // Use efficient condition variable waiting instead of polling
-  absl::MutexLock lock(&mutex_);
-  while (!should_stop_) {
-    // Wait for either stop condition or short timeout for event processing
-    if (mutex_.AwaitWithTimeout(stop_condition_, absl::Milliseconds(50))) {
-      break;
-    }
-
-    // Release mutex before doing I/O operations
-    mutex_.Unlock();
-
-    struct epoll_event events[1];
-    int nfds = epoll_wait(epoll_fd, events, 1, 0);  // Non-blocking check
-
-    if (nfds == -1) {
-      if (errno != EINTR) {
-        LOG(ERROR) << "epoll_wait failed: " << strerror(errno);
-      }
-      mutex_.Lock();
-      continue;
-    }
-
-    if (nfds > 0 && events[0].data.fd == inotify_fd_) {
-      // Process events with streaming batch approach
-      std::vector<File> current_batch;
-      const size_t batch_size = 10000;
-      const int max_cycles = 10;  // Process up to 10 cycles to batch high-frequency events
-
-      // Get snapshot of observers once
-      std::vector<Observer> observer_snapshot;
-      {
-        absl::MutexLock lock(&mutex_);
-        observer_snapshot.reserve(observers_.size());
-        for (const auto& [token, observer] : observers_) {
-          observer_snapshot.push_back(observer);
-        }
-      }
-
-      for (int cycle = 0; cycle < max_cycles; ++cycle) {
-        auto discovered_files = ProcessInotifyEvents();
-        if (discovered_files.empty()) {
-          break;  // No more events to process
-        }
-
-        // Add files to current batch
-        for (const auto& file : discovered_files) {
-          current_batch.push_back(file);
-          
-          // Flush batch when it reaches the limit
-          if (current_batch.size() >= batch_size) {
-            for (const auto& observer : observer_snapshot) {
-              try {
-                observer(current_batch);
-              } catch (const std::exception& e) {
-                LOG(ERROR) << "Observer threw exception: " << e.what();
-              } catch (...) {
-                LOG(ERROR) << "Observer threw unknown exception";
-              }
-            }
-            current_batch.clear();
-          }
-        }
-
-        // Check if there are more events immediately available
-        nfds = epoll_wait(epoll_fd, events, 1, 0);
-        if (nfds <= 0) {
-          break;
-        }
-      }
-
-      // Flush any remaining files in the final batch
-      if (!current_batch.empty()) {
-        for (const auto& observer : observer_snapshot) {
-          try {
-            observer(current_batch);
-          } catch (const std::exception& e) {
-            LOG(ERROR) << "Observer threw exception: " << e.what();
-          } catch (...) {
-            LOG(ERROR) << "Observer threw unknown exception";
-          }
-        }
-      }
-    }
-
-    // Re-acquire mutex for next iteration
-    mutex_.Lock();
-  }
-
-  close(epoll_fd);
 }
 
+void FileDiscovery::ProcessInotifyEvents() {
+  constexpr size_t kNotifyBatchSize = 10000;
+  std::vector<File> files;
+  std::array<char, 4096> buffer;
 
-void FileDiscovery::PerformInitialScanWithBatching(const std::string& directory, Observer observer) {
-  std::vector<File> batch;
-  const size_t batch_size = 10000;
-  
-  // Scan existing files using recursive directory iterator
-  std::error_code ec;
-  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
-  if (ec) {
-    LOG(ERROR) << "Failed to scan directory " << directory << ": " << ec.message();
-    return;
-  }
+  auto flush_batch = [&]() {
+    if (files.empty()) return;
+    NotifyObservers(files);
+    files.clear();
+  };
 
-  for (const auto& entry : iterator) {
-    if (entry.is_regular_file(ec) && !ec) {
-      batch.push_back({entry.path().string()});
-      
-      // Flush batch when it reaches the limit
-      if (batch.size() >= batch_size) {
-        try {
-          observer(batch);
-        } catch (const std::exception& e) {
-          LOG(ERROR) << "Observer threw exception: " << e.what();
-        } catch (...) {
-          LOG(ERROR) << "Observer threw unknown exception";
-        }
-        batch.clear();
-      }
+  while (true) {
+    ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
+    CHECK_GE(length, 0) << "Failed to read inotify events: " << strerror(errno);
+    if (length == 0) break;  // No more events to process
+
+    ssize_t offset = 0;
+    while (offset < length) {
+      const struct inotify_event* event =
+          reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
+      auto file = ProcessInotifyEvent(*event);
+      if (file) files.push_back(*file);
+      if (files.size() >= kNotifyBatchSize) flush_batch();
+      offset += sizeof(struct inotify_event) + event->len;
     }
   }
-  
-  // Flush any remaining files in the final batch
-  if (!batch.empty()) {
-    try {
-      observer(batch);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Observer threw exception: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Observer threw unknown exception";
-    }
+
+  flush_batch();  // Flush any remaining files in the batch
+}
+
+auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
+    -> std::optional<File> {
+  const Path directory(watch_descriptors_.at(event.wd));
+
+  // Create full file path
+  Path filepath = directory / event.name;
+
+  // Handle different event types
+  if (event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
+    // File finished writing or moved into directory
+    return File{.filepath = filepath};
   }
+
+  constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;
+  constexpr uint32_t kDirDeleteMask = IN_DELETE | IN_ISDIR;
+  if ((event.mask & kDirCreateMask) == kDirCreateMask) {
+    AddWatchRecursive(filepath.string());
+  } else if ((event.mask & kDirDeleteMask) == kDirDeleteMask) {
+    // Directory deleted - remove all watches for it and subdirectories
+    RemoveWatchRecursive(filepath.string());
+  } else if (event.mask & IN_DELETE_SELF) {
+    RemoveWatchRecursive(directory);
+  }
+
+  return std::nullopt;
+}
+
+void FileDiscovery::NotifyObservers(std::span<const File> files) {
+  if (files.empty()) return;
+  absl::c_for_each(observers_, [&](const auto& pair) {
+    const auto& [token, observer] = pair;
+    observer(files);
+  });
 }
 
 }  // namespace ice_skate
