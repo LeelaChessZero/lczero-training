@@ -60,6 +60,8 @@ void TarChunkSource::Index() {
   LOG(INFO) << "Read " << files_.size() << " entries from " << filename_;
 }
 
+std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
+
 size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 
 std::string TarChunkSource::GetChunkData(size_t index) {

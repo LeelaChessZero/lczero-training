@@ -24,6 +24,7 @@ class TarChunkSource : public ChunkSource {
     bool is_gzip;
   };
 
+  std::string GetChunkSortKey() const override;
   void Index() override;
   size_t GetChunkCount() const override;
   std::string GetChunkData(size_t index) override;
