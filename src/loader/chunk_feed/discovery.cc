@@ -1,4 +1,4 @@
-#include "chunk_feed/discovery.h"
+#include "loader/chunk_feed/discovery.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/log/check.h>

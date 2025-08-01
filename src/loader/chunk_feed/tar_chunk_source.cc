@@ -7,7 +7,7 @@
 
 #include <stdexcept>
 
-#include "reader/gz.h"
+#include "utils/gz.h"
 
 namespace lczero {
 namespace ice_skate {

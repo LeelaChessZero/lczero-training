@@ -1,4 +1,4 @@
-#include "misc/stream_shuffler.h"
+#include "utils/stream_shuffler.h"
 
 #include <absl/random/random.h>
 #include <gtest/gtest.h>

@@ -1,5 +1,5 @@
 project(
-  'ice_skate_loader',
+  'lczero-training',
   'cpp',
   version : '0.1',
   meson_version : '>= 1.3.0',
@@ -52,11 +52,11 @@ gtest_main_dep = dependency(
 inc = include_directories('src')
 
 files = [
-  'src/chunk_feed/discovery.cc',
-  'src/data_loader.cc',
-  'src/misc/stream_shuffler.cc',
-  'src/reader/gz.cc',
-  'src/chunk_feed/tar_chunk_source.cc',
+  'src/loader/chunk_feed/discovery.cc',
+  'src/loader/data_loader.cc',
+  'src/utils/stream_shuffler.cc',
+  'src/utils/gz.cc',
+  'src/loader/chunk_feed/tar_chunk_source.cc',
 ]
 
 loader_lib = static_library(
@@ -77,7 +77,7 @@ loader_lib = static_library(
 
 exe = executable(
   'loader',
-  'src/loader_main.cpp',
+  'src/loader/loader_main.cpp',
   dependencies : [
     libarchive_dep,
     zlib_dep,
@@ -94,7 +94,7 @@ exe = executable(
 
 stream_shuffler_test = executable(
   'stream_shuffler_test',
-  'src/misc/stream_shuffler_test.cc',
+  'src/utils/stream_shuffler_test.cc',
   include_directories : inc,
   dependencies : [
     gtest_dep,
@@ -108,7 +108,7 @@ test('stream_shuffler', stream_shuffler_test)
 
 discovery_main = executable(
   'discovery_main',
-  'src/chunk_feed/discovery_main.cc',
+  'src/loader/chunk_feed/discovery_main.cc',
   include_directories : inc,
   dependencies : [
     absl_log_dep,

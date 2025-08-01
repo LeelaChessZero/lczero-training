@@ -106,3 +106,11 @@ venv.bak/
 
 # protobuf stuff
 tf/proto/
+
+# Meson
+builddir/
+subprojects/
+
+# Claude
+.claude/
+CLAUDE.local.md
