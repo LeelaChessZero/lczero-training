@@ -1,3 +1,6 @@
+#include <absl/flags/flag.h>
+#include <absl/flags/parse.h>
+#include <absl/log/globals.h>
 #include <absl/log/initialize.h>
 #include <absl/log/log.h>
 
@@ -6,42 +9,44 @@
 
 #include "discovery.h"
 
-using namespace lczero::ice_skate;
+ABSL_FLAG(std::string, directory, "", "Directory to monitor for files");
 
 int main(int argc, char* argv[]) {
+  absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
 
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <directory>" << std::endl;
+  std::string directory = absl::GetFlag(FLAGS_directory);
+  if (directory.empty()) {
+    std::cerr << "Usage: " << argv[0] << " --directory=<directory>"
+              << std::endl;
     return 1;
   }
 
-  std::string directory = argv[1];
-
-  FileDiscovery discovery;
+  lczero::ice_skate::FileDiscovery discovery;
 
   auto token = discovery.RegisterObserver(
-      [](std::span<const FileDiscovery::File> files) {
+      [](std::span<const lczero::ice_skate::FileDiscovery::File> files) {
         for (const auto& file : files) {
-          std::cout << "File Discovered: " << file.filepath << std::endl;
+          LOG(INFO) << "File Discovered: " << file.filepath;
         }
       });
 
-  std::cout << "Starting to monitor directory: " << directory << std::endl;
-  std::cout << "Scanning for existing files..." << std::endl;
+  LOG(INFO) << "Starting to monitor directory: " << directory;
+  LOG(INFO) << "Scanning for existing files...";
 
   discovery.AddDirectory(
-      directory, [](std::span<const FileDiscovery::File> files) {
+      directory,
+      [](std::span<const lczero::ice_skate::FileDiscovery::File> files) {
         for (const auto& file : files) {
-          std::cout << "File Initial: " << file.filepath << std::endl;
+          LOG(INFO) << "File Initial: " << file.filepath;
         }
       });
 
-  std::cout << "Scan completed." << std::endl;
-  std::cout << "Initial files will be reported via observer callback above."
-            << std::endl;
+  LOG(INFO) << "Scan completed.";
+  LOG(INFO) << "Initial files will be reported via observer callback above.";
 
-  std::cout << "Monitoring for new files... Press Enter to exit." << std::endl;
+  LOG(INFO) << "Monitoring for new files... Press Enter to exit.";
 
   std::cin.get();
 

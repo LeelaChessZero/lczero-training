@@ -36,6 +36,12 @@ absl_synchronization_dep = dependency(
 absl_random_dep = dependency(
   'absl_random_random',
 ).as_system()
+absl_flags_dep = dependency(
+  'absl_flags',
+).as_system()
+absl_flags_parse_dep = dependency(
+  'absl_flags_parse',
+).as_system()
 gtest_dep = dependency(
   'gtest',
 ).as_system()
@@ -107,6 +113,8 @@ discovery_main = executable(
   dependencies : [
     absl_log_dep,
     absl_log_initialize_dep,
+    absl_flags_dep,
+    absl_flags_parse_dep,
   ],
   link_with : loader_lib,
 )
