@@ -49,7 +49,7 @@ gtest_main_dep = dependency(
   'gtest_main',
 ).as_system()
 
-inc = include_directories('src', 'libs/lc0/src')
+includes = include_directories('src', 'libs/lc0/src')
 
 files = [
   'src/loader/chunk_feed/discovery.cc',
@@ -64,7 +64,7 @@ files = [
 loader_lib = static_library(
   'loader',
   files,
-  include_directories : inc,
+  include_directories : includes,
   dependencies : [
     libarchive_dep,
     zlib_dep,
@@ -80,6 +80,7 @@ loader_lib = static_library(
 exe = executable(
   'loader',
   'src/loader/loader_main.cpp',
+  include_directories : includes,
   dependencies : [
     libarchive_dep,
     zlib_dep,
@@ -97,7 +98,7 @@ exe = executable(
 stream_shuffler_test = executable(
   'stream_shuffler_test',
   'src/utils/stream_shuffler_test.cc',
-  include_directories : inc,
+  include_directories : includes,
   dependencies : [
     gtest_dep,
     gtest_main_dep,
@@ -111,7 +112,7 @@ test('stream_shuffler', stream_shuffler_test)
 discovery_main = executable(
   'discovery_main',
   'src/loader/chunk_feed/discovery_main.cc',
-  include_directories : inc,
+  include_directories : includes,
   dependencies : [
     absl_log_dep,
     absl_log_initialize_dep,

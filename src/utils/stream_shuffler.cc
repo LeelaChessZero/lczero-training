@@ -3,31 +3,36 @@
 namespace lczero {
 namespace training {
 
-void StreamShuffler::SetHeadBound(size_t head_bound) {
-  assert(head_bound >= head_bound_);
-  stream_size_ += head_bound - head_bound_;
-  while (head_bound_ < head_bound) {
+void StreamShuffler::SetUpperBound(size_t upper_bound) {
+  assert(upper_bound >= upper_bound_);
+  stream_size_ += upper_bound - upper_bound_;
+  while (upper_bound_ < upper_bound) {
     if (buckets_.empty() || buckets_.back().GetRemainingCapacity() == 0) {
-      buckets_.emplace_back(head_bound_, bucket_size_);
+      buckets_.emplace_back(upper_bound_, bucket_size_);
     }
-    head_bound_ = std::min(
-        head_bound, head_bound_ + buckets_.back().GetRemainingCapacity());
-    buckets_.back().Extend(head_bound_);
+    upper_bound_ = std::min(
+        upper_bound, upper_bound_ + buckets_.back().GetRemainingCapacity());
+    buckets_.back().Extend(upper_bound_);
   }
 }
 
-void StreamShuffler::SetTailBound(size_t tail_bound) {
-  assert(tail_bound >= tail_bound_);
-  tail_bound_ = tail_bound;
-  if (tail_bound >= head_bound_) {
-    head_bound_ = tail_bound;
+void StreamShuffler::SetLowerBound(size_t lower_bound) {
+  assert(lower_bound >= lower_bound_);
+  lower_bound_ = lower_bound;
+  if (lower_bound >= upper_bound_) {
+    upper_bound_ = lower_bound;
     stream_size_ = 0;
     buckets_.clear();
     return;
   }
-  while (!buckets_.empty() && buckets_.front().upper_bound() <= tail_bound_) {
+  while (!buckets_.empty() && buckets_.front().upper_bound() <= lower_bound_) {
     stream_size_ -= buckets_.front().size();
     buckets_.pop_front();
+  }
+  if (!buckets_.empty()) {
+    auto old_size = buckets_.front().size();
+    buckets_.front().DeclareLowerBound(lower_bound_);
+    stream_size_ -= old_size - buckets_.front().size();
   }
 }
 
@@ -43,7 +48,7 @@ std::optional<size_t> StreamShuffler::GetNextItem() {
   };
 
   while (stream_size_ > 0) {
-    if (auto item = try_fetch(); item >= tail_bound_) return item;
+    if (auto item = try_fetch(); item >= lower_bound_) return item;
   }
 
   return std::nullopt;
@@ -71,6 +76,20 @@ size_t StreamShuffler::Bucket::Fetch(size_t item_idx) {
   size_t item = items_[item_idx];
   std::swap(items_[item_idx], items_[--items_count_]);
   return item;
+}
+
+void DeclareLowerBound(size_t new_lower_bound);
+void StreamShuffler::Bucket::DeclareLowerBound(size_t new_lower_bound) {
+  if (upper_bound_ - new_lower_bound < 2 * items_count_) return;
+
+  // If the bucket has much more items that the allowed range, there are many
+  // items out of the range. It makes sense to sort and remove them.
+  std::sort(items_.begin(), items_.begin() + items_count_,
+            std::greater<size_t>());
+  // Find the first item that is under the new lower bound.
+  auto it = std::upper_bound(items_.begin(), items_.begin() + items_count_,
+                             new_lower_bound, std::greater<size_t>());
+  items_count_ = it - items_.begin();
 }
 
 }  // namespace training

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "chunk_feed/discovery.h"
+#include "chunk_feed/chunk_set.h"
 
 namespace lczero {
 namespace training {
@@ -19,6 +20,7 @@ class DataLoader {
  private:
   DataLoaderConfig config_;
   FileDiscovery file_discovery_;
+  ChunkSet chunk_set_;
 };
 
 }  // namespace training
