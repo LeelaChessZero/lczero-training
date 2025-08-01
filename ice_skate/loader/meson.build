@@ -46,10 +46,11 @@ gtest_main_dep = dependency(
 inc = include_directories('src')
 
 files = [
-  'src/reader/tar.cc',
-  'src/reader/gz.cc',
   'src/chunk_feed/discovery.cc',
+  'src/data_loader.cc',
   'src/misc/stream_shuffler.cc',
+  'src/reader/gz.cc',
+  'src/chunk_feed/tar_chunk_source.cc',
 ]
 
 loader_lib = static_library(
@@ -71,8 +72,17 @@ loader_lib = static_library(
 exe = executable(
   'loader',
   'src/loader_main.cpp',
-  install : true,
-  dependencies : [],
+  dependencies : [
+    libarchive_dep,
+    zlib_dep,
+    absl_log_dep,
+    absl_log_initialize_dep,
+    absl_check_dep,
+    absl_hash_dep,
+    absl_container_dep,
+    absl_synchronization_dep,
+    absl_random_dep,
+  ],
   link_with : loader_lib,
 )
 

@@ -1,4 +1,4 @@
-#include "reader/tar.h"
+#include "chunk_feed/tar_chunk_source.h"
 
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
@@ -12,21 +12,20 @@
 namespace lczero {
 namespace ice_skate {
 
-TarFile::TarFile(const std::string_view filename)
+TarChunkSource::TarChunkSource(const std::string_view filename)
     : archive_(archive_read_new()), filename_(filename) {
   if (!archive_) throw std::runtime_error("Failed to create archive reader");
-  ScanTarFile(filename);
 }
 
-TarFile::~TarFile() {
+TarChunkSource::~TarChunkSource() {
   if (archive_) archive_read_free(archive_);
 }
 
-void TarFile::ScanTarFile(std::string_view filename) {
+void TarChunkSource::Index() {
   archive_read_support_filter_all(archive_);
   archive_read_support_format_all(archive_);
 
-  int r = archive_read_open_filename(archive_, filename.data(), 10240);
+  int r = archive_read_open_filename(archive_, filename_.data(), 10240);
   if (r != ARCHIVE_OK) {
     archive_read_free(archive_);
     throw std::runtime_error("Failed to open tar file: " +
@@ -58,12 +57,12 @@ void TarFile::ScanTarFile(std::string_view filename) {
     archive_read_data_skip(archive_);
   }
 
-  LOG(INFO) << "Read " << files_.size() << " entries from " << filename;
+  LOG(INFO) << "Read " << files_.size() << " entries from " << filename_;
 }
 
-size_t TarFile::GetFileCount() const { return files_.size(); }
+size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 
-std::string TarFile::GetFileContentsByIndex(size_t index) {
+std::string TarChunkSource::GetChunkData(size_t index) {
   if (index >= files_.size())
     throw std::out_of_range("File index out of range");
   const auto& file_entry = files_[index];

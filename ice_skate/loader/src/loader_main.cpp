@@ -1,20 +1,25 @@
+#include <absl/log/initialize.h>
+#include <absl/log/globals.h>
+
 #include <iostream>
 
-#include "reader/tar.h"
+#include "data_loader.h"
 
 namespace lczero {
 namespace ice_skate {
 
 void Run() {
-  TarFile tar(
-      "/home/crem/tmp/2025-07/lczero-training/data/"
-      "training-run1-test80-20250722-0617.tar");
+  DataLoaderConfig config{.training_data_path =
+                              "/home/crem/tmp/2025-07/lczero-training/"};
+  DataLoader loader(config);
 }
 
 }  // namespace ice_skate
 }  // namespace lczero
 
-int main() {
+int main(int, char*[]) {
+  absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
   lczero::ice_skate::Run();
   return 0;
 }

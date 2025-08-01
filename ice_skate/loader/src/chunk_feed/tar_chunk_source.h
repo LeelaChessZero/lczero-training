@@ -7,16 +7,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include "chunk_feed/chunk_source.h"
+
 namespace lczero {
 namespace ice_skate {
 
-class TarFile {
+class TarChunkSource : public ChunkSource {
  public:
-  TarFile(const std::string_view filename);
-  ~TarFile();
-
-  size_t GetFileCount() const;
-  std::string GetFileContentsByIndex(size_t index);
+  TarChunkSource(const std::string_view filename);
+  ~TarChunkSource();
 
  private:
   struct FileEntry {
@@ -25,7 +24,9 @@ class TarFile {
     bool is_gzip;
   };
 
-  void ScanTarFile(std::string_view filename);
+  void Index() override;
+  size_t GetChunkCount() const override;
+  std::string GetChunkData(size_t index) override;
 
   archive* archive_ = nullptr;
   std::vector<FileEntry> files_;

@@ -1,13 +1,24 @@
 #pragma once
+
 #include <cstddef>
+#include <string>
+
+#include "chunk_feed/discovery.h"
 
 namespace lczero {
 namespace ice_skate {
 
+struct DataLoaderConfig {
+  std::string training_data_path;
+};
+
 class DataLoader {
  public:
-  void SetTargetNumChunks(size_t target_num_chunks);
-  void SetShuffleBufferSizeFrames(size_t size);
+  DataLoader(const DataLoaderConfig& config);
+
+ private:
+  DataLoaderConfig config_;
+  FileDiscovery file_discovery_;
 };
 
 }  // namespace ice_skate
