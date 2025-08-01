@@ -3,15 +3,15 @@
 #include <string>
 #include <string_view>
 
-#include "chunk_feed/chunk_source.h"
+#include "loader/chunk_feed/chunk_source.h"
 
 namespace lczero {
 namespace training {
 
-class GzChunkSource : public ChunkSource {
+class RawFileChunkSource : public ChunkSource {
  public:
-  GzChunkSource(const std::string_view filename);
-  ~GzChunkSource();
+  RawFileChunkSource(const std::string_view filename);
+  ~RawFileChunkSource();
 
  private:
   std::string GetChunkSortKey() const override;

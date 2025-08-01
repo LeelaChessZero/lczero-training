@@ -49,14 +49,16 @@ gtest_main_dep = dependency(
   'gtest_main',
 ).as_system()
 
-inc = include_directories('src')
+inc = include_directories('src', 'libs/lc0/src')
 
 files = [
   'src/loader/chunk_feed/discovery.cc',
-  'src/loader/data_loader.cc',
-  'src/utils/stream_shuffler.cc',
-  'src/utils/gz.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
+  'src/loader/chunk_feed/rawfile_chunk_source.cc',
+  'src/loader/data_loader.cc',
+  'src/utils/gz.cc',
+  'src/utils/stream_shuffler.cc',
+  'libs/lc0/src/utils/files.cc',
 ]
 
 loader_lib = static_library(
