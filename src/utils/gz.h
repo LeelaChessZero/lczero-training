@@ -4,9 +4,9 @@
 #include <string>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 std::string GunzipBuffer(std::span<const char> buffer);
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

@@ -23,10 +23,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  lczero::ice_skate::FileDiscovery discovery;
+  lczero::training::FileDiscovery discovery;
 
   auto token = discovery.RegisterObserver(
-      [](std::span<const lczero::ice_skate::FileDiscovery::File> files) {
+      [](std::span<const lczero::training::FileDiscovery::File> files) {
         for (const auto& file : files) {
           LOG(INFO) << "File Discovered: " << file.filepath;
         }
@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
 
   discovery.AddDirectory(
       directory,
-      [](std::span<const lczero::ice_skate::FileDiscovery::File> files) {
+      [](std::span<const lczero::training::FileDiscovery::File> files) {
         for (const auto& file : files) {
           LOG(INFO) << "File Initial: " << file.filepath;
         }

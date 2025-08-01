@@ -10,7 +10,7 @@
 #include "utils/gz.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 TarChunkSource::TarChunkSource(const std::string_view filename)
     : archive_(archive_read_new()), filename_(filename) {
@@ -93,5 +93,5 @@ std::string TarChunkSource::GetChunkData(size_t index) {
   return content;
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

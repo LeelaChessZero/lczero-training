@@ -6,7 +6,7 @@
 #include "chunk_feed/chunk_source.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 class GzChunkSource : public ChunkSource {
  public:
@@ -22,5 +22,5 @@ class GzChunkSource : public ChunkSource {
   std::string filename_;
 };
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

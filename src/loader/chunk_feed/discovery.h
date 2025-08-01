@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 // This class watches for new files in a directory (recursively) and notifies
 // registered observers when new files are either closed after writing or
@@ -59,5 +59,5 @@ class FileDiscovery {
   absl::Notification stop_condition_;
 };
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

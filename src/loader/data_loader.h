@@ -6,7 +6,7 @@
 #include "chunk_feed/discovery.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 struct DataLoaderConfig {
   std::string training_data_path;
@@ -21,5 +21,5 @@ class DataLoader {
   FileDiscovery file_discovery_;
 };
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

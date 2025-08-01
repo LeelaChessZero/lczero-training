@@ -4,9 +4,9 @@
 #include <string_view>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 std::string ReadFile(std::string_view path);
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

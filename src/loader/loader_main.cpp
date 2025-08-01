@@ -6,7 +6,7 @@
 #include "data_loader.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 void Run() {
   DataLoaderConfig config{.training_data_path =
@@ -14,12 +14,12 @@ void Run() {
   DataLoader loader(config);
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero
 
 int main(int, char*[]) {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
-  lczero::ice_skate::Run();
+  lczero::training::Run();
   return 0;
 }

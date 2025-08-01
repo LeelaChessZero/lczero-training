@@ -3,7 +3,7 @@
 #include <absl/log/log.h>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 DataLoader::DataLoader(const DataLoaderConfig& config) : config_(config) {
   // Initialize file discovery with the training data path
@@ -17,5 +17,5 @@ DataLoader::DataLoader(const DataLoaderConfig& config) : config_(config) {
                                });
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

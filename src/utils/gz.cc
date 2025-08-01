@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 std::string GunzipBuffer(std::span<const char> buffer) {
   z_stream strm = {};
@@ -47,5 +47,5 @@ std::string GunzipBuffer(std::span<const char> buffer) {
   return output;
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

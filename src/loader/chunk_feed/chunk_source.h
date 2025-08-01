@@ -1,7 +1,7 @@
 #pragma once
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 class ChunkSource {
  public:
@@ -12,5 +12,5 @@ class ChunkSource {
   virtual std::string GetChunkData(size_t index) = 0;
 };
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

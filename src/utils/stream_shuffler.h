@@ -9,7 +9,7 @@
 #include <optional>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 // Returns a number between [tail_bound, head_bound) in shuffled order.
 // Both bounds can be changed at any time, and the stream will adapt
@@ -46,5 +46,5 @@ class StreamShuffler {
   size_t bucket_size_ = 524288;
 };
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

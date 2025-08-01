@@ -9,7 +9,7 @@
 #include "utils/readfile.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 GzChunkSource::GzChunkSource(const std::string_view filename)
     : filename_(filename) {}
@@ -30,5 +30,5 @@ std::string GzChunkSource::GetChunkData(size_t index) {
   return GunzipBuffer(compressed_content);
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

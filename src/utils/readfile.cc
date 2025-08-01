@@ -10,7 +10,7 @@
 #include "absl/strings/str_join.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 std::string ReadFile(std::string_view path) {
   int fd = open(path.data(), O_RDONLY);
@@ -43,5 +43,5 @@ std::string ReadFile(std::string_view path) {
   return absl::StrJoin(chunks, "");
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

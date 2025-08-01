@@ -1,7 +1,7 @@
 #include "utils/stream_shuffler.h"
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 void StreamShuffler::SetHeadBound(size_t head_bound) {
   assert(head_bound >= head_bound_);
@@ -73,5 +73,5 @@ size_t StreamShuffler::Bucket::Fetch(size_t item_idx) {
   return item;
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

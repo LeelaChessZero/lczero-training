@@ -14,7 +14,7 @@
 #include <stdexcept>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 FileDiscovery::FileDiscovery() {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
@@ -200,5 +200,5 @@ void FileDiscovery::NotifyObservers(std::span<const File> files) {
   });
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero

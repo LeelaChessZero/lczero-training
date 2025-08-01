@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace lczero {
-namespace ice_skate {
+namespace training {
 
 class StreamShufflerTest : public ::testing::Test {
  protected:
@@ -244,5 +244,5 @@ TEST_F(StreamShufflerTest, TailCatchesUpToHead) {
   EXPECT_EQ(shuffler_.GetNextItem(), std::nullopt);
 }
 
-}  // namespace ice_skate
+}  // namespace training
 }  // namespace lczero
