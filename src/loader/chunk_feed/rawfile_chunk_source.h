@@ -8,6 +8,8 @@
 namespace lczero {
 namespace training {
 
+// A chunk source that reads a single (potentially gzipped) file as a single
+// chunk.
 class RawFileChunkSource : public ChunkSource {
  public:
   RawFileChunkSource(const std::string_view filename);

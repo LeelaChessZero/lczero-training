@@ -12,6 +12,8 @@
 namespace lczero {
 namespace training {
 
+// A chunk source that reads a tar archive and provides access to its files as
+// chunks. Each file in the tar is treated as a separate chunk.
 class TarChunkSource : public ChunkSource {
  public:
   TarChunkSource(const std::string_view filename);

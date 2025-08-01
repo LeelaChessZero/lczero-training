@@ -26,11 +26,11 @@ class FileDiscovery {
   struct File {
     Path filepath;
   };
-  using Token = size_t;
+  using ObeserverToken = size_t;
   using Observer = std::function<void(std::span<const File>)>;
 
-  Token RegisterObserver(Observer observer);
-  void UnregisterObserver(Token token);
+  ObeserverToken RegisterObserver(Observer observer);
+  void UnregisterObserver(ObeserverToken token);
 
   FileDiscovery();
   ~FileDiscovery();
@@ -50,10 +50,10 @@ class FileDiscovery {
   void NotifyObservers(std::span<const File> files);
 
   int inotify_fd_;
-  Token next_token_ = 1;
+  ObeserverToken next_token_ = 1;
   // Watch descriptor to directory path.
   absl::flat_hash_map<int, Path> watch_descriptors_;
-  absl::flat_hash_map<Token, Observer> observers_;
+  absl::flat_hash_map<ObeserverToken, Observer> observers_;
 
   std::thread monitor_thread_;
   absl::Notification stop_condition_;

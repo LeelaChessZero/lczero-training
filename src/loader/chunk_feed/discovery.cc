@@ -32,13 +32,13 @@ FileDiscovery::~FileDiscovery() {
   if (inotify_fd_ != -1) close(inotify_fd_);
 }
 
-FileDiscovery::Token FileDiscovery::RegisterObserver(Observer observer) {
-  Token token = next_token_++;
+FileDiscovery::ObeserverToken FileDiscovery::RegisterObserver(Observer observer) {
+  ObeserverToken token = next_token_++;
   observers_[token] = std::move(observer);
   return token;
 }
 
-void FileDiscovery::UnregisterObserver(Token token) { observers_.erase(token); }
+void FileDiscovery::UnregisterObserver(ObeserverToken token) { observers_.erase(token); }
 
 void FileDiscovery::AddDirectory(const Path& directory,
                                  Observer initial_observer) {

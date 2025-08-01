@@ -9,7 +9,7 @@
 namespace lczero {
 namespace training {
 
-std::string GunzipBuffer(std::span<const char> buffer) {
+std::string GunzipBuffer(std::string_view buffer) {
   z_stream strm = {};
   int ret = inflateInit2(&strm, 16 + MAX_WBITS);
   if (ret != Z_OK) {
