@@ -7,6 +7,7 @@
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/discovery.h"
 #include "utils/queue.h"
+#include "utils/stream_shuffler.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {
@@ -20,12 +21,15 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
 struct ChunkSetOptions {
   size_t chunks_window;    // Number of chunks to keep in memory.
   size_t num_threads = 4;  // Number of threads to use for feeding chunks.
+  size_t output_queue_size = 16;  // Size of the output queue.
 };
 
 class ChunkSet {
  public:
   ChunkSet(Queue<FileDiscovery::File>* input_queue,
            const ChunkSetOptions& options);
+
+  Queue<std::string>* output();
 
  private:
   struct ChunkSourceItem {
@@ -38,7 +42,9 @@ class ChunkSet {
   size_t chunks_window_;
   ThreadPool thread_pool_;
   Queue<FileDiscovery::File>* input_queue_;
-  std::vector<ChunkSourceItem> chunk_sources_;
+  Queue<std::string> output_queue_;
+  std::deque<ChunkSourceItem> chunk_sources_;
+  StreamShuffler stream_shuffler_;
 };
 
 }  // namespace training

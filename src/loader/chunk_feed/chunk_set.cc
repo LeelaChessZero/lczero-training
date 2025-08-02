@@ -28,9 +28,12 @@ ChunkSet::ChunkSet(Queue<FileDiscovery::File>* input_queue,
                    const ChunkSetOptions& options)
     : chunks_window_(options.chunks_window),
       thread_pool_(options.num_threads, ThreadPoolOptions{}),
-      input_queue_(input_queue) {
+      input_queue_(input_queue),
+      output_queue_(options.output_queue_size) {
   InitializeChunkSources();
 }
+
+Queue<std::string>* ChunkSet::output() { return &output_queue_; }
 
 void ChunkSet::InitializeChunkSources() {
   ThreadPool file_reader_pool(4);
