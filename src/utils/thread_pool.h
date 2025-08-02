@@ -17,8 +17,8 @@ struct ThreadPoolOptions {
 
 class ThreadPool {
  public:
-  ThreadPool(const ThreadPoolOptions& options = ThreadPoolOptions(),
-             size_t initial_threads = 0);
+  ThreadPool(size_t initial_threads = 0,
+             const ThreadPoolOptions& options = ThreadPoolOptions());
 
   // Blocks until all tasks are completed.
   ~ThreadPool();
@@ -34,6 +34,10 @@ class ThreadPool {
   // Waits for at least one thread to become available, i.e. no tasks are
   // pending, and number of running tasks is less than the number of threads.
   void WaitForAvailableThread();
+
+  // Waits until the number of queued but not yet started tasks is below
+  // the specified threshold.
+  void WaitForPendingTasksBelow(size_t threshold);
 
   // Number of tasks that are not yet started.
   size_t num_pending_tasks() const;
@@ -56,6 +60,10 @@ class ThreadPool {
   bool ThreadAvailableCond() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     return pending_tasks_.empty() && running_tasks_ < threads_.size();
   }
+  bool TaskCountBelowThreshold(size_t threshold) const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    return pending_tasks_.size() < threshold;
+  }
 
   ThreadPool(const ThreadPool&) = delete;
   ThreadPool& operator=(const ThreadPool&) = delete;
@@ -71,8 +79,8 @@ class ThreadPool {
   size_t running_tasks_ ABSL_GUARDED_BY(mutex_) = 0;
 };
 
-inline ThreadPool::ThreadPool(const ThreadPoolOptions& options,
-                              size_t initial_threads)
+inline ThreadPool::ThreadPool(size_t initial_threads,
+                              const ThreadPoolOptions& options)
     : options_(options) {
   for (size_t i = 0; i < initial_threads; ++i) {
     threads_.emplace_back(&ThreadPool::WorkerLoop, this);
@@ -137,6 +145,12 @@ inline void ThreadPool::WaitAll() {
 inline void ThreadPool::WaitForAvailableThread() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &ThreadPool::ThreadAvailableCond));
+}
+
+inline void ThreadPool::WaitForPendingTasksBelow(size_t threshold) {
+  absl::MutexLock lock(&mutex_);
+  mutex_.Await(
+      absl::Condition(this, &ThreadPool::TaskCountBelowThreshold, threshold));
 }
 
 inline void ThreadPool::StartWorkerThread()

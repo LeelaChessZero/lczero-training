@@ -1,5 +1,5 @@
-#include <absl/log/initialize.h>
 #include <absl/log/globals.h>
+#include <absl/log/initialize.h>
 
 #include <iostream>
 
@@ -9,8 +9,9 @@ namespace lczero {
 namespace training {
 
 void Run() {
-  DataLoaderConfig config{.training_data_path =
-                              "/home/crem/tmp/2025-07/lczero-training/"};
+  DataLoaderConfig config{
+      .training_data_path = "/home/crem/tmp/2025-07/lczero-training/",
+      .num_chunks_window = 1000};
   DataLoader loader(config);
 }
 

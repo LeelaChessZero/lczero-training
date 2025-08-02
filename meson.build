@@ -10,8 +10,13 @@ project(
   ],
 )
 
-add_project_arguments('-Wno-nullability-extension', language : 'cpp')
+# Allow Clang nullability extensions when using Clang compiler
+cpp_compiler = meson.get_compiler('cpp')
+if cpp_compiler.get_id() == 'clang'
+  add_project_arguments('-Wno-nullability-extension', language : 'cpp')
+endif
 add_project_arguments('-Werror', language : 'cpp')
+
 
 libarchive_dep = dependency('libarchive')
 zlib_dep = dependency('zlib')
@@ -52,9 +57,10 @@ gtest_main_dep = dependency(
 includes = include_directories('src', 'libs/lc0/src')
 
 files = [
+  'src/loader/chunk_feed/chunk_set.cc',
   'src/loader/chunk_feed/discovery.cc',
-  'src/loader/chunk_feed/tar_chunk_source.cc',
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
+  'src/loader/chunk_feed/tar_chunk_source.cc',
   'src/loader/data_loader.cc',
   'src/utils/gz.cc',
   'src/utils/stream_shuffler.cc',

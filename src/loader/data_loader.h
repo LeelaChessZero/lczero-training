@@ -11,6 +11,7 @@ namespace training {
 
 struct DataLoaderConfig {
   std::string training_data_path;
+  size_t num_chunks_window;
 };
 
 class DataLoader {
