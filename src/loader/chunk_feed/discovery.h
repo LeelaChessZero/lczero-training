@@ -17,6 +17,12 @@
 namespace lczero {
 namespace training {
 
+// Configuration options for FileDiscovery
+struct FileDiscoveryOptions {
+  size_t queue_capacity = 16;
+  std::filesystem::path directory;
+};
+
 // This class watches for new files in a directory (recursively) and notifies
 // registered observers when new files are either closed after writing or
 // renamed into.
@@ -35,7 +41,7 @@ class FileDiscovery {
     Path filepath;
     Phase phase;
   };
-  explicit FileDiscovery(size_t queue_capacity = 1000);
+  explicit FileDiscovery(const FileDiscoveryOptions& options);
   ~FileDiscovery();
 
   // Returns the output queue for this stage
@@ -44,10 +50,10 @@ class FileDiscovery {
   // Closes the output queue, signaling completion
   void Close();
 
+ private:
   // Starts monitoring the directory.
   void AddDirectory(const Path& directory);
 
- private:
   void MonitorThread();
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);

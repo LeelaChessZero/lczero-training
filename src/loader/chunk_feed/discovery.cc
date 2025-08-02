@@ -16,12 +16,13 @@
 namespace lczero {
 namespace training {
 
-FileDiscovery::FileDiscovery(size_t queue_capacity)
-    : output_queue_(queue_capacity) {
+FileDiscovery::FileDiscovery(const FileDiscoveryOptions& options)
+    : output_queue_(options.queue_capacity) {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
   monitor_thread_ = std::thread(&FileDiscovery::MonitorThread, this);
+  AddDirectory(options.directory);
 }
 
 FileDiscovery::~FileDiscovery() {
@@ -34,6 +35,8 @@ FileDiscovery::~FileDiscovery() {
 }
 
 Queue<FileDiscovery::File>* FileDiscovery::output() { return &output_queue_; }
+
+void FileDiscovery::Close() { output_queue_.Close(); }
 
 void FileDiscovery::AddDirectory(const Path& directory) {
   PerformInitialScan(directory);

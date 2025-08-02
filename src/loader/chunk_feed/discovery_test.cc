@@ -53,11 +53,20 @@ class FileDiscoveryTest : public ::testing::Test {
 };
 
 TEST_F(FileDiscoveryTest, ConstructorCreatesQueue) {
-  FileDiscovery discovery(100);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
   auto* queue = discovery.output();
   EXPECT_NE(queue, nullptr);
-  EXPECT_EQ(queue->Size(), 0);
   EXPECT_EQ(queue->Capacity(), 100);
+
+  // Wait for initial scan to complete
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // Should have kInitialScanComplete message for empty directory
+  EXPECT_EQ(queue->Size(), 1);
+  auto file = queue->Get();
+  EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
+  EXPECT_TRUE(file.filepath.empty());
 }
 
 TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
@@ -66,8 +75,8 @@ TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
   CreateFile(test_dir_ / "file2.txt");
   CreateFile(test_dir_ / "subdir" / "file3.txt");
 
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Collect files from queue
   std::unordered_set<std::string> found_files;
@@ -102,8 +111,8 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
   CreateDirectory(test_dir_ / "subdir");
   CreateDirectory(test_dir_ / "empty_dir");
 
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial scan
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -124,8 +133,8 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
 }
 
 TEST_F(FileDiscoveryTest, DetectsNewFiles) {
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial scan to complete
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -150,8 +159,8 @@ TEST_F(FileDiscoveryTest, DetectsNewFiles) {
 }
 
 TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial scan
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -183,8 +192,8 @@ TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
 
 TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
   // Test with empty directory
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial scan
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -203,8 +212,8 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
     CreateFile(test_dir_ / ("batch_file_" + std::to_string(i) + ".txt"));
   }
 
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial scan
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -229,8 +238,8 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
 }
 
 TEST_F(FileDiscoveryTest, QueueClosurePreventsNewFiles) {
-  FileDiscovery discovery(100);
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Wait for initial setup
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -253,8 +262,8 @@ TEST_F(FileDiscoveryTest, QueueClosurePreventsNewFiles) {
 
 TEST_F(FileDiscoveryTest, DestructorCleansUpProperly) {
   auto test_cleanup = [&]() {
-    FileDiscovery discovery(100);
-    discovery.AddDirectory(test_dir_);
+    FileDiscovery discovery(
+        FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
     CreateFile(test_dir_ / "cleanup_test.txt");
 
@@ -270,8 +279,9 @@ TEST_F(FileDiscoveryTest, DestructorCleansUpProperly) {
 
 // Stress test with rapid file creation
 TEST_F(FileDiscoveryTest, RapidFileCreation) {
-  FileDiscovery discovery(1000);  // Larger queue for stress test
-  discovery.AddDirectory(test_dir_);
+  FileDiscovery discovery(FileDiscoveryOptions{
+      .queue_capacity = 1000,
+      .directory = test_dir_});  // Larger queue for stress test
 
   // Wait for initial scan
   std::this_thread::sleep_for(std::chrono::milliseconds(100));

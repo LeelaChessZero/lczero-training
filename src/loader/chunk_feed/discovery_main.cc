@@ -24,10 +24,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  lczero::training::FileDiscovery discovery;
-
   LOG(INFO) << "Starting to monitor directory: " << directory;
-  discovery.AddDirectory(directory);
+  lczero::training::FileDiscovery discovery(
+      lczero::training::FileDiscoveryOptions{.queue_capacity = 16,
+                                             .directory = directory});
 
   // Consumer thread to read from the queue
   std::thread consumer_thread([&discovery]() {
