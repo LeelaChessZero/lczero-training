@@ -12,6 +12,8 @@
 namespace lczero {
 namespace training {
 
+// Creates a ChunkSource based on file extension. Returns RawFileChunkSource for
+// .gz files, TarChunkSource for .tar files, or nullptr for unsupported types.
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
     const std::filesystem::path& filepath);
 
