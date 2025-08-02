@@ -91,7 +91,15 @@ stream_shuffler_test = executable(
   link_with : loader_lib,
 )
 
+queue_test = executable(
+  'queue_test',
+  'src/utils/queue_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization']],
+)
+
 test('stream_shuffler', stream_shuffler_test)
+test('queue', queue_test)
 
 discovery_main = executable(
   'discovery_main',

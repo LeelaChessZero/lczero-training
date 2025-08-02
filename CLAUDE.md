@@ -9,7 +9,15 @@ They are being rewritten.
 The old code is Python/TensorFlow-based, new code is Python/JAX-based with
 modules written in C++, operating through pybind11.
 
-The build system for C++ code is meson.
+The build system for C++ code is meson. During development, the project is built
+in the `builddir/`.
+
+## Testing and Building
+
+* C++ tests use GTest framework
+* Tests are defined in `meson.build` with `test()` function 
+* Run tests: `meson test -C builddir/`
+* Build: `meson compile -C builddir/` from build directory
 
 ## Documentation
 
