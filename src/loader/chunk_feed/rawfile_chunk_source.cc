@@ -5,8 +5,8 @@
 #include <fstream>
 #include <stdexcept>
 
-#include "utils/gz.h"
 #include "utils/files.h"
+#include "utils/gz.h"
 
 namespace lczero {
 namespace training {

@@ -6,15 +6,41 @@ Zero training process.
 
 ## High-Level Overview
 
-The Data Loader consists of the following parts:
+The Data Loader consists of the following stages connected through a
+[Queue](../src/utils/queue.h):
 
-* [Chunk Feed](../src/loader/chunk_feed) — Provides a stream of chunks.
-  * [Discovery](../src/loader/chunk_feed/discovery.h) — Watches a directory for
-    new chunk files. Also performs initial chunk discovery.
-  * [Chunk Set](../src/loader/chunk_feed/chunk_set.h) — Manages a set of chunks,
-    keeping last `num_chunks` available and removing old ones. Typical values
-    for `num_chunks` is around 30'000'000.
-  * TODO Describe further.
-* [Frame Shuffler](../src/loader/frame_shuffler) — Takes a stream of chunks and
-  provides shuffled batches of frames for training.
-  * TODO Describe further.
+* [Discovery](../src/loader/chunk_feed/discovery.h) — Training data discovery
+  worker (watches a directory and provides feed of filenames)
+* [Chunk Set](../src/loader/chunk_feed/chunk_set.h) — Keeps a set of chunks,
+  managing the last `num_chunks` available and removing old ones, and outputting
+  them in shuffled order.
+* [Chunk Filter](../src/loader/chunk_feed/chunk_filter.h) — Filters the chunk
+  stream, filtering out invalid chunks.
+* [Chunk Rescorer](../src/loader/chunk_feed/chunk_rescorer.h) — Rescores chunks
+  based on tablebase or intentional blunders.
+* [Frame Shuffler](../src/loader/frame_shuffler.h) — Takes a stream of chunks
+  and provides shuffled batches of frames for training, using reservoir
+  sampling.
+* [Tensor Generator](../src/loader/tensor_generator.h) — Takes frames and
+  provides tensor buffers for the training process.
+
+## Stage interface
+
+All stages implement the similar API and structure, although not sharing any
+base class.
+
+```cpp
+class Stage {
+ public:
+    using InputType = ...;  // Type of input data for this stage
+    using OutputType = ...; // Type of output data from this stage
+    // input_queue is omitted in the producer stages like Discovery.
+    Stage(Queue<InputType>* input_queue, /* other params */);
+    Queue<OutputType>* output() const;
+
+private:
+    ThreadPool thread_pool_;
+    Queue<InputType>* input_queue_;
+    Queue<OutputType> output_queue_;
+};
+```

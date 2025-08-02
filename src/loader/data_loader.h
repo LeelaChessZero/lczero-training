@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <string>
 
-#include "chunk_feed/discovery.h"
 #include "chunk_feed/chunk_set.h"
+#include "chunk_feed/discovery.h"
 
 namespace lczero {
 namespace training {

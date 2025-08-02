@@ -117,10 +117,11 @@ TEST_F(StreamShufflerTest, TailAdvancesByBucketMultiples) {
     EXPECT_LT(item.value(), 12);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  
+
   // Verify all items in range [4, 12) were eventually fetched
   for (size_t i = 4; i < 12; ++i) {
-    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+    EXPECT_TRUE(all_received.count(i) > 0)
+        << "Item " << i << " was never fetched";
   }
 }
 
@@ -144,10 +145,11 @@ TEST_F(StreamShufflerTest, TailAdvancesByNonMultiples) {
     EXPECT_LT(item.value(), 10);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  
+
   // Verify all items in range [3, 10) were eventually fetched
   for (size_t i = 3; i < 10; ++i) {
-    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+    EXPECT_TRUE(all_received.count(i) > 0)
+        << "Item " << i << " was never fetched";
   }
 }
 
@@ -173,10 +175,11 @@ TEST_F(StreamShufflerTest, BothBoundsSlideSimultaneously) {
     EXPECT_LT(item.value(), 15);
     EXPECT_TRUE(all_received.insert(item.value()).second);
   }
-  
+
   // Verify all items in range [5, 15) were eventually fetched
   for (size_t i = 5; i < 15; ++i) {
-    EXPECT_TRUE(all_received.count(i) > 0) << "Item " << i << " was never fetched";
+    EXPECT_TRUE(all_received.count(i) > 0)
+        << "Item " << i << " was never fetched";
   }
 }
 

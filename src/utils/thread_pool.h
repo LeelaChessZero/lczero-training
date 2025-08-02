@@ -148,13 +148,18 @@ inline void ThreadPool::WaitForAvailableThread() {
 }
 
 inline void ThreadPool::WaitForPendingTasksBelow(size_t threshold) {
-  struct Args { ThreadPool* pool; size_t threshold; };
+  struct Args {
+    ThreadPool* pool;
+    size_t threshold;
+  };
   Args args{this, threshold};
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(+[](void* data) -> bool {
-    auto* args = static_cast<Args*>(data);
-    return args->pool->pending_tasks_.size() < args->threshold;
-  }, &args));
+  mutex_.Await(absl::Condition(
+      +[](void* data) -> bool {
+        auto* args = static_cast<Args*>(data);
+        return args->pool->pending_tasks_.size() < args->threshold;
+      },
+      &args));
 }
 
 inline void ThreadPool::StartWorkerThread()
