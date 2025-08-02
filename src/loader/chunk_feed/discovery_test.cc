@@ -77,16 +77,23 @@ TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   // Collect all files found during initial scan
+  bool scan_complete_received = false;
   while (queue->Size() > 0) {
     auto file = queue->Get();
-    EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
-    found_files.insert(file.filepath.filename().string());
+    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+      EXPECT_TRUE(file.filepath.empty());
+      scan_complete_received = true;
+    } else {
+      EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
+      found_files.insert(file.filepath.filename().string());
+    }
   }
 
   EXPECT_EQ(found_files.size(), 3);
   EXPECT_TRUE(found_files.count("file1.txt"));
   EXPECT_TRUE(found_files.count("file2.txt"));
   EXPECT_TRUE(found_files.count("file3.txt"));
+  EXPECT_TRUE(scan_complete_received);
 }
 
 TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
@@ -105,7 +112,10 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
   std::vector<FileDiscovery::File> files;
   auto* queue = discovery.output();
   while (queue->Size() > 0) {
-    files.push_back(queue->Get());
+    auto file = queue->Get();
+    if (file.phase != FileDiscovery::Phase::kInitialScanComplete) {
+      files.push_back(file);
+    }
   }
 
   EXPECT_EQ(files.size(), 1);
@@ -180,7 +190,11 @@ TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   auto* queue = discovery.output();
-  EXPECT_EQ(queue->Size(), 0);
+  EXPECT_EQ(queue->Size(), 1);  // Should have kInitialScanComplete message
+
+  auto file = queue->Get();
+  EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
+  EXPECT_TRUE(file.filepath.empty());
 }
 
 TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
@@ -200,8 +214,12 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
   auto* queue = discovery.output();
   while (queue->Size() > 0) {
     auto file = queue->Get();
-    EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
-    found_files.insert(file.filepath.filename().string());
+    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+      EXPECT_TRUE(file.filepath.empty());
+    } else {
+      EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
+      found_files.insert(file.filepath.filename().string());
+    }
   }
 
   EXPECT_EQ(found_files.size(), 5);
@@ -218,6 +236,15 @@ TEST_F(FileDiscoveryTest, QueueClosurePreventsNewFiles) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   auto* queue = discovery.output();
+
+  // Wait for initial scan to complete first
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // Clear any messages
+  while (queue->Size() > 0) {
+    queue->Get();
+  }
+
   queue->Close();
 
   // Any subsequent queue operations should throw

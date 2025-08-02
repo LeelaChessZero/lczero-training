@@ -12,7 +12,7 @@
 namespace lczero {
 namespace training {
 
-TarChunkSource::TarChunkSource(const std::string_view filename)
+TarChunkSource::TarChunkSource(const std::filesystem::path& filename)
     : archive_(archive_read_new()), filename_(filename) {
   if (!archive_) throw std::runtime_error("Failed to create archive reader");
 }

@@ -1,7 +1,7 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
-#include <string_view>
 
 #include "loader/chunk_feed/chunk_source.h"
 
@@ -12,7 +12,7 @@ namespace training {
 // chunk.
 class RawFileChunkSource : public ChunkSource {
  public:
-  RawFileChunkSource(const std::string_view filename);
+  RawFileChunkSource(const std::filesystem::path& filename);
   ~RawFileChunkSource();
 
  private:

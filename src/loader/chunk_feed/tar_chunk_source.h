@@ -2,8 +2,8 @@
 
 #include <archive.h>
 
+#include <filesystem>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -16,7 +16,7 @@ namespace training {
 // chunks. Each file in the tar is treated as a separate chunk.
 class TarChunkSource : public ChunkSource {
  public:
-  TarChunkSource(const std::string_view filename);
+  TarChunkSource(const std::filesystem::path& filename);
   ~TarChunkSource();
 
  private:

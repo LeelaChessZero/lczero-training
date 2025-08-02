@@ -26,8 +26,9 @@ class FileDiscovery {
   using Path = std::filesystem::path;
 
   enum class Phase {
-    kInitialScan,  // File found during initial directory scan
-    kNewFile       // File discovered via inotify notification
+    kInitialScan,          // File found during initial directory scan
+    kInitialScanComplete,  // Initial scan is complete (empty filename)
+    kNewFile               // File discovered via inotify notification
   };
 
   struct File {

@@ -11,7 +11,7 @@
 namespace lczero {
 namespace training {
 
-RawFileChunkSource::RawFileChunkSource(const std::string_view filename)
+RawFileChunkSource::RawFileChunkSource(const std::filesystem::path& filename)
     : filename_(filename) {}
 
 RawFileChunkSource::~RawFileChunkSource() = default;

@@ -67,6 +67,10 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
   }
 
   flush_batch();  // Flush any remaining files in the batch
+
+  // Signal that initial scan is complete
+  output_queue_.Put(
+      {{.filepath = Path{}, .phase = Phase::kInitialScanComplete}});
 }
 
 void FileDiscovery::AddWatchRecursive(const Path& path) {
