@@ -5,7 +5,7 @@ the file formats utilized.
 
 * Training data **frame** is a data structure that holds information needed for
   the NN training about a single chess position. Currently it's a fixed sized
-  struct, e.g. [V6TrainingData](libs/lc0/src/trainingdata/trainingdata.h).
+  struct, e.g. [V6TrainingData](../libs/lc0/src/trainingdata/trainingdata.h).
 * **Chunk** is a sequence of frames from a single game. Currently, they are
   stored in a gzipped file where frames are concatenated together.
 * **Chunk Source** is a file that contains one or more chunks. In older versions
