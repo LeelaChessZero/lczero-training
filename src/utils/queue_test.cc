@@ -152,10 +152,36 @@ TEST_F(QueueTest, CapacityOne) {
   EXPECT_EQ(queue.Size(), 0);
 }
 
-// Note: Tests for operations on pre-closed queues are omitted because
-// the current queue implementation has a bug where condition predicates
-// return false when closed, causing Await() to block forever instead of
-// allowing the operations to throw QueueClosedException.
+// Tests for operations on pre-closed queues
+
+TEST_F(QueueTest, PutOnClosedQueue) {
+  Queue<int> queue(5);
+  queue.Close();
+  
+  EXPECT_THROW(queue.Put(42), QueueClosedException);
+}
+
+TEST_F(QueueTest, GetOnClosedQueue) {
+  Queue<int> queue(5);
+  queue.Close();
+  
+  EXPECT_THROW(queue.Get(), QueueClosedException);
+}
+
+TEST_F(QueueTest, BatchPutOnClosedQueue) {
+  Queue<int> queue(5);
+  queue.Close();
+  
+  std::vector<int> items = {1, 2, 3};
+  EXPECT_THROW(queue.Put(absl::Span<const int>(items)), QueueClosedException);
+}
+
+TEST_F(QueueTest, BatchGetOnClosedQueue) {
+  Queue<int> queue(5);
+  queue.Close();
+  
+  EXPECT_THROW(queue.Get(3), QueueClosedException);
+}
 
 // Thread safety tests
 
@@ -284,8 +310,106 @@ TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
   EXPECT_EQ(result, 42);
 }
 
-// Test for Close() unblocking waiting threads omitted due to implementation bug
+TEST_F(QueueTest, CloseUnblocksWaitingPut) {
+  Queue<int> queue(1);
+  queue.Put(1);  // Fill the queue
+  
+  std::atomic<bool> put_started{false};
+  std::atomic<bool> exception_thrown{false};
+  
+  std::thread blocker([&queue, &put_started, &exception_thrown]() {
+    put_started = true;
+    try {
+      queue.Put(2);  // This should block
+    } catch (const QueueClosedException&) {
+      exception_thrown = true;
+    }
+  });
+  
+  // Give the blocker thread time to block
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_TRUE(put_started);
+  EXPECT_FALSE(exception_thrown);
+  
+  // Close the queue - this should unblock the waiting Put()
+  queue.Close();
+  
+  blocker.join();
+  EXPECT_TRUE(exception_thrown);
+}
 
-// Test for batch operations blocking correctly omitted due to Close() implementation bug
+TEST_F(QueueTest, CloseUnblocksWaitingGet) {
+  Queue<int> queue(5);  // Empty queue
+  
+  std::atomic<bool> get_started{false};
+  std::atomic<bool> exception_thrown{false};
+  
+  std::thread blocker([&queue, &get_started, &exception_thrown]() {
+    get_started = true;
+    try {
+      queue.Get();  // This should block
+    } catch (const QueueClosedException&) {
+      exception_thrown = true;
+    }
+  });
+  
+  // Give the blocker thread time to block
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_TRUE(get_started);
+  EXPECT_FALSE(exception_thrown);
+  
+  // Close the queue - this should unblock the waiting Get()
+  queue.Close();
+  
+  blocker.join();
+  EXPECT_TRUE(exception_thrown);
+}
+
+TEST_F(QueueTest, CloseUnblocksBatchOperations) {
+  Queue<int> queue(2);
+  queue.Put(1);
+  queue.Put(2);  // Fill the queue
+  
+  std::atomic<bool> batch_put_started{false};
+  std::atomic<bool> batch_put_exception{false};
+  std::atomic<bool> batch_get_started{false};
+  std::atomic<bool> batch_get_exception{false};
+  
+  std::thread batch_put_blocker([&queue, &batch_put_started, &batch_put_exception]() {
+    batch_put_started = true;
+    try {
+      std::vector<int> items = {3, 4, 5};
+      queue.Put(absl::Span<const int>(items));  // Should block
+    } catch (const QueueClosedException&) {
+      batch_put_exception = true;
+    }
+  });
+  
+  Queue<int> empty_queue(5);
+  std::thread batch_get_blocker([&empty_queue, &batch_get_started, &batch_get_exception]() {
+    batch_get_started = true;
+    try {
+      empty_queue.Get(3);  // Should block
+    } catch (const QueueClosedException&) {
+      batch_get_exception = true;
+    }
+  });
+  
+  // Give the blocker threads time to block
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_TRUE(batch_put_started);
+  EXPECT_TRUE(batch_get_started);
+  EXPECT_FALSE(batch_put_exception);
+  EXPECT_FALSE(batch_get_exception);
+  
+  // Close both queues
+  queue.Close();
+  empty_queue.Close();
+  
+  batch_put_blocker.join();
+  batch_get_blocker.join();
+  EXPECT_TRUE(batch_put_exception);
+  EXPECT_TRUE(batch_get_exception);
+}
 
 }  // namespace lczero

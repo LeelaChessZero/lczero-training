@@ -200,24 +200,24 @@ void Queue<T>::Close() {
 
 template <typename T>
 bool Queue<T>::CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return !closed_ && size_ < capacity_;
+  return closed_ || size_ < capacity_;
 }
 
 template <typename T>
 bool Queue<T>::CanPutMultiple(size_t count)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return !closed_ && size_ + count <= capacity_;
+  return closed_ || size_ + count <= capacity_;
 }
 
 template <typename T>
 bool Queue<T>::CanGet() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return !closed_ && size_ > 0;
+  return closed_ || size_ > 0;
 }
 
 template <typename T>
 bool Queue<T>::CanGetMultiple(size_t count)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return !closed_ && size_ >= count;
+  return closed_ || size_ >= count;
 }
 
 }  // namespace lczero
