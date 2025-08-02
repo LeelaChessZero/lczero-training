@@ -98,8 +98,17 @@ queue_test = executable(
   dependencies : test_deps + [absl_deps['synchronization']],
 )
 
+discovery_test = executable(
+  'discovery_test',
+  'src/loader/chunk_feed/discovery_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
+
 test('stream_shuffler', stream_shuffler_test)
 test('queue', queue_test)
+test('discovery', discovery_test)
 
 discovery_main = executable(
   'discovery_main',

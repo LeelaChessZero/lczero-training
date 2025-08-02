@@ -36,7 +36,7 @@ class Stage {
     using OutputType = ...; // Type of output data from this stage
     // input_queue is omitted in the producer stages like Discovery.
     Stage(Queue<InputType>* input_queue, /* other params */);
-    Queue<OutputType>* output() const;
+    Queue<OutputType>* output();
 
 private:
     ThreadPool thread_pool_;

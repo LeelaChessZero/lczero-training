@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <string>
+#include <thread>
 
 #include "discovery.h"
 
@@ -25,32 +26,32 @@ int main(int argc, char* argv[]) {
 
   lczero::training::FileDiscovery discovery;
 
-  auto token = discovery.RegisterObserver(
-      [](std::span<const lczero::training::FileDiscovery::File> files) {
-        for (const auto& file : files) {
-          LOG(INFO) << "File Discovered: " << file.filepath;
-        }
-      });
-
   LOG(INFO) << "Starting to monitor directory: " << directory;
-  LOG(INFO) << "Scanning for existing files...";
+  discovery.AddDirectory(directory);
 
-  discovery.AddDirectory(
-      directory,
-      [](std::span<const lczero::training::FileDiscovery::File> files) {
-        for (const auto& file : files) {
-          LOG(INFO) << "File Initial: " << file.filepath;
-        }
-      });
+  // Consumer thread to read from the queue
+  std::thread consumer_thread([&discovery]() {
+    auto* queue = discovery.output();
+    try {
+      while (true) {
+        auto file = queue->Get();
+        const char* phase_str =
+            (file.phase == lczero::training::FileDiscovery::Phase::kInitialScan)
+                ? "Initial"
+                : "Discovered";
+        LOG(INFO) << "File " << phase_str << ": " << file.filepath;
+      }
+    } catch (const lczero::QueueClosedException&) {
+      LOG(INFO) << "Queue closed, consumer thread exiting";
+    }
+  });
 
-  LOG(INFO) << "Scan completed.";
-  LOG(INFO) << "Initial files will be reported via observer callback above.";
-
-  LOG(INFO) << "Monitoring for new files... Press Enter to exit.";
-
+  LOG(INFO) << "Monitoring for files... Press Enter to exit.";
   std::cin.get();
 
-  discovery.UnregisterObserver(token);
+  // Close the queue and wait for consumer to finish
+  discovery.output()->Close();
+  consumer_thread.join();
 
   return 0;
 }

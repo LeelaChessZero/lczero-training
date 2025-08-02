@@ -16,7 +16,8 @@
 namespace lczero {
 namespace training {
 
-FileDiscovery::FileDiscovery() {
+FileDiscovery::FileDiscovery(size_t queue_capacity)
+    : output_queue_(queue_capacity) {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
@@ -32,25 +33,14 @@ FileDiscovery::~FileDiscovery() {
   if (inotify_fd_ != -1) close(inotify_fd_);
 }
 
-FileDiscovery::ObeserverToken FileDiscovery::RegisterObserver(
-    Observer observer) {
-  ObeserverToken token = next_token_++;
-  observers_[token] = std::move(observer);
-  return token;
-}
+Queue<FileDiscovery::File>* FileDiscovery::output() { return &output_queue_; }
 
-void FileDiscovery::UnregisterObserver(ObeserverToken token) {
-  observers_.erase(token);
-}
-
-void FileDiscovery::AddDirectory(const Path& directory,
-                                 Observer initial_observer) {
-  PerformInitialScan(directory, initial_observer);
+void FileDiscovery::AddDirectory(const Path& directory) {
+  PerformInitialScan(directory);
   AddWatchRecursive(directory);
 }
 
-void FileDiscovery::PerformInitialScan(const Path& directory,
-                                       Observer observer) {
+void FileDiscovery::PerformInitialScan(const Path& directory) {
   constexpr size_t kBatchSize = 10000;
   std::vector<File> batch;
   batch.reserve(kBatchSize);
@@ -63,13 +53,14 @@ void FileDiscovery::PerformInitialScan(const Path& directory,
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
-    observer(batch);
+    output_queue_.Put(batch);
     batch.clear();
   };
 
   for (const auto& entry : iterator) {
     if (entry.is_regular_file(ec) && !ec) {
-      batch.push_back({entry.path().string()});
+      batch.push_back(
+          {.filepath = entry.path().string(), .phase = Phase::kInitialScan});
       // Flush batch when it reaches the limit
       if (batch.size() >= kBatchSize) flush_batch();
     }
@@ -145,7 +136,7 @@ void FileDiscovery::ProcessInotifyEvents() {
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
-    NotifyObservers(files);
+    output_queue_.Put(files);
     files.clear();
   };
 
@@ -178,7 +169,7 @@ auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
   // Handle different event types
   if (event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
     // File finished writing or moved into directory
-    return File{.filepath = filepath};
+    return File{.filepath = filepath, .phase = Phase::kNewFile};
   }
 
   constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;
@@ -193,14 +184,6 @@ auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
   }
 
   return std::nullopt;
-}
-
-void FileDiscovery::NotifyObservers(std::span<const File> files) {
-  if (files.empty()) return;
-  absl::c_for_each(observers_, [&](const auto& pair) {
-    const auto& [token, observer] = pair;
-    observer(files);
-  });
 }
 
 }  // namespace training

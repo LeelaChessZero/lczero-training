@@ -18,6 +18,7 @@ in the `builddir/`.
 * Tests are defined in `meson.build` with `test()` function 
 * Run tests: `meson test -C builddir/`
 * Build: `meson compile -C builddir/` from build directory
+* Format C++ code: `just format-cpp`
 
 ## Documentation
 

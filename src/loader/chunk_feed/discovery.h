@@ -12,6 +12,8 @@
 #include <thread>
 #include <vector>
 
+#include "src/utils/queue.h"
+
 namespace lczero {
 namespace training {
 
@@ -23,37 +25,37 @@ class FileDiscovery {
  public:
   using Path = std::filesystem::path;
 
+  enum class Phase {
+    kInitialScan,  // File found during initial directory scan
+    kNewFile       // File discovered via inotify notification
+  };
+
   struct File {
     Path filepath;
+    Phase phase;
   };
-  using ObeserverToken = size_t;
-  using Observer = std::function<void(std::span<const File>)>;
-
-  ObeserverToken RegisterObserver(Observer observer);
-  void UnregisterObserver(ObeserverToken token);
-
-  FileDiscovery();
+  explicit FileDiscovery(size_t queue_capacity = 1000);
   ~FileDiscovery();
 
-  // Starts monitoring the directory. Calls initial_observer with existing files
-  // in batches. Newly discovered files will be reported to registered
-  // observers.
-  void AddDirectory(const Path& directory, Observer initial_observer);
+  // Returns the output queue for this stage
+  Queue<File>* output();
+
+  // Starts monitoring the directory.
+  void AddDirectory(const Path& directory);
 
  private:
   void MonitorThread();
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);
-  void PerformInitialScan(const Path& directory, Observer observer);
+  void PerformInitialScan(const Path& directory);
   void ProcessInotifyEvents();
   std::optional<File> ProcessInotifyEvent(const struct inotify_event& event);
-  void NotifyObservers(std::span<const File> files);
 
   int inotify_fd_;
-  ObeserverToken next_token_ = 1;
   // Watch descriptor to directory path.
   absl::flat_hash_map<int, Path> watch_descriptors_;
-  absl::flat_hash_map<ObeserverToken, Observer> observers_;
+
+  Queue<File> output_queue_;
 
   std::thread monitor_thread_;
   absl::Notification stop_condition_;
