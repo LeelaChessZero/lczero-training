@@ -2,10 +2,12 @@
 
 #include <filesystem>
 
+#include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/discovery.h"
 #include "loader/chunk_feed/rawfile_chunk_source.h"
 #include "loader/chunk_feed/tar_chunk_source.h"
+#include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
@@ -31,7 +33,9 @@ ChunkSet::ChunkSet(Queue<FileDiscovery::File>* input_queue,
 }
 
 void ChunkSet::InitializeChunkSources() {
+  ThreadPool file_reader_pool(4);
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources;
+  absl::Mutex sources_mutex;
 
   // Read from input queue until kInitialScanComplete
   while (true) {
@@ -42,13 +46,20 @@ void ChunkSet::InitializeChunkSources() {
     }
 
     if (file.phase == FileDiscovery::Phase::kInitialScan) {
-      // Create ChunkSource from file and add to uninitialized_sources
-      auto source = CreateChunkSourceFromFile(file.filepath);
-      if (source) {
-        uninitialized_sources.push_back(std::move(source));
-      }
+      // Create ChunkSource from file in thread pool
+      file_reader_pool.Enqueue(
+          [filepath = file.filepath, &uninitialized_sources, &sources_mutex]() {
+            auto source = CreateChunkSourceFromFile(filepath);
+            if (source) {
+              absl::MutexLock lock(&sources_mutex);
+              uninitialized_sources.push_back(std::move(source));
+            }
+          });
     }
   }
+
+  // Wait for all file creation tasks to complete
+  file_reader_pool.WaitAll();
 
   std::sort(uninitialized_sources.begin(), uninitialized_sources.end(),
             [](const auto& a, const auto& b) {
@@ -60,15 +71,15 @@ void ChunkSet::InitializeChunkSources() {
   // TODO If we need different number of threads for indexing, we can just
   // create a separate thread pool for indexing here.
   while (true) {
-    thread_pool_.WaitForAvailableThread();
+    file_reader_pool.WaitForAvailableThread();
     if (source_index == 0 || total_chunks >= chunks_window_) break;
     auto& source = uninitialized_sources[--source_index];
-    thread_pool_.Enqueue([source = std::move(source), &total_chunks]() {
+    file_reader_pool.Enqueue([source = std::move(source), &total_chunks]() {
       source->Index();
       total_chunks += source->GetChunkCount();
     });
   }
-  thread_pool_.WaitAll();
+  file_reader_pool.WaitAll();
 
   if (total_chunks < chunks_window_) {
     throw std::runtime_error("Not enough chunks to feed.");
