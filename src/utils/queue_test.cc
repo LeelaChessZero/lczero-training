@@ -415,4 +415,56 @@ TEST_F(QueueTest, CloseUnblocksBatchOperations) {
   EXPECT_TRUE(batch_get_exception);
 }
 
+// Bug reproduction test: Get() should not throw when queue is closed but has
+// elements
+TEST_F(QueueTest, GetFromClosedQueueWithElements) {
+  Queue<int> queue(5);
+
+  // Put some elements in the queue
+  queue.Put(1);
+  queue.Put(2);
+  queue.Put(3);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Close the queue
+  queue.Close();
+
+  // Should be able to get elements that were already in the queue
+  // This currently fails but should succeed
+  EXPECT_EQ(queue.Get(), 1);
+  EXPECT_EQ(queue.Get(), 2);
+  EXPECT_EQ(queue.Get(), 3);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Only now should Get() throw when queue is empty and closed
+  EXPECT_THROW(queue.Get(), QueueClosedException);
+}
+
+TEST_F(QueueTest, BatchGetFromClosedQueueWithElements) {
+  Queue<int> queue(5);
+
+  // Put some elements in the queue
+  queue.Put(1);
+  queue.Put(2);
+  queue.Put(3);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Close the queue
+  queue.Close();
+
+  // Should be able to get elements that were already in the queue
+  auto result = queue.Get(2);
+  EXPECT_EQ(result.size(), 2);
+  EXPECT_EQ(result[0], 1);
+  EXPECT_EQ(result[1], 2);
+  EXPECT_EQ(queue.Size(), 1);
+
+  // Get remaining element
+  EXPECT_EQ(queue.Get(), 3);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Only now should Get() throw when queue is empty and closed
+  EXPECT_THROW(queue.Get(1), QueueClosedException);
+}
+
 }  // namespace lczero

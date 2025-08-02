@@ -40,6 +40,9 @@ class FileDiscovery {
   // Returns the output queue for this stage
   Queue<File>* output();
 
+  // Closes the output queue, signaling completion
+  void Close();
+
   // Starts monitoring the directory.
   void AddDirectory(const Path& directory);
 

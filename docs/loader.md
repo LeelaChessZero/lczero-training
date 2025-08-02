@@ -29,6 +29,9 @@ The Data Loader consists of the following stages connected through a
 All stages implement the similar API and structure, although not sharing any
 base class.
 
+All stages/workers (except pure producers) wait for the input queue to Close(),
+then Close() output Queue.
+
 ```cpp
 class Stage {
  public:

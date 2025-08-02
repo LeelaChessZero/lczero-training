@@ -17,6 +17,8 @@ class QueueClosedException : public std::runtime_error {
 
 // Thread-safe fixed-size circular buffer queue with blocking operations.
 // Supports both single and batch put/get operations.
+// When closed, Put operations throw immediately, but Get operations only throw
+// when the queue becomes empty - allowing consumption of remaining elements.
 template <typename T>
 class Queue {
  public:
@@ -43,8 +45,9 @@ class Queue {
   // Returns the capacity of the queue.
   size_t Capacity() const;
 
-  // Closes the queue, causing all blocked operations to throw
-  // QueueClosedException.
+  // Closes the queue. Put operations immediately throw QueueClosedException.
+  // Get operations only throw when attempting to get from an empty closed
+  // queue, allowing remaining elements to be consumed.
   void Close();
 
  private:
@@ -143,7 +146,7 @@ template <typename T>
 T Queue<T>::Get() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
-  if (closed_) throw QueueClosedException();
+  if (closed_ && size_ == 0) throw QueueClosedException();
 
   T item = std::move(buffer_[head_]);
   head_ = (head_ + 1) % capacity_;
@@ -168,7 +171,7 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
         return args->queue->CanGetMultiple(args->count);
       },
       &args));
-  if (closed_) throw QueueClosedException();
+  if (closed_ && size_ < count) throw QueueClosedException();
 
   absl::FixedArray<T> result(count);
 
