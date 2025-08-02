@@ -18,41 +18,42 @@ endif
 add_project_arguments('-Werror', language : 'cpp')
 
 
+# External dependencies
 libarchive_dep = dependency('libarchive')
 zlib_dep = dependency('zlib')
-absl_log_dep = dependency(
-  'absl_log',
-).as_system()
-absl_log_initialize_dep = dependency(
-  'absl_log_initialize',
-).as_system()
-absl_check_dep = dependency(
-  'absl_check',
-).as_system()
-absl_hash_dep = dependency(
-  'absl_hash',
-).as_system()
-absl_container_dep = dependency(
-  'absl_raw_hash_set',
-).as_system()
-absl_synchronization_dep = dependency(
-  'absl_synchronization',
-).as_system()
-absl_random_dep = dependency(
-  'absl_random_random',
-).as_system()
-absl_flags_dep = dependency(
-  'absl_flags',
-).as_system()
-absl_flags_parse_dep = dependency(
-  'absl_flags_parse',
-).as_system()
-gtest_dep = dependency(
-  'gtest',
-).as_system()
-gtest_main_dep = dependency(
-  'gtest_main',
-).as_system()
+
+# Abseil dependencies
+absl_deps = {}
+foreach name : [
+  'log', 'log_initialize', 'check', 'hash', 'raw_hash_set', 
+  'synchronization', 'random_random', 'flags', 'flags_parse'
+]
+  absl_deps += {name.underscorify() : dependency('absl_' + name).as_system()}
+endforeach
+
+# Test dependencies
+gtest_dep = dependency('gtest').as_system()
+gtest_main_dep = dependency('gtest_main').as_system()
+
+# Common dependency sets
+external_deps = [libarchive_dep, zlib_dep]
+core_absl_deps = [
+  absl_deps['log'],
+  absl_deps['check'],
+  absl_deps['hash'],
+  absl_deps['raw_hash_set'],
+  absl_deps['synchronization'],
+  absl_deps['random_random'],
+]
+loader_deps = external_deps + core_absl_deps
+main_deps = loader_deps + [absl_deps['log_initialize']]
+test_deps = [gtest_dep, gtest_main_dep]
+cli_deps = [
+  absl_deps['log'],
+  absl_deps['log_initialize'],
+  absl_deps['flags'],
+  absl_deps['flags_parse'],
+]
 
 includes = include_directories('src', 'libs/lc0/src')
 
@@ -71,33 +72,14 @@ loader_lib = static_library(
   'loader',
   files,
   include_directories : includes,
-  dependencies : [
-    libarchive_dep,
-    zlib_dep,
-    absl_log_dep,
-    absl_check_dep,
-    absl_hash_dep,
-    absl_container_dep,
-    absl_synchronization_dep,
-    absl_random_dep,
-  ],
+  dependencies : loader_deps,
 )
 
 exe = executable(
   'loader',
   'src/loader/loader_main.cpp',
   include_directories : includes,
-  dependencies : [
-    libarchive_dep,
-    zlib_dep,
-    absl_log_dep,
-    absl_log_initialize_dep,
-    absl_check_dep,
-    absl_hash_dep,
-    absl_container_dep,
-    absl_synchronization_dep,
-    absl_random_dep,
-  ],
+  dependencies : main_deps,
   link_with : loader_lib,
 )
 
@@ -105,11 +87,7 @@ stream_shuffler_test = executable(
   'stream_shuffler_test',
   'src/utils/stream_shuffler_test.cc',
   include_directories : includes,
-  dependencies : [
-    gtest_dep,
-    gtest_main_dep,
-    absl_random_dep,
-  ],
+  dependencies : test_deps + [absl_deps['random_random']],
   link_with : loader_lib,
 )
 
@@ -119,11 +97,6 @@ discovery_main = executable(
   'discovery_main',
   'src/loader/chunk_feed/discovery_main.cc',
   include_directories : includes,
-  dependencies : [
-    absl_log_dep,
-    absl_log_initialize_dep,
-    absl_flags_dep,
-    absl_flags_parse_dep,
-  ],
+  dependencies : cli_deps,
   link_with : loader_lib,
 )
