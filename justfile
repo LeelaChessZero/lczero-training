@@ -10,9 +10,13 @@ check-cpp:
 format-cpp:
     find src/ -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" -o -name "*.h" -o -name "*.hpp" | xargs clang-format -i
 
+# Build the project
+build:
+    meson compile -C builddir/
+
 # Run tests
 test:
     meson test -C builddir/
 
-# Run all checks (formatting and tests)
-pre-commit: check-cpp test
+# Run all checks (formatting, build, and tests)
+pre-commit: check-cpp build test

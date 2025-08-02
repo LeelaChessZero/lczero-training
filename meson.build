@@ -66,6 +66,7 @@ files = [
   'src/utils/gz.cc',
   'src/utils/stream_shuffler.cc',
   'libs/lc0/src/utils/files.cc',
+  'libs/lc0/src/utils/logging.cc',
 ]
 
 loader_lib = static_library(
