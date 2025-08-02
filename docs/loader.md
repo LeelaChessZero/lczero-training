@@ -24,6 +24,9 @@ The Data Loader consists of the following stages connected through a
 * [Tensor Generator](../src/loader/tensor_generator.h) — Takes frames and
   provides tensor buffers for the training process.
 
+All stages are quite sloppy in closing the output queues, the idea that we don't
+need clean shutdown. (TODO fix this.)
+
 ## Stage interface
 
 All stages implement the similar API and structure, although not sharing any
