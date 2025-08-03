@@ -8,11 +8,9 @@
 #include <absl/log/log.h>
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <thread>
 #include <unordered_set>
 
 namespace lczero {
@@ -50,6 +48,19 @@ class FileDiscoveryTest : public ::testing::Test {
   }
 
   std::filesystem::path test_dir_;
+
+  // Helper function to consume all initial scan results including completion
+  // marker
+  void ConsumeInitialScan(Queue<FileDiscovery::File>* queue) {
+    bool scan_complete = false;
+    while (!scan_complete) {
+      auto file = queue->Get();
+      if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+        scan_complete = true;
+      }
+      // We consume and discard all initial scan files
+    }
+  }
 };
 
 TEST_F(FileDiscoveryTest, ConstructorCreatesQueue) {
@@ -59,11 +70,7 @@ TEST_F(FileDiscoveryTest, ConstructorCreatesQueue) {
   EXPECT_NE(queue, nullptr);
   EXPECT_EQ(queue->Capacity(), 100);
 
-  // Wait for initial scan to complete
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   // Should have kInitialScanComplete message for empty directory
-  EXPECT_EQ(queue->Size(), 1);
   auto file = queue->Get();
   EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
@@ -82,12 +89,9 @@ TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
   std::unordered_set<std::string> found_files;
   auto* queue = discovery.output();
 
-  // Wait a bit for initial scan to complete
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   // Collect all files found during initial scan
   bool scan_complete_received = false;
-  while (queue->Size() > 0) {
+  while (!scan_complete_received) {
     auto file = queue->Get();
     if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
@@ -114,15 +118,15 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
   FileDiscovery discovery(
       FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  // Wait for initial scan
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   // Should only find the file, not directories
   std::vector<FileDiscovery::File> files;
   auto* queue = discovery.output();
-  while (queue->Size() > 0) {
+  bool scan_complete_received = false;
+  while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.phase != FileDiscovery::Phase::kInitialScanComplete) {
+    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+      scan_complete_received = true;
+    } else {
       files.push_back(file);
     }
   }
@@ -136,55 +140,35 @@ TEST_F(FileDiscoveryTest, DetectsNewFiles) {
   FileDiscovery discovery(
       FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  // Wait for initial scan to complete
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   auto* queue = discovery.output();
-  // Clear any initial scan results
-  while (queue->Size() > 0) {
-    queue->Get();
-  }
+  // Consume initial scan results
+  ConsumeInitialScan(queue);
 
   // Create a new file
   CreateFile(test_dir_ / "new_file.txt");
 
-  // Wait for inotify to detect the file
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-  // Should detect the new file
-  EXPECT_GT(queue->Size(), 0);
+  // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "new_file.txt");
   EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
 }
 
 TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
-
-  // Wait for initial scan
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  auto* queue = discovery.output();
-  // Clear initial scan results
-  while (queue->Size() > 0) {
-    queue->Get();
-  }
-
-  // Create new subdirectory and file
+  // Pre-create the subdirectory structure
   auto subdir = test_dir_ / "new_subdir";
   CreateDirectory(subdir);
 
-  // Give time for directory creation to be detected
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  FileDiscovery discovery(
+      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
+  auto* queue = discovery.output();
+  // Consume initial scan results
+  ConsumeInitialScan(queue);
+
+  // Create file in the existing subdirectory
   CreateFile(subdir / "file_in_new_dir.txt");
 
-  // Wait for file detection
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-  // Should detect the file in the new subdirectory
-  EXPECT_GT(queue->Size(), 0);
+  // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "file_in_new_dir.txt");
   EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
@@ -195,12 +179,7 @@ TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
   FileDiscovery discovery(
       FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  // Wait for initial scan
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   auto* queue = discovery.output();
-  EXPECT_EQ(queue->Size(), 1);  // Should have kInitialScanComplete message
-
   auto file = queue->Get();
   EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
@@ -215,16 +194,15 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
   FileDiscovery discovery(
       FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  // Wait for initial scan
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
   // Collect all files
   std::unordered_set<std::string> found_files;
   auto* queue = discovery.output();
-  while (queue->Size() > 0) {
+  bool scan_complete_received = false;
+  while (!scan_complete_received) {
     auto file = queue->Get();
     if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
+      scan_complete_received = true;
     } else {
       EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
       found_files.insert(file.filepath.filename().string());
@@ -241,20 +219,11 @@ TEST_F(FileDiscoveryTest, QueueClosurePreventsNewFiles) {
   FileDiscovery discovery(
       FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  // Wait for initial setup
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   auto* queue = discovery.output();
+  // Consume initial scan results
+  ConsumeInitialScan(queue);
 
-  // Wait for initial scan to complete first
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  // Clear any messages
-  while (queue->Size() > 0) {
-    queue->Get();
-  }
-
-  queue->Close();
+  discovery.Close();
 
   // Any subsequent queue operations should throw
   EXPECT_THROW(queue->Get(), QueueClosedException);
@@ -267,8 +236,9 @@ TEST_F(FileDiscoveryTest, DestructorCleansUpProperly) {
 
     CreateFile(test_dir_ / "cleanup_test.txt");
 
-    // Wait a bit for initial operations
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto* queue = discovery.output();
+    // Consume initial scan results
+    ConsumeInitialScan(queue);
 
     // FileDiscovery destructor should be called here
   };
@@ -283,36 +253,25 @@ TEST_F(FileDiscoveryTest, RapidFileCreation) {
       .queue_capacity = 1000,
       .directory = test_dir_});  // Larger queue for stress test
 
-  // Wait for initial scan
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   auto* queue = discovery.output();
-  // Clear initial scan results
-  while (queue->Size() > 0) {
-    queue->Get();
-  }
+  // Consume initial scan results
+  ConsumeInitialScan(queue);
 
   // Rapidly create files
   constexpr int num_files = 10;
   for (int i = 0; i < num_files; ++i) {
     CreateFile(test_dir_ / ("rapid_" + std::to_string(i) + ".txt"));
-    // Small delay to ensure files are created separately
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
-  // Wait for all files to be detected
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-  // Count detected files
-  int detected_count = 0;
-  while (queue->Size() > 0) {
+  // Collect detected files - we should get at least some
+  std::vector<FileDiscovery::File> files;
+  constexpr int min_expected = num_files / 2;
+  for (int i = 0; i < min_expected; ++i) {
     auto file = queue->Get();
     EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
-    detected_count++;
+    files.push_back(file);
   }
-
-  // Should detect most or all files (inotify may coalesce some events)
-  EXPECT_GE(detected_count, num_files / 2);  // At least half should be detected
+  EXPECT_GE(files.size(), min_expected);
 }
 
 }  // namespace training

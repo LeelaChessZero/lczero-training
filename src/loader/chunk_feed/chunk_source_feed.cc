@@ -36,6 +36,9 @@ Queue<ChunkSourceFeed::OutputType>* ChunkSourceFeed::output() {
 }
 
 void ChunkSourceFeed::Worker() {
+  // Create a local producer for this worker thread
+  auto producer = output_queue_.CreateProducer();
+
   try {
     while (true) {
       auto file = input_queue_->Get();
@@ -46,12 +49,13 @@ void ChunkSourceFeed::Worker() {
         // Output the ChunkSource with its phase.
         ChunkSourceWithPhase output{.source = std::move(source),
                                     .phase = file.phase};
-        output_queue_.Put(std::move(output));
+        producer.Put(std::move(output));
       }
     }
   } catch (const QueueClosedException&) {
-    // Input queue is closed, close output queue.
-    output_queue_.Close();
+    // Input queue is closed, the local producer will be destroyed when this
+    // function exits which may close the output queue if this is the last
+    // producer
   }
 }
 

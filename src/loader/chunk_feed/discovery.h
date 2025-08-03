@@ -58,7 +58,7 @@ class FileDiscovery {
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);
   void PerformInitialScan(const Path& directory);
-  void ProcessInotifyEvents();
+  void ProcessInotifyEvents(Queue<File>::Producer& producer);
   std::optional<File> ProcessInotifyEvent(const struct inotify_event& event);
 
   int inotify_fd_;
@@ -66,6 +66,7 @@ class FileDiscovery {
   absl::flat_hash_map<int, Path> watch_descriptors_;
 
   Queue<File> output_queue_;
+  Queue<File>::Producer producer_;
 
   std::thread monitor_thread_;
   absl::Notification stop_condition_;

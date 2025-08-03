@@ -17,7 +17,8 @@ namespace lczero {
 namespace training {
 
 FileDiscovery::FileDiscovery(const FileDiscoveryOptions& options)
-    : output_queue_(options.queue_capacity) {
+    : output_queue_(options.queue_capacity),
+      producer_(output_queue_.CreateProducer()) {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
@@ -26,17 +27,28 @@ FileDiscovery::FileDiscovery(const FileDiscoveryOptions& options)
 }
 
 FileDiscovery::~FileDiscovery() {
-  stop_condition_.Notify();
-  if (monitor_thread_.joinable()) monitor_thread_.join();
-  for (const auto& [wd, path] : watch_descriptors_) {
-    inotify_rm_watch(inotify_fd_, wd);
-  }
+  Close();
   if (inotify_fd_ != -1) close(inotify_fd_);
 }
 
 Queue<FileDiscovery::File>* FileDiscovery::output() { return &output_queue_; }
 
-void FileDiscovery::Close() { output_queue_.Close(); }
+void FileDiscovery::Close() {
+  // First stop all watches
+  for (const auto& [wd, path] : watch_descriptors_) {
+    inotify_rm_watch(inotify_fd_, wd);
+  }
+  watch_descriptors_.clear();
+
+  // Then stop the thread
+  stop_condition_.Notify();
+  if (monitor_thread_.joinable()) {
+    monitor_thread_.join();
+  }
+
+  // Finally close the producer to close the queue
+  producer_.Close();
+}
 
 void FileDiscovery::AddDirectory(const Path& directory) {
   PerformInitialScan(directory);
@@ -56,7 +68,7 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
-    output_queue_.Put(batch);
+    producer_.Put(batch);
     batch.clear();
   };
 
@@ -72,8 +84,7 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
   flush_batch();  // Flush any remaining files in the batch
 
   // Signal that initial scan is complete
-  output_queue_.Put(
-      {{.filepath = Path{}, .phase = Phase::kInitialScanComplete}});
+  producer_.Put({{.filepath = Path{}, .phase = Phase::kInitialScanComplete}});
 }
 
 void FileDiscovery::AddWatchRecursive(const Path& path) {
@@ -130,20 +141,20 @@ void FileDiscovery::MonitorThread() {
 
     do {
       assert(nfds == 1 && event.data.fd == inotify_fd_);
-      ProcessInotifyEvents();
+      ProcessInotifyEvents(producer_);
       nfds = epoll_wait(epoll_fd, &event, 1, 0);
     } while (nfds > 0);
   }
 }
 
-void FileDiscovery::ProcessInotifyEvents() {
+void FileDiscovery::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
-    output_queue_.Put(files);
+    producer.Put(files);
     files.clear();
   };
 

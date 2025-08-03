@@ -15,12 +15,14 @@ TEST(ChunkSourceFeedTest, ProcessesFiles) {
   ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
   ChunkSourceFeed feed(&input_queue, options);
 
-  // Add a file with unsupported extension (should not create ChunkSource)
-  input_queue.Put(FileDiscovery::File{
-      .filepath = std::filesystem::path("/test.txt"),  // unsupported extension
-      .phase = FileDiscovery::Phase::kInitialScan});
-
-  input_queue.Close();
+  {
+    auto producer = input_queue.CreateProducer();
+    // Add a file with unsupported extension (should not create ChunkSource)
+    producer.Put(FileDiscovery::File{
+        .filepath =
+            std::filesystem::path("/test.txt"),  // unsupported extension
+        .phase = FileDiscovery::Phase::kInitialScan});
+  }  // Producer destroyed here, closing input queue
 
   // Try to get output - there should be no valid ChunkSources for unsupported
   // files
@@ -43,17 +45,18 @@ TEST(ChunkSourceFeedTest, HandlesPhases) {
   ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
   ChunkSourceFeed feed(&input_queue, options);
 
-  // Test different phases - all should be passed through even if no ChunkSource
-  // is created
-  input_queue.Put(
-      FileDiscovery::File{.filepath = std::filesystem::path("/test1.gz"),
-                          .phase = FileDiscovery::Phase::kInitialScan});
+  {
+    auto producer = input_queue.CreateProducer();
+    // Test different phases - all should be passed through even if no
+    // ChunkSource is created
+    producer.Put(
+        FileDiscovery::File{.filepath = std::filesystem::path("/test1.gz"),
+                            .phase = FileDiscovery::Phase::kInitialScan});
 
-  input_queue.Put(
-      FileDiscovery::File{.filepath = std::filesystem::path("/test2.gz"),
-                          .phase = FileDiscovery::Phase::kNewFile});
-
-  input_queue.Close();
+    producer.Put(
+        FileDiscovery::File{.filepath = std::filesystem::path("/test2.gz"),
+                            .phase = FileDiscovery::Phase::kNewFile});
+  }  // Producer destroyed here, closing input queue
 
   // Queue should eventually close when input is done
   try {

@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
   std::cin.get();
 
   // Close the queue and wait for consumer to finish
-  discovery.output()->Close();
+  discovery.Close();
   consumer_thread.join();
 
   return 0;

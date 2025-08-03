@@ -103,6 +103,9 @@ void ChunkSet::ProcessInputFiles(
 }
 
 void ChunkSet::InputWorker() {
+  // Create a local producer for this worker
+  auto producer = output_queue_.CreateProducer();
+
   try {
     while (true) {
       auto chunk_source_with_phase = input_queue_->Get();
@@ -118,7 +121,7 @@ void ChunkSet::InputWorker() {
     }
   } catch (const QueueClosedException&) {
     // Queue is closed, stop processing.
-    output_queue_.Close();
+    // The local producer will be destroyed when this function exits
   }
 }
 

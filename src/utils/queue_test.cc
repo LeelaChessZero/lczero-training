@@ -27,8 +27,11 @@ TEST_F(QueueTest, ConstructorCreatesEmptyQueue) {
 
 TEST_F(QueueTest, SinglePutGet) {
   Queue<int> queue(5);
-  queue.Put(42);
-  EXPECT_EQ(queue.Size(), 1);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(42);
+    EXPECT_EQ(queue.Size(), 1);
+  }  // Producer destroyed here, queue closes
 
   int value = queue.Get();
   EXPECT_EQ(value, 42);
@@ -37,9 +40,12 @@ TEST_F(QueueTest, SinglePutGet) {
 
 TEST_F(QueueTest, MovePutGet) {
   Queue<std::unique_ptr<int>> queue(5);
-  auto ptr = std::make_unique<int>(42);
-  queue.Put(std::move(ptr));
-  EXPECT_EQ(queue.Size(), 1);
+  {
+    auto producer = queue.CreateProducer();
+    auto ptr = std::make_unique<int>(42);
+    producer.Put(std::move(ptr));
+    EXPECT_EQ(queue.Size(), 1);
+  }  // Producer destroyed here, queue closes
 
   auto result = queue.Get();
   EXPECT_EQ(*result, 42);
@@ -49,10 +55,13 @@ TEST_F(QueueTest, MovePutGet) {
 TEST_F(QueueTest, MultiplePutGet) {
   Queue<int> queue(5);
 
-  for (int i = 0; i < 5; ++i) {
-    queue.Put(i);
-  }
-  EXPECT_EQ(queue.Size(), 5);
+  {
+    auto producer = queue.CreateProducer();
+    for (int i = 0; i < 5; ++i) {
+      producer.Put(i);
+    }
+    EXPECT_EQ(queue.Size(), 5);
+  }  // Producer destroyed here, queue closes
 
   for (int i = 0; i < 5; ++i) {
     int value = queue.Get();
@@ -63,15 +72,16 @@ TEST_F(QueueTest, MultiplePutGet) {
 
 TEST_F(QueueTest, CircularBufferBehavior) {
   Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
 
   // Fill queue
-  queue.Put(1);
-  queue.Put(2);
-  queue.Put(3);
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
 
   // Get one item, put another
   EXPECT_EQ(queue.Get(), 1);
-  queue.Put(4);
+  producer.Put(4);
 
   // Verify remaining items
   EXPECT_EQ(queue.Get(), 2);
@@ -85,8 +95,11 @@ TEST_F(QueueTest, BatchPutConstSpan) {
   Queue<int> queue(5);
   std::vector<int> items = {1, 2, 3};
 
-  queue.Put(absl::Span<const int>(items));
-  EXPECT_EQ(queue.Size(), 3);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(absl::Span<const int>(items));
+    EXPECT_EQ(queue.Size(), 3);
+  }  // Producer destroyed here, queue closes
 
   for (int i = 0; i < 3; ++i) {
     EXPECT_EQ(queue.Get(), i + 1);
@@ -100,8 +113,11 @@ TEST_F(QueueTest, BatchPutMoveSpan) {
   items.push_back(std::make_unique<int>(2));
   items.push_back(std::make_unique<int>(3));
 
-  queue.Put(absl::Span<std::unique_ptr<int>>(items));
-  EXPECT_EQ(queue.Size(), 3);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(absl::Span<std::unique_ptr<int>>(items));
+    EXPECT_EQ(queue.Size(), 3);
+  }  // Producer destroyed here, queue closes
 
   for (int i = 0; i < 3; ++i) {
     auto result = queue.Get();
@@ -113,16 +129,22 @@ TEST_F(QueueTest, BatchPutEmptySpan) {
   Queue<int> queue(5);
   std::vector<int> empty_items;
 
-  queue.Put(absl::Span<const int>(empty_items));
-  EXPECT_EQ(queue.Size(), 0);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(absl::Span<const int>(empty_items));
+    EXPECT_EQ(queue.Size(), 0);
+  }  // Producer destroyed here, queue closes
 }
 
 TEST_F(QueueTest, BatchGet) {
   Queue<int> queue(5);
 
-  for (int i = 0; i < 5; ++i) {
-    queue.Put(i);
-  }
+  {
+    auto producer = queue.CreateProducer();
+    for (int i = 0; i < 5; ++i) {
+      producer.Put(i);
+    }
+  }  // Producer destroyed here, queue closes
 
   auto result = queue.Get(3);
   EXPECT_EQ(result.size(), 3);
@@ -134,7 +156,10 @@ TEST_F(QueueTest, BatchGet) {
 
 TEST_F(QueueTest, BatchGetZeroCount) {
   Queue<int> queue(5);
-  queue.Put(42);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(42);
+  }  // Producer destroyed here, queue closes
 
   auto result = queue.Get(0);
   EXPECT_EQ(result.size(), 0);
@@ -146,40 +171,59 @@ TEST_F(QueueTest, BatchGetZeroCount) {
 TEST_F(QueueTest, CapacityOne) {
   Queue<int> queue(1);
 
-  queue.Put(42);
-  EXPECT_EQ(queue.Size(), 1);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(42);
+    EXPECT_EQ(queue.Size(), 1);
+  }  // Producer destroyed here, queue closes
 
   EXPECT_EQ(queue.Get(), 42);
   EXPECT_EQ(queue.Size(), 0);
 }
 
-// Tests for operations on pre-closed queues
+// Tests for operations when all producer tokens are destroyed
 
 TEST_F(QueueTest, PutOnClosedQueue) {
   Queue<int> queue(5);
-  queue.Close();
+  // Create and immediately destroy producer to close queue
+  {
+    auto producer = queue.CreateProducer();
+  }
 
-  EXPECT_THROW(queue.Put(42), QueueClosedException);
+  // Try to create a new producer after queue is closed
+  auto producer = queue.CreateProducer();
+  EXPECT_THROW(producer.Put(42), QueueClosedException);
 }
 
 TEST_F(QueueTest, GetOnClosedQueue) {
   Queue<int> queue(5);
-  queue.Close();
+  // Create and immediately destroy producer to close queue
+  {
+    auto producer = queue.CreateProducer();
+  }
 
   EXPECT_THROW(queue.Get(), QueueClosedException);
 }
 
 TEST_F(QueueTest, BatchPutOnClosedQueue) {
   Queue<int> queue(5);
-  queue.Close();
+  // Create and immediately destroy producer to close queue
+  {
+    auto producer = queue.CreateProducer();
+  }
 
+  auto producer = queue.CreateProducer();
   std::vector<int> items = {1, 2, 3};
-  EXPECT_THROW(queue.Put(absl::Span<const int>(items)), QueueClosedException);
+  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
+               QueueClosedException);
 }
 
 TEST_F(QueueTest, BatchGetOnClosedQueue) {
   Queue<int> queue(5);
-  queue.Close();
+  // Create and immediately destroy producer to close queue
+  {
+    auto producer = queue.CreateProducer();
+  }
 
   EXPECT_THROW(queue.Get(3), QueueClosedException);
 }
@@ -192,10 +236,12 @@ TEST_F(QueueTest, SingleProducerSingleConsumer) {
   std::vector<int> consumed;
 
   std::thread producer([&queue, &producer_done]() {
+    auto prod = queue.CreateProducer();
     for (int i = 0; i < 100; ++i) {
-      queue.Put(i);
+      prod.Put(i);
     }
     producer_done = true;
+    // Producer destroyed here, closing the queue
   });
 
   std::thread consumer([&queue, &consumed, &producer_done]() {
@@ -223,53 +269,60 @@ TEST_F(QueueTest, MultipleProducersMultipleConsumers) {
   Queue<int> queue(10);
   constexpr int num_producers = 2;
   constexpr int items_per_producer = 5;
+  constexpr int total_items = num_producers * items_per_producer;
 
-  std::vector<int> all_produced;
   std::vector<int> all_consumed;
-  std::mutex produced_mutex;
   std::vector<std::thread> producers;
 
-  // Start producers
+  // Use a single producer token that we control explicitly
+  auto producer_token = queue.CreateProducer();
+
+  // Start producers - they all share the same producer token via reference
   for (int p = 0; p < num_producers; ++p) {
-    producers.emplace_back([&queue, &all_produced, &produced_mutex, p]() {
+    producers.emplace_back([&producer_token, p]() {
       for (int i = 0; i < items_per_producer; ++i) {
         int value = p * items_per_producer + i;
-        queue.Put(value);
-        {
-          std::lock_guard<std::mutex> lock(produced_mutex);
-          all_produced.push_back(value);
-        }
+        producer_token.Put(value);
       }
     });
   }
 
-  // Wait for producers to finish
+  // Wait for all producers to finish
   for (auto& producer : producers) {
     producer.join();
   }
 
-  // Now consume all items
-  for (int i = 0; i < num_producers * items_per_producer; ++i) {
+  // Now explicitly close the queue by destroying the producer token
+  {
+    auto temp = std::move(producer_token);
+  }  // Queue is now closed
+
+  // Now consume all items from the closed queue
+  for (int i = 0; i < total_items; ++i) {
     all_consumed.push_back(queue.Get());
   }
 
   // Verify all items were consumed
-  EXPECT_EQ(all_consumed.size(), num_producers * items_per_producer);
+  EXPECT_EQ(all_consumed.size(), total_items);
   EXPECT_EQ(queue.Size(), 0);
+
+  // Trying to get one more should throw
+  EXPECT_THROW(queue.Get(), QueueClosedException);
 }
 
 TEST_F(QueueTest, BlockingBehaviorOnFullQueue) {
   Queue<int> queue(2);
   std::atomic<bool> put_blocked{false};
   std::atomic<bool> put_completed{false};
+  auto producer = queue.CreateProducer();
 
   // Fill the queue
-  queue.Put(1);
-  queue.Put(2);
+  producer.Put(1);
+  producer.Put(2);
 
-  std::thread blocker([&queue, &put_blocked, &put_completed]() {
+  std::thread blocker([&producer, &put_blocked, &put_completed]() {
     put_blocked = true;
-    queue.Put(3);  // This should block
+    producer.Put(3);  // This should block
     put_completed = true;
   });
 
@@ -291,6 +344,7 @@ TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
   std::atomic<bool> get_blocked{false};
   std::atomic<bool> get_completed{false};
   std::atomic<int> result{-1};
+  auto producer = queue.CreateProducer();
 
   std::thread blocker([&queue, &get_blocked, &get_completed, &result]() {
     get_blocked = true;
@@ -304,24 +358,28 @@ TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
   EXPECT_FALSE(get_completed);
 
   // Put an item in the queue
-  queue.Put(42);
+  producer.Put(42);
 
   blocker.join();
   EXPECT_TRUE(get_completed);
   EXPECT_EQ(result, 42);
 }
 
-TEST_F(QueueTest, CloseUnblocksWaitingPut) {
+TEST_F(QueueTest, ProducerDestructionUnblocksWaitingPut) {
   Queue<int> queue(1);
-  queue.Put(1);  // Fill the queue
+  std::unique_ptr<Queue<int>::Producer> producer1 =
+      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
+  std::unique_ptr<Queue<int>::Producer> producer2 =
+      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
+  producer1->Put(1);  // Fill the queue
 
   std::atomic<bool> put_started{false};
   std::atomic<bool> exception_thrown{false};
 
-  std::thread blocker([&queue, &put_started, &exception_thrown]() {
+  std::thread blocker([&producer2, &put_started, &exception_thrown]() {
     put_started = true;
     try {
-      queue.Put(2);  // This should block
+      producer2->Put(2);  // This should block
     } catch (const QueueClosedException&) {
       exception_thrown = true;
     }
@@ -332,18 +390,24 @@ TEST_F(QueueTest, CloseUnblocksWaitingPut) {
   EXPECT_TRUE(put_started);
   EXPECT_FALSE(exception_thrown);
 
-  // Close the queue - this should unblock the waiting Put()
-  queue.Close();
+  // Destroy all producers - this should close queue and unblock the waiting
+  // Put()
+  producer1.reset();
+  producer2.reset();
 
   blocker.join();
   EXPECT_TRUE(exception_thrown);
 }
 
-TEST_F(QueueTest, CloseUnblocksWaitingGet) {
+TEST_F(QueueTest, ProducerDestructionUnblocksWaitingGet) {
   Queue<int> queue(5);  // Empty queue
 
   std::atomic<bool> get_started{false};
   std::atomic<bool> exception_thrown{false};
+
+  // Create a producer to keep queue open initially
+  std::unique_ptr<Queue<int>::Producer> producer =
+      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
 
   std::thread blocker([&queue, &get_started, &exception_thrown]() {
     get_started = true;
@@ -359,17 +423,20 @@ TEST_F(QueueTest, CloseUnblocksWaitingGet) {
   EXPECT_TRUE(get_started);
   EXPECT_FALSE(exception_thrown);
 
-  // Close the queue - this should unblock the waiting Get()
-  queue.Close();
+  // Destroy the producer - this should close queue and unblock the waiting
+  // Get()
+  producer.reset();
 
   blocker.join();
   EXPECT_TRUE(exception_thrown);
 }
 
-TEST_F(QueueTest, CloseUnblocksBatchOperations) {
+TEST_F(QueueTest, ProducerDestructionUnblocksBatchOperations) {
   Queue<int> queue(2);
-  queue.Put(1);
-  queue.Put(2);  // Fill the queue
+  std::unique_ptr<Queue<int>::Producer> producer =
+      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
+  producer->Put(1);
+  producer->Put(2);  // Fill the queue
 
   std::atomic<bool> batch_put_started{false};
   std::atomic<bool> batch_put_exception{false};
@@ -377,17 +444,19 @@ TEST_F(QueueTest, CloseUnblocksBatchOperations) {
   std::atomic<bool> batch_get_exception{false};
 
   std::thread batch_put_blocker(
-      [&queue, &batch_put_started, &batch_put_exception]() {
+      [&producer, &batch_put_started, &batch_put_exception]() {
         batch_put_started = true;
         try {
           std::vector<int> items = {3, 4, 5};
-          queue.Put(absl::Span<const int>(items));  // Should block
+          producer->Put(absl::Span<const int>(items));  // Should block
         } catch (const QueueClosedException&) {
           batch_put_exception = true;
         }
       });
 
   Queue<int> empty_queue(5);
+  std::unique_ptr<Queue<int>::Producer> empty_producer =
+      std::make_unique<Queue<int>::Producer>(empty_queue.CreateProducer());
   std::thread batch_get_blocker(
       [&empty_queue, &batch_get_started, &batch_get_exception]() {
         batch_get_started = true;
@@ -405,9 +474,9 @@ TEST_F(QueueTest, CloseUnblocksBatchOperations) {
   EXPECT_FALSE(batch_put_exception);
   EXPECT_FALSE(batch_get_exception);
 
-  // Close both queues
-  queue.Close();
-  empty_queue.Close();
+  // Destroy producers to close both queues
+  producer.reset();
+  empty_producer.reset();
 
   batch_put_blocker.join();
   batch_get_blocker.join();
@@ -415,22 +484,20 @@ TEST_F(QueueTest, CloseUnblocksBatchOperations) {
   EXPECT_TRUE(batch_get_exception);
 }
 
-// Bug reproduction test: Get() should not throw when queue is closed but has
-// elements
+// Test: Get() should not throw when queue is closed but has elements
 TEST_F(QueueTest, GetFromClosedQueueWithElements) {
   Queue<int> queue(5);
 
-  // Put some elements in the queue
-  queue.Put(1);
-  queue.Put(2);
-  queue.Put(3);
-  EXPECT_EQ(queue.Size(), 3);
-
-  // Close the queue
-  queue.Close();
+  // Put some elements in the queue, then destroy producer to close it
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(1);
+    producer.Put(2);
+    producer.Put(3);
+    EXPECT_EQ(queue.Size(), 3);
+  }  // Producer destroyed here, queue closes
 
   // Should be able to get elements that were already in the queue
-  // This currently fails but should succeed
   EXPECT_EQ(queue.Get(), 1);
   EXPECT_EQ(queue.Get(), 2);
   EXPECT_EQ(queue.Get(), 3);
@@ -443,14 +510,14 @@ TEST_F(QueueTest, GetFromClosedQueueWithElements) {
 TEST_F(QueueTest, BatchGetFromClosedQueueWithElements) {
   Queue<int> queue(5);
 
-  // Put some elements in the queue
-  queue.Put(1);
-  queue.Put(2);
-  queue.Put(3);
-  EXPECT_EQ(queue.Size(), 3);
-
-  // Close the queue
-  queue.Close();
+  // Put some elements in the queue, then destroy producer to close it
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(1);
+    producer.Put(2);
+    producer.Put(3);
+    EXPECT_EQ(queue.Size(), 3);
+  }  // Producer destroyed here, queue closes
 
   // Should be able to get elements that were already in the queue
   auto result = queue.Get(2);
@@ -465,6 +532,69 @@ TEST_F(QueueTest, BatchGetFromClosedQueueWithElements) {
 
   // Only now should Get() throw when queue is empty and closed
   EXPECT_THROW(queue.Get(1), QueueClosedException);
+}
+
+// Test producer token mechanism specifically
+TEST_F(QueueTest, ProducerTokenMechanism) {
+  Queue<int> queue(5);
+
+  // Create multiple producers
+  auto producer1 = queue.CreateProducer();
+  auto producer2 = queue.CreateProducer();
+
+  // Both should be able to put items
+  producer1.Put(1);
+  producer2.Put(2);
+  EXPECT_EQ(queue.Size(), 2);
+
+  // Destroy one producer - queue should still be open
+  {
+    auto temp = std::move(producer1);
+  }  // producer1 is destroyed here
+  producer2.Put(3);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Destroy last producer - queue should close
+  {
+    auto temp = std::move(producer2);
+  }  // producer2 is destroyed here
+
+  // Should still be able to get existing items
+  EXPECT_EQ(queue.Get(), 1);
+  EXPECT_EQ(queue.Get(), 2);
+  EXPECT_EQ(queue.Get(), 3);
+
+  // But trying to get more should throw
+  EXPECT_THROW(queue.Get(), QueueClosedException);
+}
+
+TEST_F(QueueTest, ProducerMoveSemantics) {
+  Queue<int> queue(5);
+
+  auto producer1 = queue.CreateProducer();
+  producer1.Put(42);
+
+  // Move constructor
+  auto producer2 = std::move(producer1);
+  producer2.Put(43);
+  EXPECT_EQ(queue.Size(), 2);
+
+  // Create another producer and use move assignment
+  auto producer3 = queue.CreateProducer();
+  producer3 = std::move(producer2);
+  producer3.Put(44);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Destroy the last producer
+  {
+    auto temp = std::move(producer3);
+  }  // producer3 is destroyed here
+
+  // Should be able to get all items
+  EXPECT_EQ(queue.Get(), 42);
+  EXPECT_EQ(queue.Get(), 43);
+  EXPECT_EQ(queue.Get(), 44);
+  EXPECT_THROW(queue.Get(), QueueClosedException);
 }
 
 }  // namespace lczero
