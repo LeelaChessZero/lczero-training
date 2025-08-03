@@ -23,7 +23,7 @@ struct ChunkSourceFeedOptions {
 
 struct ChunkSourceWithPhase {
   std::unique_ptr<ChunkSource> source;
-  FileDiscovery::Phase phase;
+  FileDiscovery::MessageType message_type;
 };
 
 // Worker pool that converts FileDiscovery output to ChunkSource objects.

@@ -55,7 +55,8 @@ class FileDiscoveryTest : public ::testing::Test {
     bool scan_complete = false;
     while (!scan_complete) {
       auto file = queue->Get();
-      if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+      if (file.message_type ==
+          FileDiscovery::MessageType::kInitialScanComplete) {
         scan_complete = true;
       }
       // We consume and discard all initial scan files
@@ -72,7 +73,8 @@ TEST_F(FileDiscoveryTest, ConstructorCreatesQueue) {
 
   // Should have kInitialScanComplete message for empty directory
   auto file = queue->Get();
-  EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
+  EXPECT_EQ(file.message_type,
+            FileDiscovery::MessageType::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
 }
 
@@ -93,11 +95,11 @@ TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
       scan_complete_received = true;
     } else {
-      EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
+      EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
       found_files.insert(file.filepath.filename().string());
     }
   }
@@ -124,7 +126,7 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
       scan_complete_received = true;
     } else {
       files.push_back(file);
@@ -133,7 +135,7 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
 
   EXPECT_EQ(files.size(), 1);
   EXPECT_EQ(files[0].filepath.filename().string(), "file.txt");
-  EXPECT_EQ(files[0].phase, FileDiscovery::Phase::kInitialScan);
+  EXPECT_EQ(files[0].message_type, FileDiscovery::MessageType::kFile);
 }
 
 TEST_F(FileDiscoveryTest, DetectsNewFiles) {
@@ -150,7 +152,7 @@ TEST_F(FileDiscoveryTest, DetectsNewFiles) {
   // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "new_file.txt");
-  EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
+  EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
 }
 
 TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
@@ -171,7 +173,7 @@ TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
   // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "file_in_new_dir.txt");
-  EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
+  EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
 }
 
 TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
@@ -181,7 +183,8 @@ TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
 
   auto* queue = discovery.output();
   auto file = queue->Get();
-  EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScanComplete);
+  EXPECT_EQ(file.message_type,
+            FileDiscovery::MessageType::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
 }
 
@@ -200,11 +203,11 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
       scan_complete_received = true;
     } else {
-      EXPECT_EQ(file.phase, FileDiscovery::Phase::kInitialScan);
+      EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
       found_files.insert(file.filepath.filename().string());
     }
   }
@@ -268,7 +271,7 @@ TEST_F(FileDiscoveryTest, RapidFileCreation) {
   constexpr int min_expected = num_files / 2;
   for (int i = 0; i < min_expected; ++i) {
     auto file = queue->Get();
-    EXPECT_EQ(file.phase, FileDiscovery::Phase::kNewFile);
+    EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
     files.push_back(file);
   }
   EXPECT_GE(files.size(), min_expected);

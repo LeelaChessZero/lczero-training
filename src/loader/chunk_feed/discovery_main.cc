@@ -35,11 +35,12 @@ int main(int argc, char* argv[]) {
     try {
       while (true) {
         auto file = queue->Get();
-        const char* phase_str =
-            (file.phase == lczero::training::FileDiscovery::Phase::kInitialScan)
-                ? "Initial"
-                : "Discovered";
-        LOG(INFO) << "File " << phase_str << ": " << file.filepath;
+        const char* type_str =
+            (file.message_type ==
+             lczero::training::FileDiscovery::MessageType::kFile)
+                ? "File"
+                : "Initial scan complete";
+        LOG(INFO) << "File " << type_str << ": " << file.filepath;
       }
     } catch (const lczero::QueueClosedException&) {
       LOG(INFO) << "Queue closed, consumer thread exiting";

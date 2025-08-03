@@ -48,7 +48,7 @@ void ChunkSourceFeed::Worker() {
       if (source) {
         // Output the ChunkSource with its phase.
         ChunkSourceWithPhase output{.source = std::move(source),
-                                    .phase = file.phase};
+                                    .message_type = file.message_type};
         producer.Put(std::move(output));
       }
     }

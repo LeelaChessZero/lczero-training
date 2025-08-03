@@ -74,8 +74,8 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
 
   for (const auto& entry : iterator) {
     if (entry.is_regular_file(ec) && !ec) {
-      batch.push_back(
-          {.filepath = entry.path().string(), .phase = Phase::kInitialScan});
+      batch.push_back({.filepath = entry.path().string(),
+                       .message_type = MessageType::kFile});
       // Flush batch when it reaches the limit
       if (batch.size() >= kBatchSize) flush_batch();
     }
@@ -84,7 +84,8 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
   flush_batch();  // Flush any remaining files in the batch
 
   // Signal that initial scan is complete
-  producer_.Put({{.filepath = Path{}, .phase = Phase::kInitialScanComplete}});
+  producer_.Put({{.filepath = Path{},
+                  .message_type = MessageType::kInitialScanComplete}});
 }
 
 void FileDiscovery::AddWatchRecursive(const Path& path) {
@@ -187,7 +188,7 @@ auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
   // Handle different event types
   if (event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
     // File finished writing or moved into directory
-    return File{.filepath = filepath, .phase = Phase::kNewFile};
+    return File{.filepath = filepath, .message_type = MessageType::kFile};
   }
 
   constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;

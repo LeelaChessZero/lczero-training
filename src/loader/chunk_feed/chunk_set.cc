@@ -30,12 +30,13 @@ std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources() {
   while (true) {
     auto chunk_source_with_phase = input_queue_->Get();
 
-    if (chunk_source_with_phase.phase ==
-        FileDiscovery::Phase::kInitialScanComplete) {
+    if (chunk_source_with_phase.message_type ==
+        FileDiscovery::MessageType::kInitialScanComplete) {
       break;
     }
 
-    if (chunk_source_with_phase.phase == FileDiscovery::Phase::kInitialScan) {
+    if (chunk_source_with_phase.message_type ==
+        FileDiscovery::MessageType::kFile) {
       // Add ChunkSource to uninitialized sources.
       uninitialized_sources.push_back(
           std::move(chunk_source_with_phase.source));
@@ -110,7 +111,8 @@ void ChunkSet::InputWorker() {
     while (true) {
       auto chunk_source_with_phase = input_queue_->Get();
 
-      if (chunk_source_with_phase.phase == FileDiscovery::Phase::kNewFile) {
+      if (chunk_source_with_phase.message_type ==
+          FileDiscovery::MessageType::kFile) {
         // Index the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
         source->Index();

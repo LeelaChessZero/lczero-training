@@ -31,15 +31,14 @@ class FileDiscovery {
  public:
   using Path = std::filesystem::path;
 
-  enum class Phase {
-    kInitialScan,          // File found during initial directory scan
-    kInitialScanComplete,  // Initial scan is complete (empty filename)
-    kNewFile               // File discovered via inotify notification
+  enum class MessageType {
+    kFile,                // File discovered (initial scan or inotify)
+    kInitialScanComplete  // Initial scan is complete (empty filepath)
   };
 
   struct File {
     Path filepath;
-    Phase phase;
+    MessageType message_type;
   };
   explicit FileDiscovery(const FileDiscoveryOptions& options);
   ~FileDiscovery();

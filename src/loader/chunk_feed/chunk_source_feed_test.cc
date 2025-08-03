@@ -21,7 +21,7 @@ TEST(ChunkSourceFeedTest, ProcessesFiles) {
     producer.Put(FileDiscovery::File{
         .filepath =
             std::filesystem::path("/test.txt"),  // unsupported extension
-        .phase = FileDiscovery::Phase::kInitialScan});
+        .message_type = FileDiscovery::MessageType::kFile});
   }  // Producer destroyed here, closing input queue
 
   // Try to get output - there should be no valid ChunkSources for unsupported
@@ -51,11 +51,11 @@ TEST(ChunkSourceFeedTest, HandlesPhases) {
     // ChunkSource is created
     producer.Put(
         FileDiscovery::File{.filepath = std::filesystem::path("/test1.gz"),
-                            .phase = FileDiscovery::Phase::kInitialScan});
+                            .message_type = FileDiscovery::MessageType::kFile});
 
     producer.Put(
         FileDiscovery::File{.filepath = std::filesystem::path("/test2.gz"),
-                            .phase = FileDiscovery::Phase::kNewFile});
+                            .message_type = FileDiscovery::MessageType::kFile});
   }  // Producer destroyed here, closing input queue
 
   // Queue should eventually close when input is done
