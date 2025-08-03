@@ -16,10 +16,20 @@ namespace training {
 // accordingly. Not thread-safe.
 class StreamShuffler {
  public:
+  // Sets the upper bound (exclusive). Can only be increased.
   void SetUpperBound(size_t upper_bound);
+
+  // Sets the lower bound (inclusive). Can only be increased.
   void SetLowerBound(size_t lower_bound);
+
+  // Sets the bucket size for internal storage optimization.
   void SetBucketSize(size_t bucket_size) { bucket_size_ = bucket_size; }
+
+  // Returns the next item in shuffled order, or nullopt if exhausted.
   std::optional<size_t> GetNextItem();
+
+  // Resets the shuffler to restart iteration with specified bounds.
+  void Reset(size_t lower_bound, size_t upper_bound);
 
  private:
   class Bucket {

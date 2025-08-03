@@ -1,5 +1,6 @@
 #include "utils/stream_shuffler.h"
 
+#include <absl/container/flat_hash_set.h>
 #include <absl/random/random.h>
 #include <gtest/gtest.h>
 
@@ -245,6 +246,41 @@ TEST_F(StreamShufflerTest, TailCatchesUpToHead) {
 
   shuffler_.SetLowerBound(8);
   EXPECT_EQ(shuffler_.GetNextItem(), std::nullopt);
+}
+
+TEST_F(StreamShufflerTest, ResetAllowsIterationRestart) {
+  shuffler_.SetUpperBound(5);
+  shuffler_.SetLowerBound(0);
+
+  // Exhaust all items
+  absl::flat_hash_set<size_t> first_round;
+  std::optional<size_t> item;
+  while ((item = shuffler_.GetNextItem()).has_value()) {
+    first_round.insert(item.value());
+  }
+
+  // Should have gotten all 5 items
+  EXPECT_EQ(first_round.size(), 5);
+
+  // Shuffler should be exhausted
+  EXPECT_EQ(shuffler_.GetNextItem(), std::nullopt);
+
+  // Reset the shuffler
+  shuffler_.Reset(0, 5);
+
+  // Should be able to get items again
+  absl::flat_hash_set<size_t> second_round;
+  int count = 0;
+  while ((item = shuffler_.GetNextItem()).has_value() && count < 10) {
+    second_round.insert(item.value());
+    count++;
+  }
+
+  // Should get all items again
+  EXPECT_EQ(second_round.size(), 5);
+
+  // Both rounds should contain the same set of items
+  EXPECT_EQ(first_round, second_round);
 }
 
 }  // namespace training

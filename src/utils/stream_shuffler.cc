@@ -54,6 +54,19 @@ std::optional<size_t> StreamShuffler::GetNextItem() {
   return std::nullopt;
 }
 
+void StreamShuffler::Reset(size_t lower_bound, size_t upper_bound) {
+  // Reset all internal state
+  buckets_.clear();
+  stream_size_ = 0;
+  upper_bound_ = lower_bound;
+  lower_bound_ = lower_bound;
+
+  // Establish the bounds, which will build the buckets with fresh data
+  if (upper_bound > lower_bound) {
+    SetUpperBound(upper_bound);
+  }
+}
+
 StreamShuffler::Bucket::Bucket(size_t lower_bound, size_t capacity)
     : upper_bound_(lower_bound), items_(capacity) {}
 
