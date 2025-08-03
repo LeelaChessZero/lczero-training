@@ -7,18 +7,13 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/discovery.h"
+#include "loader/chunk_feed/chunk_source_feed.h"
 #include "utils/queue.h"
 #include "utils/stream_shuffler.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
-
-// Creates a ChunkSource based on file extension. Returns RawFileChunkSource for
-// .gz files, TarChunkSource for .tar files, or nullptr for unsupported types.
-std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
-    const std::filesystem::path& filepath);
 
 struct ChunkSetOptions {
   size_t chunks_window;      // Number of chunks to keep in memory.
@@ -28,7 +23,7 @@ struct ChunkSetOptions {
 
 class ChunkSet {
  public:
-  ChunkSet(Queue<FileDiscovery::File>* input_queue,
+  ChunkSet(Queue<ChunkSourceWithPhase>* input_queue,
            const ChunkSetOptions& options);
 
   Queue<std::string>* output();
@@ -48,7 +43,7 @@ class ChunkSet {
 
   const size_t chunks_window_;
   ThreadPool input_processing_pool_;
-  Queue<FileDiscovery::File>* input_queue_;
+  Queue<ChunkSourceWithPhase>* input_queue_;
   Queue<std::string> output_queue_;
 
   absl::Mutex chunk_sources_mutex_;

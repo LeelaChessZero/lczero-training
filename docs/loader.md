@@ -11,6 +11,8 @@ The Data Loader consists of the following stages connected through a
 
 * [Discovery](../src/loader/chunk_feed/discovery.h) — Training data discovery
   worker (watches a directory and provides feed of filenames)
+* [ChunkSource Feed](../src/loader/chunk_feed/chunk_source_feed.h) — Reads
+  chunks from files, providing a stream of chunks.
 * [Chunk Set](../src/loader/chunk_feed/chunk_set.h) — Keeps a set of chunks,
   managing the last `num_chunks` available and removing old ones, and outputting
   them in shuffled order.

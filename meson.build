@@ -59,6 +59,7 @@ includes = include_directories('src', 'libs/lc0/src')
 
 files = [
   'src/loader/chunk_feed/chunk_set.cc',
+  'src/loader/chunk_feed/chunk_source_feed.cc',
   'src/loader/chunk_feed/discovery.cc',
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
@@ -107,9 +108,18 @@ discovery_test = executable(
   link_with : loader_lib,
 )
 
+chunk_source_feed_test = executable(
+  'chunk_source_feed_test',
+  'src/loader/chunk_feed/chunk_source_feed_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization']],
+  link_with : loader_lib,
+)
+
 test('stream_shuffler', stream_shuffler_test)
 test('queue', queue_test)
 test('discovery', discovery_test)
+test('chunk_source_feed', chunk_source_feed_test)
 
 discovery_main = executable(
   'discovery_main',

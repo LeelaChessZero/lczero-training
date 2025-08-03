@@ -5,27 +5,13 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/discovery.h"
-#include "loader/chunk_feed/rawfile_chunk_source.h"
-#include "loader/chunk_feed/tar_chunk_source.h"
+#include "loader/chunk_feed/chunk_source_feed.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
 
-std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
-    const std::filesystem::path& filepath) {
-  auto extension = filepath.extension();
-  if (extension == ".gz") {
-    return std::make_unique<RawFileChunkSource>(filepath);
-  }
-  if (extension == ".tar") {
-    return std::make_unique<TarChunkSource>(filepath);
-  }
-  return nullptr;
-}
-
-ChunkSet::ChunkSet(Queue<FileDiscovery::File>* input_queue,
+ChunkSet::ChunkSet(Queue<ChunkSourceWithPhase>* input_queue,
                    const ChunkSetOptions& options)
     : chunks_window_(options.chunks_window),
       input_processing_pool_(options.input_threads, ThreadPoolOptions{}),
@@ -38,33 +24,23 @@ ChunkSet::ChunkSet(Queue<FileDiscovery::File>* input_queue,
 Queue<std::string>* ChunkSet::output() { return &output_queue_; }
 
 std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources() {
-  ThreadPool file_reader_pool(4);
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources;
-  absl::Mutex sources_mutex;
 
   // Read from input queue until kInitialScanComplete.
   while (true) {
-    auto file = input_queue_->Get();
+    auto chunk_source_with_phase = input_queue_->Get();
 
-    if (file.phase == FileDiscovery::Phase::kInitialScanComplete) {
+    if (chunk_source_with_phase.phase ==
+        FileDiscovery::Phase::kInitialScanComplete) {
       break;
     }
 
-    if (file.phase == FileDiscovery::Phase::kInitialScan) {
-      // Create ChunkSource from file in thread pool.
-      file_reader_pool.Enqueue(
-          [filepath = file.filepath, &uninitialized_sources, &sources_mutex]() {
-            auto source = CreateChunkSourceFromFile(filepath);
-            if (source) {
-              absl::MutexLock lock(&sources_mutex);
-              uninitialized_sources.push_back(std::move(source));
-            }
-          });
+    if (chunk_source_with_phase.phase == FileDiscovery::Phase::kInitialScan) {
+      // Add ChunkSource to uninitialized sources.
+      uninitialized_sources.push_back(
+          std::move(chunk_source_with_phase.source));
     }
   }
-
-  // Wait for all file creation tasks to complete.
-  file_reader_pool.WaitAll();
 
   // Sort in descending order (newest first).
   std::sort(uninitialized_sources.begin(), uninitialized_sources.end(),
@@ -74,18 +50,18 @@ std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources() {
   std::atomic<size_t> total_chunks = 0;
   size_t sources_to_keep = 0;
 
-  // TODO If we need different number of threads for indexing, we can just
-  // create a separate thread pool for indexing here.
+  ThreadPool indexing_pool(4);  // TODO make configurable
+
   for (auto& source : uninitialized_sources) {
-    file_reader_pool.WaitForAvailableThread();
+    indexing_pool.WaitForAvailableThread();
     if (total_chunks >= chunks_window_) break;
-    file_reader_pool.Enqueue([&source, &total_chunks]() {
+    indexing_pool.Enqueue([&source, &total_chunks]() {
       source->Index();
       total_chunks += source->GetChunkCount();
     });
     ++sources_to_keep;
   }
-  file_reader_pool.WaitAll();
+  indexing_pool.WaitAll();
 
   if (total_chunks < chunks_window_) {
     throw std::runtime_error("Not enough chunks to feed.");
@@ -129,17 +105,15 @@ void ChunkSet::ProcessInputFiles(
 void ChunkSet::InputWorker() {
   try {
     while (true) {
-      auto file = input_queue_->Get();
+      auto chunk_source_with_phase = input_queue_->Get();
 
-      if (file.phase == FileDiscovery::Phase::kNewFile) {
-        // Create and index new chunk source.
-        auto source = CreateChunkSourceFromFile(file.filepath);
-        if (source) {
-          source->Index();
+      if (chunk_source_with_phase.phase == FileDiscovery::Phase::kNewFile) {
+        // Index the new chunk source.
+        auto source = std::move(chunk_source_with_phase.source);
+        source->Index();
 
-          absl::MutexLock lock(&chunk_sources_mutex_);
-          AddNewChunkSource(std::move(source));
-        }
+        absl::MutexLock lock(&chunk_sources_mutex_);
+        AddNewChunkSource(std::move(source));
       }
     }
   } catch (const QueueClosedException&) {
