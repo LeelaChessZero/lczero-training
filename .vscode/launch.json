@@ -8,7 +8,7 @@
             "type": "lldb",
             "request": "launch",
             "name": "stream_shuffler_test",
-            "program": "${workspaceFolder}/ice_skate/loader/builddir/stream_shuffler_test",
+            "program": "${workspaceFolder}/builddir/queue_test",
             "args": [
                 // "lc3",
                 // "--gather-threads=1",
@@ -17,7 +17,7 @@
                 // "-b",
                 // "trivial"
             ],
-            "cwd": "${workspaceFolder}/ice_skate/loader/builddir"
+            "cwd": "${workspaceFolder}/builddir"
         }
     ]
 }

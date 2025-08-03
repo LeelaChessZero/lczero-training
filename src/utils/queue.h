@@ -85,7 +85,6 @@ class Queue {
   mutable absl::Mutex mutex_;
 
   // Internal methods for producer management
-  void AddProducer();
   void RemoveProducer();
 
   // Internal Put methods (called by Producer)
@@ -109,7 +108,7 @@ Queue<T>::Queue(size_t capacity) : capacity_(capacity), buffer_(capacity) {}
 // Producer implementation
 template <typename T>
 Queue<T>::Producer::Producer(Queue<T>& queue) : queue_(&queue) {
-  queue_->AddProducer();
+  // Producer count is incremented in CreateProducer()
 }
 
 template <typename T>
@@ -168,29 +167,24 @@ void Queue<T>::Producer::Close() {
 // Queue implementation
 template <typename T>
 typename Queue<T>::Producer Queue<T>::CreateProducer() {
-  return Producer(*this);
-}
-
-template <typename T>
-void Queue<T>::AddProducer() {
   absl::MutexLock lock(&mutex_);
+  if (closed_) throw QueueClosedException();
   ++producer_count_;
+  return Producer(*this);
 }
 
 template <typename T>
 void Queue<T>::RemoveProducer() {
   absl::MutexLock lock(&mutex_);
   --producer_count_;
-  if (producer_count_ == 0) {
-    closed_ = true;
-  }
+  if (producer_count_ == 0) closed_ = true;
 }
 
 template <typename T>
 void Queue<T>::PutInternal(const T& item) {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-  if (closed_) throw QueueClosedException();
+  assert(!closed_);
   buffer_[tail_] = item;
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
@@ -200,7 +194,7 @@ template <typename T>
 void Queue<T>::PutInternal(T&& item) {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-  if (closed_) throw QueueClosedException();
+  assert(!closed_);
   buffer_[tail_] = std::move(item);
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
@@ -222,7 +216,7 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
         return args->queue->CanPutMultiple(args->count);
       },
       &args));
-  if (closed_) throw QueueClosedException();
+  assert(!closed_);
 
   for (const auto& item : items) {
     buffer_[tail_] = item;
@@ -247,7 +241,7 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
         return args->queue->CanPutMultiple(args->count);
       },
       &args));
-  if (closed_) throw QueueClosedException();
+  assert(!closed_);
 
   for (auto& item : items) {
     buffer_[tail_] = std::move(item);
@@ -311,13 +305,13 @@ size_t Queue<T>::Capacity() const {
 
 template <typename T>
 bool Queue<T>::CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return closed_ || size_ < capacity_;
+  return size_ < capacity_;
 }
 
 template <typename T>
 bool Queue<T>::CanPutMultiple(size_t count)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return closed_ || size_ + count <= capacity_;
+  return size_ + count <= capacity_;
 }
 
 template <typename T>

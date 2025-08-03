@@ -183,16 +183,16 @@ TEST_F(QueueTest, CapacityOne) {
 
 // Tests for operations when all producer tokens are destroyed
 
-TEST_F(QueueTest, PutOnClosedQueue) {
+TEST_F(QueueTest, CreateProducerOnClosedQueue) {
   Queue<int> queue(5);
   // Create and immediately destroy producer to close queue
   {
     auto producer = queue.CreateProducer();
   }
 
-  // Try to create a new producer after queue is closed
-  auto producer = queue.CreateProducer();
-  EXPECT_THROW(producer.Put(42), QueueClosedException);
+  // Trying to create a new producer after queue is closed results in an
+  // exception.
+  EXPECT_THROW(queue.CreateProducer(), QueueClosedException);
 }
 
 TEST_F(QueueTest, GetOnClosedQueue) {
@@ -203,19 +203,6 @@ TEST_F(QueueTest, GetOnClosedQueue) {
   }
 
   EXPECT_THROW(queue.Get(), QueueClosedException);
-}
-
-TEST_F(QueueTest, BatchPutOnClosedQueue) {
-  Queue<int> queue(5);
-  // Create and immediately destroy producer to close queue
-  {
-    auto producer = queue.CreateProducer();
-  }
-
-  auto producer = queue.CreateProducer();
-  std::vector<int> items = {1, 2, 3};
-  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
-               QueueClosedException);
 }
 
 TEST_F(QueueTest, BatchGetOnClosedQueue) {
@@ -365,40 +352,6 @@ TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
   EXPECT_EQ(result, 42);
 }
 
-TEST_F(QueueTest, ProducerDestructionUnblocksWaitingPut) {
-  Queue<int> queue(1);
-  std::unique_ptr<Queue<int>::Producer> producer1 =
-      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
-  std::unique_ptr<Queue<int>::Producer> producer2 =
-      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
-  producer1->Put(1);  // Fill the queue
-
-  std::atomic<bool> put_started{false};
-  std::atomic<bool> exception_thrown{false};
-
-  std::thread blocker([&producer2, &put_started, &exception_thrown]() {
-    put_started = true;
-    try {
-      producer2->Put(2);  // This should block
-    } catch (const QueueClosedException&) {
-      exception_thrown = true;
-    }
-  });
-
-  // Give the blocker thread time to block
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_TRUE(put_started);
-  EXPECT_FALSE(exception_thrown);
-
-  // Destroy all producers - this should close queue and unblock the waiting
-  // Put()
-  producer1.reset();
-  producer2.reset();
-
-  blocker.join();
-  EXPECT_TRUE(exception_thrown);
-}
-
 TEST_F(QueueTest, ProducerDestructionUnblocksWaitingGet) {
   Queue<int> queue(5);  // Empty queue
 
@@ -429,59 +382,6 @@ TEST_F(QueueTest, ProducerDestructionUnblocksWaitingGet) {
 
   blocker.join();
   EXPECT_TRUE(exception_thrown);
-}
-
-TEST_F(QueueTest, ProducerDestructionUnblocksBatchOperations) {
-  Queue<int> queue(2);
-  std::unique_ptr<Queue<int>::Producer> producer =
-      std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
-  producer->Put(1);
-  producer->Put(2);  // Fill the queue
-
-  std::atomic<bool> batch_put_started{false};
-  std::atomic<bool> batch_put_exception{false};
-  std::atomic<bool> batch_get_started{false};
-  std::atomic<bool> batch_get_exception{false};
-
-  std::thread batch_put_blocker(
-      [&producer, &batch_put_started, &batch_put_exception]() {
-        batch_put_started = true;
-        try {
-          std::vector<int> items = {3, 4, 5};
-          producer->Put(absl::Span<const int>(items));  // Should block
-        } catch (const QueueClosedException&) {
-          batch_put_exception = true;
-        }
-      });
-
-  Queue<int> empty_queue(5);
-  std::unique_ptr<Queue<int>::Producer> empty_producer =
-      std::make_unique<Queue<int>::Producer>(empty_queue.CreateProducer());
-  std::thread batch_get_blocker(
-      [&empty_queue, &batch_get_started, &batch_get_exception]() {
-        batch_get_started = true;
-        try {
-          empty_queue.Get(3);  // Should block
-        } catch (const QueueClosedException&) {
-          batch_get_exception = true;
-        }
-      });
-
-  // Give the blocker threads time to block
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_TRUE(batch_put_started);
-  EXPECT_TRUE(batch_get_started);
-  EXPECT_FALSE(batch_put_exception);
-  EXPECT_FALSE(batch_get_exception);
-
-  // Destroy producers to close both queues
-  producer.reset();
-  empty_producer.reset();
-
-  batch_put_blocker.join();
-  batch_get_blocker.join();
-  EXPECT_TRUE(batch_put_exception);
-  EXPECT_TRUE(batch_get_exception);
 }
 
 // Test: Get() should not throw when queue is closed but has elements
