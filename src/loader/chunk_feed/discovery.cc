@@ -1,6 +1,7 @@
 #include "loader/chunk_feed/discovery.h"
 
 #include <absl/cleanup/cleanup.h>
+#include <absl/container/flat_hash_set.h>
 #include <absl/log/check.h>
 #include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
@@ -51,20 +52,41 @@ void FileDiscovery::Close() {
 }
 
 void FileDiscovery::AddDirectory(const Path& directory) {
-  PerformInitialScan(directory);
-  AddWatchRecursive(directory);
+  ScanDirectoryWithWatch(directory);
+
+  // Signal that initial scan is complete
+  producer_.Put({{.filepath = Path{},
+                  .message_type = MessageType::kInitialScanComplete}});
 }
 
-void FileDiscovery::PerformInitialScan(const Path& directory) {
+void FileDiscovery::ScanDirectoryWithWatch(const Path& directory) {
+  // Step 1: Set up watch first
+  int wd = inotify_add_watch(inotify_fd_, directory.c_str(),
+                             IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
+                                 IN_DELETE | IN_DELETE_SELF | IN_MOVE);
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << directory;
+  watch_descriptors_[wd] = directory;
+
+  // Step 2: Scan directory non-recursively, remembering files and subdirs
+  std::vector<Path> files;
+  std::vector<Path> subdirectories;
+  std::error_code ec;
+  auto iterator = std::filesystem::directory_iterator(directory, ec);
+  CHECK(!ec) << "Failed to iterate directory " << directory << ": "
+             << ec.message();
+
+  for (const auto& entry : iterator) {
+    if (entry.is_regular_file(ec) && !ec) {
+      files.push_back(entry.path());
+    } else if (entry.is_directory(ec) && !ec) {
+      subdirectories.push_back(entry.path());
+    }
+  }
+
+  // Send notifications for discovered files
   constexpr size_t kBatchSize = 10000;
   std::vector<File> batch;
   batch.reserve(kBatchSize);
-
-  // Scan existing files using recursive directory iterator
-  std::error_code ec;
-  auto iterator = std::filesystem::recursive_directory_iterator(directory, ec);
-  CHECK(!ec) << "Failed to iterate directory " << directory << ": "
-             << ec.message();
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
@@ -72,20 +94,68 @@ void FileDiscovery::PerformInitialScan(const Path& directory) {
     batch.clear();
   };
 
-  for (const auto& entry : iterator) {
-    if (entry.is_regular_file(ec) && !ec) {
-      batch.push_back({.filepath = entry.path().string(),
-                       .message_type = MessageType::kFile});
-      // Flush batch when it reaches the limit
-      if (batch.size() >= kBatchSize) flush_batch();
+  for (const auto& filepath : files) {
+    batch.push_back(
+        {.filepath = filepath.string(), .message_type = MessageType::kFile});
+    if (batch.size() >= kBatchSize) flush_batch();
+  }
+
+  // Step 3: Read from watch descriptor, skipping already discovered files
+  ProcessWatchEventsForNewItems(files);
+
+  // Step 4: Clean the files vector to save memory
+  files.clear();
+
+  // Step 5: Recursively call for subdirectories
+  for (const auto& subdir : subdirectories) {
+    ScanDirectoryWithWatch(subdir);
+  }
+
+  // Flush any remaining files
+  flush_batch();
+}
+
+void FileDiscovery::ProcessWatchEventsForNewItems(
+    const std::vector<Path>& known_files) {
+  // Create a set for fast lookup of already discovered files
+  absl::flat_hash_set<std::string> known_file_set;
+  for (const auto& file : known_files) {
+    known_file_set.insert(file.string());
+  }
+
+  // Process any events that may have occurred during scanning
+  std::array<char, 4096> buffer;
+  std::vector<File> new_files;
+
+  while (true) {
+    ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
+    if (length <= 0) break;  // No more events to process
+
+    ssize_t offset = 0;
+    while (offset < length) {
+      const struct inotify_event* event =
+          reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
+
+      // Only process file creation/write events, skip already known files
+      if ((event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) && event->len > 0) {
+        const Path directory(watch_descriptors_.at(event->wd));
+        Path filepath = directory / event->name;
+
+        // Only add if we haven't seen this file before
+        if (!known_file_set.contains(filepath.string())) {
+          new_files.push_back({.filepath = filepath.string(),
+                               .message_type = MessageType::kFile});
+        }
+      }
+
+      offset += sizeof(struct inotify_event) + event->len;
     }
   }
 
-  flush_batch();  // Flush any remaining files in the batch
-
-  // Signal that initial scan is complete
-  producer_.Put({{.filepath = Path{},
-                  .message_type = MessageType::kInitialScanComplete}});
+  // Send notifications for any new files discovered through watch events
+  if (!new_files.empty()) {
+    producer_.Put(new_files);
+  }
 }
 
 void FileDiscovery::AddWatchRecursive(const Path& path) {
@@ -194,7 +264,7 @@ auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
   constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;
   constexpr uint32_t kDirDeleteMask = IN_DELETE | IN_ISDIR;
   if ((event.mask & kDirCreateMask) == kDirCreateMask) {
-    AddWatchRecursive(filepath.string());
+    ScanDirectoryWithWatch(filepath.string());
   } else if ((event.mask & kDirDeleteMask) == kDirDeleteMask) {
     // Directory deleted - remove all watches for it and subdirectories
     RemoveWatchRecursive(filepath.string());

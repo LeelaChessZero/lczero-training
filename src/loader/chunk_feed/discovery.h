@@ -56,7 +56,8 @@ class FileDiscovery {
   void MonitorThread();
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);
-  void PerformInitialScan(const Path& directory);
+  void ScanDirectoryWithWatch(const Path& directory);
+  void ProcessWatchEventsForNewItems(const std::vector<Path>& known_files);
   void ProcessInotifyEvents(Queue<File>::Producer& producer);
   std::optional<File> ProcessInotifyEvent(const struct inotify_event& event);
 
