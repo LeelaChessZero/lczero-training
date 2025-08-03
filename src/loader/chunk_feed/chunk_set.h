@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/discovery.h"
 #include "utils/queue.h"
@@ -41,14 +43,18 @@ class ChunkSet {
   void ProcessInputFiles(
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources);
   void InputWorker();
+  void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
 
   const size_t chunks_window_;
   ThreadPool input_processing_pool_;
   Queue<FileDiscovery::File>* input_queue_;
   Queue<std::string> output_queue_;
 
-  std::deque<ChunkSourceItem> chunk_sources_;
-  StreamShuffler stream_shuffler_;
+  absl::Mutex chunk_sources_mutex_;
+  std::deque<ChunkSourceItem> chunk_sources_
+      ABSL_GUARDED_BY(chunk_sources_mutex_);
+  StreamShuffler stream_shuffler_ ABSL_GUARDED_BY(chunk_sources_mutex_);
 };
 
 }  // namespace training

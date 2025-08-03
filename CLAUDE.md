@@ -19,6 +19,9 @@ in the `builddir/`.
 * Run tests: `meson test -C builddir/`
 * Build: `meson compile -C builddir/` from build directory
 * Format C++ code: `just format-cpp`
+* We use Google C++ style guide.
+  * That means 80 columns.
+  * That means comments should be in full sentences with periods in the end.
 
 ## Documentation
 
