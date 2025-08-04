@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <thread>
 #include <vector>
 
@@ -299,7 +300,8 @@ TEST_F(QueueTest, MultipleProducersMultipleConsumers) {
 
 TEST_F(QueueTest, BlockingBehaviorOnFullQueue) {
   Queue<int> queue(2);
-  std::atomic<bool> put_blocked{false};
+  std::promise<void> about_to_block;
+  std::future<void> about_to_block_future = about_to_block.get_future();
   std::atomic<bool> put_completed{false};
   auto producer = queue.CreateProducer();
 
@@ -307,15 +309,14 @@ TEST_F(QueueTest, BlockingBehaviorOnFullQueue) {
   producer.Put(1);
   producer.Put(2);
 
-  std::thread blocker([&producer, &put_blocked, &put_completed]() {
-    put_blocked = true;
-    producer.Put(3);  // This should block
+  std::thread blocker([&producer, &about_to_block, &put_completed]() {
+    about_to_block.set_value();  // Signal we're about to block
+    producer.Put(3);             // This should block
     put_completed = true;
   });
 
-  // Give the blocker thread time to block
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_TRUE(put_blocked);
+  // Wait for thread to signal it's about to block
+  about_to_block_future.wait();
   EXPECT_FALSE(put_completed);
 
   // Make space in the queue
@@ -328,20 +329,20 @@ TEST_F(QueueTest, BlockingBehaviorOnFullQueue) {
 
 TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
   Queue<int> queue(5);
-  std::atomic<bool> get_blocked{false};
+  std::promise<void> about_to_block;
+  std::future<void> about_to_block_future = about_to_block.get_future();
   std::atomic<bool> get_completed{false};
   std::atomic<int> result{-1};
   auto producer = queue.CreateProducer();
 
-  std::thread blocker([&queue, &get_blocked, &get_completed, &result]() {
-    get_blocked = true;
-    result = queue.Get();  // This should block
+  std::thread blocker([&queue, &about_to_block, &get_completed, &result]() {
+    about_to_block.set_value();  // Signal we're about to block
+    result = queue.Get();        // This should block
     get_completed = true;
   });
 
-  // Give the blocker thread time to block
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_TRUE(get_blocked);
+  // Wait for thread to signal it's about to block
+  about_to_block_future.wait();
   EXPECT_FALSE(get_completed);
 
   // Put an item in the queue
@@ -355,15 +356,16 @@ TEST_F(QueueTest, BlockingBehaviorOnEmptyQueue) {
 TEST_F(QueueTest, ProducerDestructionUnblocksWaitingGet) {
   Queue<int> queue(5);  // Empty queue
 
-  std::atomic<bool> get_started{false};
+  std::promise<void> about_to_block;
+  std::future<void> about_to_block_future = about_to_block.get_future();
   std::atomic<bool> exception_thrown{false};
 
   // Create a producer to keep queue open initially
   std::unique_ptr<Queue<int>::Producer> producer =
       std::make_unique<Queue<int>::Producer>(queue.CreateProducer());
 
-  std::thread blocker([&queue, &get_started, &exception_thrown]() {
-    get_started = true;
+  std::thread blocker([&queue, &about_to_block, &exception_thrown]() {
+    about_to_block.set_value();  // Signal we're about to block
     try {
       queue.Get();  // This should block
     } catch (const QueueClosedException&) {
@@ -371,9 +373,8 @@ TEST_F(QueueTest, ProducerDestructionUnblocksWaitingGet) {
     }
   });
 
-  // Give the blocker thread time to block
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  EXPECT_TRUE(get_started);
+  // Wait for thread to signal it's about to block
+  about_to_block_future.wait();
   EXPECT_FALSE(exception_thrown);
 
   // Destroy the producer - this should close queue and unblock the waiting
@@ -495,6 +496,328 @@ TEST_F(QueueTest, ProducerMoveSemantics) {
   EXPECT_EQ(queue.Get(), 43);
   EXPECT_EQ(queue.Get(), 44);
   EXPECT_THROW(queue.Get(), QueueClosedException);
+}
+
+// Tests for Put operations on closed queue
+TEST_F(QueueTest, PutOnClosedQueueThrowsException) {
+  Queue<int> queue(5);
+
+  // Create producer and close it
+  auto producer = queue.CreateProducer();
+  queue.Close();
+
+  // All Put operations should throw on closed queue
+  EXPECT_THROW(producer.Put(42), QueueClosedException);
+  EXPECT_THROW(producer.Put(std::move(42)), QueueClosedException);
+
+  std::vector<int> items = {1, 2, 3};
+  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
+               QueueClosedException);
+  EXPECT_THROW(producer.Put(absl::Span<int>(items)), QueueClosedException);
+}
+
+TEST_F(QueueTest, PutOnClosedQueueAfterProducerDestruction) {
+  Queue<int> queue(5);
+
+  // Create producer, add item, then close by destroying all producers
+  auto producer = queue.CreateProducer();
+  producer.Put(1);
+  {
+    auto temp_producer = std::move(producer);
+  }  // All producers destroyed, queue closed
+
+  // Try to create new producer after close
+  EXPECT_THROW(queue.CreateProducer(), QueueClosedException);
+}
+
+TEST_F(QueueTest, BatchPutOnClosedQueueThrowsException) {
+  Queue<int> queue(10);
+
+  auto producer = queue.CreateProducer();
+  queue.Close();
+
+  // Batch put operations should throw on closed queue
+  std::vector<int> items = {1, 2, 3, 4, 5};
+  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
+               QueueClosedException);
+
+  std::vector<int> mutable_items = {6, 7, 8};
+  EXPECT_THROW(producer.Put(absl::Span<int>(mutable_items)),
+               QueueClosedException);
+}
+
+TEST_F(QueueTest, PublicCloseMethod) {
+  Queue<int> queue(5);
+
+  auto producer = queue.CreateProducer();
+  producer.Put(1);
+  producer.Put(2);
+
+  // Explicitly close the queue using public Close() method
+  queue.Close();
+
+  // Put operations should now throw
+  EXPECT_THROW(producer.Put(3), QueueClosedException);
+
+  // But Get operations should still work for existing items
+  EXPECT_EQ(queue.Get(), 1);
+  EXPECT_EQ(queue.Get(), 2);
+
+  // Get should throw when queue is empty and closed
+  EXPECT_THROW(queue.Get(), QueueClosedException);
+}
+
+TEST_F(QueueTest, CloseUnblocksWaitingSinglePut) {
+  Queue<int> queue(2);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  // Fill the queue
+  producer.Put(1);
+  producer.Put(2);
+
+  std::promise<void> about_to_block;
+  std::future<void> about_to_block_future = about_to_block.get_future();
+  std::atomic<bool> exception_thrown{false};
+
+  std::thread blocker([&producer, &about_to_block, &exception_thrown]() {
+    about_to_block.set_value();  // Signal we're about to block
+    try {
+      producer.Put(3);  // This should block since queue is full
+    } catch (const QueueClosedException&) {
+      exception_thrown = true;
+    }
+  });
+
+  // Wait for thread to signal it's about to block
+  about_to_block_future.wait();
+  EXPECT_FALSE(exception_thrown);
+
+  // Close the queue - this should unblock the waiting Put()
+  queue.Close();
+
+  blocker.join();
+  EXPECT_TRUE(exception_thrown);
+}
+
+TEST_F(QueueTest, CloseUnblocksWaitingBatchPut) {
+  Queue<int> queue(3);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  // Fill the queue partially
+  producer.Put(1);
+  producer.Put(2);
+
+  std::promise<void> about_to_block;
+  std::future<void> about_to_block_future = about_to_block.get_future();
+  std::atomic<bool> exception_thrown{false};
+
+  std::thread blocker([&producer, &about_to_block, &exception_thrown]() {
+    about_to_block.set_value();  // Signal we're about to block
+    try {
+      std::vector<int> items = {3, 4, 5};  // Need 3 slots but only 1 available
+      producer.Put(absl::Span<const int>(items));  // This should block
+    } catch (const QueueClosedException&) {
+      exception_thrown = true;
+    }
+  });
+
+  // Wait for thread to signal it's about to block
+  about_to_block_future.wait();
+  EXPECT_FALSE(exception_thrown);
+
+  // Close the queue - this should unblock the waiting batch Put()
+  queue.Close();
+
+  blocker.join();
+  EXPECT_TRUE(exception_thrown);
+}
+
+// Tests for new wait functions
+TEST_F(QueueTest, WaitForRoomAtLeast) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  // Initially empty queue should have room >= 5
+  queue.WaitForRoomAtLeast(5);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Fill queue partially
+  producer.Put(1);
+  producer.Put(2);
+
+  // Should have room >= 3
+  queue.WaitForRoomAtLeast(3);
+  EXPECT_EQ(queue.Size(), 2);
+
+  // Fill more
+  producer.Put(3);
+  producer.Put(4);
+
+  // Should have room >= 1
+  queue.WaitForRoomAtLeast(1);
+  EXPECT_EQ(queue.Size(), 4);
+
+  // Test blocking behavior
+  producer.Put(5);  // Queue is now full
+
+  std::promise<void> wait_started;
+  std::future<void> wait_started_future = wait_started.get_future();
+  std::atomic<bool> wait_completed{false};
+
+  std::thread waiter([&queue, &wait_started, &wait_completed]() {
+    wait_started.set_value();
+    queue.WaitForRoomAtLeast(2);  // Should block until 2 slots are free
+    wait_completed = true;
+  });
+
+  wait_started_future.wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  // Free up space
+  queue.Get();
+  queue.Get();
+
+  waiter.join();
+  EXPECT_TRUE(wait_completed);
+}
+
+TEST_F(QueueTest, WaitForRoomAtMost) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue partially
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+
+  // Should wait until room <= 2 (currently room = 2)
+  queue.WaitForRoomAtMost(2);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Test blocking behavior
+  std::promise<void> wait_started;
+  std::future<void> wait_started_future = wait_started.get_future();
+  std::atomic<bool> wait_completed{false};
+
+  std::thread waiter([&queue, &wait_started, &wait_completed]() {
+    wait_started.set_value();
+    queue.WaitForRoomAtMost(1);  // Should block until room <= 1
+    wait_completed = true;
+  });
+
+  wait_started_future.wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  // Add one more item to make room = 1
+  producer.Put(4);
+
+  waiter.join();
+  EXPECT_TRUE(wait_completed);
+  EXPECT_EQ(queue.Size(), 4);
+}
+
+TEST_F(QueueTest, WaitForSizeAtLeast) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  // Test blocking behavior on empty queue
+  std::promise<void> wait_started;
+  std::future<void> wait_started_future = wait_started.get_future();
+  std::atomic<bool> wait_completed{false};
+
+  std::thread waiter([&queue, &wait_started, &wait_completed]() {
+    wait_started.set_value();
+    queue.WaitForSizeAtLeast(3);  // Should block until size >= 3
+    wait_completed = true;
+  });
+
+  wait_started_future.wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  // Add items
+  producer.Put(1);
+  producer.Put(2);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  producer.Put(3);  // Now size = 3
+
+  waiter.join();
+  EXPECT_TRUE(wait_completed);
+  EXPECT_EQ(queue.Size(), 3);
+}
+
+TEST_F(QueueTest, WaitForSizeAtMost) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  // Initially empty, size <= 3
+  queue.WaitForSizeAtMost(3);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Fill queue
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  producer.Put(4);
+  producer.Put(5);
+
+  // Test blocking behavior
+  std::promise<void> wait_started;
+  std::future<void> wait_started_future = wait_started.get_future();
+  std::atomic<bool> wait_completed{false};
+
+  std::thread waiter([&queue, &wait_started, &wait_completed]() {
+    wait_started.set_value();
+    queue.WaitForSizeAtMost(2);  // Should block until size <= 2
+    wait_completed = true;
+  });
+
+  wait_started_future.wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  // Remove items
+  queue.Get();
+  queue.Get();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_FALSE(wait_completed);
+
+  queue.Get();  // Now size = 2
+
+  waiter.join();
+  EXPECT_TRUE(wait_completed);
+  EXPECT_EQ(queue.Size(), 2);
+}
+
+TEST_F(QueueTest, WaitFunctionsEdgeCases) {
+  Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
+
+  // Wait for room = 0 should work when queue is full
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  queue.WaitForRoomAtMost(0);
+  EXPECT_EQ(queue.Size(), 3);
+
+  // Wait for size = 0 should work when queue is empty
+  queue.Get();
+  queue.Get();
+  queue.Get();
+  queue.WaitForSizeAtMost(0);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Wait for room >= capacity should always succeed
+  queue.WaitForRoomAtLeast(3);
+  EXPECT_EQ(queue.Size(), 0);
+
+  // Wait for size >= 0 should always succeed
+  queue.WaitForSizeAtLeast(0);
+  EXPECT_EQ(queue.Size(), 0);
 }
 
 }  // namespace lczero

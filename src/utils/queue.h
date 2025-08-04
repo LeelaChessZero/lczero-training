@@ -71,6 +71,21 @@ class Queue {
   // Returns the capacity of the queue.
   size_t Capacity() const;
 
+  // Explicitly close the queue, preventing further Put operations.
+  void Close();
+
+  // Wait until queue has at least the specified amount of free space.
+  void WaitForRoomAtLeast(size_t room);
+
+  // Wait until queue has at most the specified amount of free space.
+  void WaitForRoomAtMost(size_t room);
+
+  // Wait until queue has at least the specified number of elements.
+  void WaitForSizeAtLeast(size_t size);
+
+  // Wait until queue has at most the specified number of elements.
+  void WaitForSizeAtMost(size_t size);
+
  private:
   friend class Producer;
 
@@ -98,6 +113,12 @@ class Queue {
   bool CanPutMultiple(size_t count) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool CanGet() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool CanGetMultiple(size_t count) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  // Additional condition predicates for wait functions
+  bool HasRoomAtLeast(size_t room) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  bool HasRoomAtMost(size_t room) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  bool HasSizeAtLeast(size_t size) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  bool HasSizeAtMost(size_t size) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 };
 
 // Implementation
@@ -184,7 +205,7 @@ template <typename T>
 void Queue<T>::PutInternal(const T& item) {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-  assert(!closed_);
+  if (closed_) throw QueueClosedException();
   buffer_[tail_] = item;
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
@@ -194,7 +215,7 @@ template <typename T>
 void Queue<T>::PutInternal(T&& item) {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-  assert(!closed_);
+  if (closed_) throw QueueClosedException();
   buffer_[tail_] = std::move(item);
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
@@ -216,7 +237,7 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
         return args->queue->CanPutMultiple(args->count);
       },
       &args));
-  assert(!closed_);
+  if (closed_) throw QueueClosedException();
 
   for (const auto& item : items) {
     buffer_[tail_] = item;
@@ -241,7 +262,7 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
         return args->queue->CanPutMultiple(args->count);
       },
       &args));
-  assert(!closed_);
+  if (closed_) throw QueueClosedException();
 
   for (auto& item : items) {
     buffer_[tail_] = std::move(item);
@@ -304,14 +325,84 @@ size_t Queue<T>::Capacity() const {
 }
 
 template <typename T>
+void Queue<T>::Close() {
+  absl::MutexLock lock(&mutex_);
+  closed_ = true;
+}
+
+template <typename T>
+void Queue<T>::WaitForRoomAtLeast(size_t room) {
+  struct Args {
+    Queue<T>* queue;
+    size_t room;
+  };
+  Args args{this, room};
+  absl::MutexLock lock(&mutex_);
+  mutex_.Await(absl::Condition(
+      +[](void* data) -> bool {
+        auto* args = static_cast<Args*>(data);
+        return args->queue->HasRoomAtLeast(args->room);
+      },
+      &args));
+}
+
+template <typename T>
+void Queue<T>::WaitForRoomAtMost(size_t room) {
+  struct Args {
+    Queue<T>* queue;
+    size_t room;
+  };
+  Args args{this, room};
+  absl::MutexLock lock(&mutex_);
+  mutex_.Await(absl::Condition(
+      +[](void* data) -> bool {
+        auto* args = static_cast<Args*>(data);
+        return args->queue->HasRoomAtMost(args->room);
+      },
+      &args));
+}
+
+template <typename T>
+void Queue<T>::WaitForSizeAtLeast(size_t size) {
+  struct Args {
+    Queue<T>* queue;
+    size_t size;
+  };
+  Args args{this, size};
+  absl::MutexLock lock(&mutex_);
+  mutex_.Await(absl::Condition(
+      +[](void* data) -> bool {
+        auto* args = static_cast<Args*>(data);
+        return args->queue->HasSizeAtLeast(args->size);
+      },
+      &args));
+}
+
+template <typename T>
+void Queue<T>::WaitForSizeAtMost(size_t size) {
+  struct Args {
+    Queue<T>* queue;
+    size_t size;
+  };
+  Args args{this, size};
+  absl::MutexLock lock(&mutex_);
+  mutex_.Await(absl::Condition(
+      +[](void* data) -> bool {
+        auto* args = static_cast<Args*>(data);
+        return args->queue->HasSizeAtMost(args->size);
+      },
+      &args));
+}
+
+template <typename T>
 bool Queue<T>::CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return size_ < capacity_;
+  return closed_ || size_ < capacity_;
 }
 
 template <typename T>
 bool Queue<T>::CanPutMultiple(size_t count)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return size_ + count <= capacity_;
+  return closed_ || size_ + count <= capacity_;
 }
 
 template <typename T>
@@ -323,6 +414,30 @@ template <typename T>
 bool Queue<T>::CanGetMultiple(size_t count)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
   return closed_ || size_ >= count;
+}
+
+template <typename T>
+bool Queue<T>::HasRoomAtLeast(size_t room)
+    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+  return capacity_ - size_ >= room;
+}
+
+template <typename T>
+bool Queue<T>::HasRoomAtMost(size_t room)
+    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+  return capacity_ - size_ <= room;
+}
+
+template <typename T>
+bool Queue<T>::HasSizeAtLeast(size_t size)
+    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+  return size_ >= size;
+}
+
+template <typename T>
+bool Queue<T>::HasSizeAtMost(size_t size)
+    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+  return size_ <= size;
 }
 
 }  // namespace lczero
