@@ -116,10 +116,18 @@ chunk_source_feed_test = executable(
   link_with : loader_lib,
 )
 
+chunk_set_test = executable(
+  'chunk_set_test',
+  'src/loader/chunk_feed/chunk_set_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
 test('stream_shuffler', stream_shuffler_test)
 test('queue', queue_test)
 test('discovery', discovery_test)
 test('chunk_source_feed', chunk_source_feed_test)
+test('chunk_set', chunk_set_test)
 
 discovery_main = executable(
   'discovery_main',

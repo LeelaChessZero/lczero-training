@@ -16,7 +16,7 @@ DataLoader::DataLoader(const DataLoaderConfig& config)
                          }),
       chunk_set_(chunk_source_feed_.output(),
                  ChunkSetOptions{
-                     .chunks_window = config_.num_chunks_window,
+                     .chunk_pool_size = config_.num_chunks_window,
                  }) {}
 
 }  // namespace training
