@@ -3,9 +3,9 @@
 #include <cstddef>
 #include <string>
 
-#include "chunk_feed/chunk_set.h"
-#include "chunk_feed/chunk_source_feed.h"
-#include "chunk_feed/discovery.h"
+#include "loader/chunk_feed/chunk_set.h"
+#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/file_path_provider.h"
 
 namespace lczero {
 namespace training {
@@ -21,7 +21,7 @@ class DataLoader {
 
  private:
   DataLoaderConfig config_;
-  FileDiscovery file_discovery_;
+  FilePathProvider file_path_provifer_;
   ChunkSourceFeed chunk_source_feed_;
   ChunkSet chunk_set_;
 };

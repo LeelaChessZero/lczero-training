@@ -1,8 +1,8 @@
-// ABOUTME: Comprehensive unit tests for the FileDiscovery class
+// ABOUTME: Comprehensive unit tests for the FilePathProvider class
 // ABOUTME: Tests initial directory scanning, file monitoring, and Queue-based
 // output
 
-#include "loader/chunk_feed/discovery.h"
+#include "loader/chunk_feed/file_path_provider.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/log/log.h>
@@ -16,13 +16,13 @@
 namespace lczero {
 namespace training {
 
-class FileDiscoveryTest : public ::testing::Test {
+class FilePathProviderTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Create unique test directory
     test_dir_ =
         std::filesystem::temp_directory_path() /
-        ("discovery_test_" +
+        ("file_path_provider_test_" +
          std::to_string(
              std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(test_dir_);
@@ -51,12 +51,12 @@ class FileDiscoveryTest : public ::testing::Test {
 
   // Helper function to consume all initial scan results including completion
   // marker
-  void ConsumeInitialScan(Queue<FileDiscovery::File>* queue) {
+  void ConsumeInitialScan(Queue<FilePathProvider::File>* queue) {
     bool scan_complete = false;
     while (!scan_complete) {
       auto file = queue->Get();
       if (file.message_type ==
-          FileDiscovery::MessageType::kInitialScanComplete) {
+          FilePathProvider::MessageType::kInitialScanComplete) {
         scan_complete = true;
       }
       // We consume and discard all initial scan files
@@ -64,42 +64,43 @@ class FileDiscoveryTest : public ::testing::Test {
   }
 };
 
-TEST_F(FileDiscoveryTest, ConstructorCreatesQueue) {
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
-  auto* queue = discovery.output();
+TEST_F(FilePathProviderTest, ConstructorCreatesQueue) {
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  auto* queue = file_path_provider.output();
   EXPECT_NE(queue, nullptr);
   EXPECT_EQ(queue->Capacity(), 100);
 
   // Should have kInitialScanComplete message for empty directory
   auto file = queue->Get();
   EXPECT_EQ(file.message_type,
-            FileDiscovery::MessageType::kInitialScanComplete);
+            FilePathProvider::MessageType::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
 }
 
-TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
+TEST_F(FilePathProviderTest, InitialScanFindsExistingFiles) {
   // Create some test files
   CreateFile(test_dir_ / "file1.txt");
   CreateFile(test_dir_ / "file2.txt");
   CreateFile(test_dir_ / "subdir" / "file3.txt");
 
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Collect files from queue
   std::unordered_set<std::string> found_files;
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
 
   // Collect all files found during initial scan
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
+    if (file.message_type ==
+        FilePathProvider::MessageType::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
       scan_complete_received = true;
     } else {
-      EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
+      EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
       found_files.insert(file.filepath.filename().string());
     }
   }
@@ -111,22 +112,23 @@ TEST_F(FileDiscoveryTest, InitialScanFindsExistingFiles) {
   EXPECT_TRUE(scan_complete_received);
 }
 
-TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
+TEST_F(FilePathProviderTest, InitialScanIgnoresDirectories) {
   // Create files and directories
   CreateFile(test_dir_ / "file.txt");
   CreateDirectory(test_dir_ / "subdir");
   CreateDirectory(test_dir_ / "empty_dir");
 
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Should only find the file, not directories
-  std::vector<FileDiscovery::File> files;
-  auto* queue = discovery.output();
+  std::vector<FilePathProvider::File> files;
+  auto* queue = file_path_provider.output();
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
+    if (file.message_type ==
+        FilePathProvider::MessageType::kInitialScanComplete) {
       scan_complete_received = true;
     } else {
       files.push_back(file);
@@ -135,14 +137,14 @@ TEST_F(FileDiscoveryTest, InitialScanIgnoresDirectories) {
 
   EXPECT_EQ(files.size(), 1);
   EXPECT_EQ(files[0].filepath.filename().string(), "file.txt");
-  EXPECT_EQ(files[0].message_type, FileDiscovery::MessageType::kFile);
+  EXPECT_EQ(files[0].message_type, FilePathProvider::MessageType::kFile);
 }
 
-TEST_F(FileDiscoveryTest, DetectsNewFiles) {
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+TEST_F(FilePathProviderTest, DetectsNewFiles) {
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   // Consume initial scan results
   ConsumeInitialScan(queue);
 
@@ -152,18 +154,18 @@ TEST_F(FileDiscoveryTest, DetectsNewFiles) {
   // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "new_file.txt");
-  EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
+  EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
 }
 
-TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
+TEST_F(FilePathProviderTest, DetectsFilesInNewSubdirectory) {
   // Pre-create the subdirectory structure
   auto subdir = test_dir_ / "new_subdir";
   CreateDirectory(subdir);
 
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   // Consume initial scan results
   ConsumeInitialScan(queue);
 
@@ -173,41 +175,42 @@ TEST_F(FileDiscoveryTest, DetectsFilesInNewSubdirectory) {
   // Wait for the new file to be detected
   auto file = queue->Get();
   EXPECT_EQ(file.filepath.filename().string(), "file_in_new_dir.txt");
-  EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
+  EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
 }
 
-TEST_F(FileDiscoveryTest, HandlesEmptyDirectory) {
+TEST_F(FilePathProviderTest, HandlesEmptyDirectory) {
   // Test with empty directory
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   auto file = queue->Get();
   EXPECT_EQ(file.message_type,
-            FileDiscovery::MessageType::kInitialScanComplete);
+            FilePathProvider::MessageType::kInitialScanComplete);
   EXPECT_TRUE(file.filepath.empty());
 }
 
-TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
+TEST_F(FilePathProviderTest, MultipleFilesInBatch) {
   // Create many files BEFORE starting discovery
   for (int i = 0; i < 5; ++i) {
     CreateFile(test_dir_ / ("batch_file_" + std::to_string(i) + ".txt"));
   }
 
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
   // Collect all files
   std::unordered_set<std::string> found_files;
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   bool scan_complete_received = false;
   while (!scan_complete_received) {
     auto file = queue->Get();
-    if (file.message_type == FileDiscovery::MessageType::kInitialScanComplete) {
+    if (file.message_type ==
+        FilePathProvider::MessageType::kInitialScanComplete) {
       EXPECT_TRUE(file.filepath.empty());
       scan_complete_received = true;
     } else {
-      EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
+      EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
       found_files.insert(file.filepath.filename().string());
     }
   }
@@ -218,32 +221,32 @@ TEST_F(FileDiscoveryTest, MultipleFilesInBatch) {
   }
 }
 
-TEST_F(FileDiscoveryTest, QueueClosurePreventsNewFiles) {
-  FileDiscovery discovery(
-      FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+TEST_F(FilePathProviderTest, QueueClosurePreventsNewFiles) {
+  FilePathProvider file_path_provider(
+      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   // Consume initial scan results
   ConsumeInitialScan(queue);
 
-  discovery.Close();
+  file_path_provider.Close();
 
   // Any subsequent queue operations should throw
   EXPECT_THROW(queue->Get(), QueueClosedException);
 }
 
-TEST_F(FileDiscoveryTest, DestructorCleansUpProperly) {
+TEST_F(FilePathProviderTest, DestructorCleansUpProperly) {
   auto test_cleanup = [&]() {
-    FileDiscovery discovery(
-        FileDiscoveryOptions{.queue_capacity = 100, .directory = test_dir_});
+    FilePathProvider file_path_provider(
+        FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
 
     CreateFile(test_dir_ / "cleanup_test.txt");
 
-    auto* queue = discovery.output();
+    auto* queue = file_path_provider.output();
     // Consume initial scan results
     ConsumeInitialScan(queue);
 
-    // FileDiscovery destructor should be called here
+    // FilePathProvider destructor should be called here
   };
 
   // This should not crash or hang
@@ -251,12 +254,12 @@ TEST_F(FileDiscoveryTest, DestructorCleansUpProperly) {
 }
 
 // Stress test with rapid file creation
-TEST_F(FileDiscoveryTest, RapidFileCreation) {
-  FileDiscovery discovery(FileDiscoveryOptions{
+TEST_F(FilePathProviderTest, RapidFileCreation) {
+  FilePathProvider file_path_provider(FilePathProviderOptions{
       .queue_capacity = 1000,
       .directory = test_dir_});  // Larger queue for stress test
 
-  auto* queue = discovery.output();
+  auto* queue = file_path_provider.output();
   // Consume initial scan results
   ConsumeInitialScan(queue);
 
@@ -267,11 +270,11 @@ TEST_F(FileDiscoveryTest, RapidFileCreation) {
   }
 
   // Collect detected files - we should get at least some
-  std::vector<FileDiscovery::File> files;
+  std::vector<FilePathProvider::File> files;
   constexpr int min_expected = num_files / 2;
   for (int i = 0; i < min_expected; ++i) {
     auto file = queue->Get();
-    EXPECT_EQ(file.message_type, FileDiscovery::MessageType::kFile);
+    EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
     files.push_back(file);
   }
   EXPECT_GE(files.size(), min_expected);

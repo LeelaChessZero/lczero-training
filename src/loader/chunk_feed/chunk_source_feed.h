@@ -4,7 +4,7 @@
 #include <memory>
 
 #include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/discovery.h"
+#include "loader/chunk_feed/file_path_provider.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 
@@ -23,14 +23,14 @@ struct ChunkSourceFeedOptions {
 
 struct ChunkSourceWithPhase {
   std::unique_ptr<ChunkSource> source;
-  FileDiscovery::MessageType message_type;
+  FilePathProvider::MessageType message_type;
 };
 
-// Worker pool that converts FileDiscovery output to ChunkSource objects.
-// Takes FileDiscovery::File as input and outputs ChunkSourceWithPhase.
+// Worker pool that converts FilePathProvider output to ChunkSource objects.
+// Takes FilePathProvider::File as input and outputs ChunkSourceWithPhase.
 class ChunkSourceFeed {
  public:
-  using InputType = FileDiscovery::File;
+  using InputType = FilePathProvider::File;
   using OutputType = ChunkSourceWithPhase;
 
   ChunkSourceFeed(Queue<InputType>* input_queue,

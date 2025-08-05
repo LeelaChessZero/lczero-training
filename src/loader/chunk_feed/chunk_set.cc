@@ -57,12 +57,12 @@ std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources(
     auto chunk_source_with_phase = input_queue_->Get();
 
     if (chunk_source_with_phase.message_type ==
-        FileDiscovery::MessageType::kInitialScanComplete) {
+        FilePathProvider::MessageType::kInitialScanComplete) {
       break;
     }
 
     if (chunk_source_with_phase.message_type ==
-        FileDiscovery::MessageType::kFile) {
+        FilePathProvider::MessageType::kFile) {
       // Add ChunkSource to uninitialized sources.
       uninitialized_sources.push_back(
           std::move(chunk_source_with_phase.source));
@@ -135,7 +135,7 @@ void ChunkSet::IndexingWorker() {
       auto chunk_source_with_phase = input_queue_->Get();
 
       if (chunk_source_with_phase.message_type ==
-          FileDiscovery::MessageType::kFile) {
+          FilePathProvider::MessageType::kFile) {
         // Index the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
         source->Index();

@@ -9,8 +9,8 @@ Zero training process.
 The Data Loader consists of the following stages connected through a
 [Queue](../src/utils/queue.h):
 
-* [Discovery](../src/loader/chunk_feed/discovery.h) — Training data discovery
-  worker (watches a directory and provides feed of filenames)
+* [FilePathProvider](../src/loader/chunk_feed/file_path_provider.h) — Training
+  data discovery worker (watches a directory and provides feed of filenames)
 * [ChunkSource Feed](../src/loader/chunk_feed/chunk_source_feed.h) — Reads
   chunks from files, providing a stream of chunks.
 * [Chunk Set](../src/loader/chunk_feed/chunk_set.h) — Keeps a set of chunks,
@@ -39,7 +39,7 @@ class Stage {
  public:
     using InputType = ...;  // Type of input data for this stage
     using OutputType = ...; // Type of output data from this stage
-    // input_queue is omitted in the producer stages like Discovery.
+    // input_queue is omitted in the producer stages like FilePathProvider.
     Stage(Queue<InputType>* input_queue, /* other params */);
     Queue<OutputType>* output();
 

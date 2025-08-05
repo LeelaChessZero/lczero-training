@@ -60,7 +60,7 @@ includes = include_directories('src', 'libs/lc0/src')
 files = [
   'src/loader/chunk_feed/chunk_set.cc',
   'src/loader/chunk_feed/chunk_source_feed.cc',
-  'src/loader/chunk_feed/discovery.cc',
+  'src/loader/chunk_feed/file_path_provider.cc',
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
   'src/loader/data_loader.cc',
@@ -100,9 +100,9 @@ queue_test = executable(
   dependencies : test_deps + [absl_deps['synchronization']],
 )
 
-discovery_test = executable(
-  'discovery_test',
-  'src/loader/chunk_feed/discovery_test.cc',
+file_path_provider_test = executable(
+  'file_path_provider_test',
+  'src/loader/chunk_feed/file_path_provider_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
@@ -123,15 +123,15 @@ chunk_set_test = executable(
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
 )
-test('stream_shuffler', stream_shuffler_test)
-test('queue', queue_test)
-test('discovery', discovery_test)
-test('chunk_source_feed', chunk_source_feed_test)
-test('chunk_set', chunk_set_test)
+test('stream_shuffler_test', stream_shuffler_test)
+test('queue_test', queue_test)
+test('file_path_provider_test', file_path_provider_test)
+test('chunk_source_feed_test', chunk_source_feed_test)
+test('chunk_set_test', chunk_set_test)
 
-discovery_main = executable(
-  'discovery_main',
-  'src/loader/chunk_feed/discovery_main.cc',
+file_path_provider_main = executable(
+  'file_path_provider_main',
+  'src/loader/chunk_feed/file_path_provider_main.cc',
   include_directories : includes,
   dependencies : cli_deps,
   link_with : loader_lib,

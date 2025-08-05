@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/discovery.h"
+#include "loader/chunk_feed/file_path_provider.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/container/flat_hash_set.h>
@@ -17,24 +17,26 @@
 namespace lczero {
 namespace training {
 
-FileDiscovery::FileDiscovery(const FileDiscoveryOptions& options)
+FilePathProvider::FilePathProvider(const FilePathProviderOptions& options)
     : output_queue_(options.queue_capacity),
       producer_(output_queue_.CreateProducer()) {
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
-  monitor_thread_ = std::thread(&FileDiscovery::MonitorThread, this);
+  monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
   AddDirectory(options.directory);
 }
 
-FileDiscovery::~FileDiscovery() {
+FilePathProvider::~FilePathProvider() {
   Close();
   if (inotify_fd_ != -1) close(inotify_fd_);
 }
 
-Queue<FileDiscovery::File>* FileDiscovery::output() { return &output_queue_; }
+Queue<FilePathProvider::File>* FilePathProvider::output() {
+  return &output_queue_;
+}
 
-void FileDiscovery::Close() {
+void FilePathProvider::Close() {
   // First stop all watches
   for (const auto& [wd, path] : watch_descriptors_) {
     inotify_rm_watch(inotify_fd_, wd);
@@ -51,7 +53,7 @@ void FileDiscovery::Close() {
   producer_.Close();
 }
 
-void FileDiscovery::AddDirectory(const Path& directory) {
+void FilePathProvider::AddDirectory(const Path& directory) {
   ScanDirectoryWithWatch(directory);
 
   // Signal that initial scan is complete
@@ -59,7 +61,7 @@ void FileDiscovery::AddDirectory(const Path& directory) {
                   .message_type = MessageType::kInitialScanComplete}});
 }
 
-void FileDiscovery::ScanDirectoryWithWatch(const Path& directory) {
+void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
   // Step 1: Set up watch first
   int wd = inotify_add_watch(inotify_fd_, directory.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
@@ -115,7 +117,7 @@ void FileDiscovery::ScanDirectoryWithWatch(const Path& directory) {
   flush_batch();
 }
 
-void FileDiscovery::ProcessWatchEventsForNewItems(
+void FilePathProvider::ProcessWatchEventsForNewItems(
     const std::vector<Path>& known_files) {
   // Create a set for fast lookup of already discovered files
   absl::flat_hash_set<std::string> known_file_set;
@@ -158,7 +160,7 @@ void FileDiscovery::ProcessWatchEventsForNewItems(
   }
 }
 
-void FileDiscovery::AddWatchRecursive(const Path& path) {
+void FilePathProvider::AddWatchRecursive(const Path& path) {
   // Add watch for current directory
   int wd = inotify_add_watch(inotify_fd_, path.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
@@ -177,7 +179,7 @@ void FileDiscovery::AddWatchRecursive(const Path& path) {
   }
 }
 
-void FileDiscovery::RemoveWatchRecursive(const Path& base) {
+void FilePathProvider::RemoveWatchRecursive(const Path& base) {
   absl::erase_if(watch_descriptors_, [&](const auto& pair) {
     const auto& [wd, path] = pair;
     const auto mismatch_iter = absl::c_mismatch(base, path).first;
@@ -188,7 +190,7 @@ void FileDiscovery::RemoveWatchRecursive(const Path& base) {
   });
 }
 
-void FileDiscovery::MonitorThread() {
+void FilePathProvider::MonitorThread() {
   int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd";
   absl::Cleanup epoll_cleanup([epoll_fd]() { close(epoll_fd); });
@@ -218,7 +220,7 @@ void FileDiscovery::MonitorThread() {
   }
 }
 
-void FileDiscovery::ProcessInotifyEvents(Queue<File>::Producer& producer) {
+void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;
@@ -247,7 +249,7 @@ void FileDiscovery::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   flush_batch();  // Flush any remaining files in the batch
 }
 
-auto FileDiscovery::ProcessInotifyEvent(const struct inotify_event& event)
+auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)
     -> std::optional<File> {
   if (event.mask & IN_IGNORED) return std::nullopt;
 

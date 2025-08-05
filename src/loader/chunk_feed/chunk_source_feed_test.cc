@@ -4,24 +4,24 @@
 
 #include <filesystem>
 
-#include "loader/chunk_feed/discovery.h"
+#include "loader/chunk_feed/file_path_provider.h"
 #include "utils/queue.h"
 
 namespace lczero {
 namespace training {
 
 TEST(ChunkSourceFeedTest, ProcessesFiles) {
-  Queue<FileDiscovery::File> input_queue(10);
+  Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
   ChunkSourceFeed feed(&input_queue, options);
 
   {
     auto producer = input_queue.CreateProducer();
     // Add a file with unsupported extension (should not create ChunkSource)
-    producer.Put(FileDiscovery::File{
+    producer.Put(FilePathProvider::File{
         .filepath =
             std::filesystem::path("/test.txt"),  // unsupported extension
-        .message_type = FileDiscovery::MessageType::kFile});
+        .message_type = FilePathProvider::MessageType::kFile});
   }  // Producer destroyed here, closing input queue
 
   // Try to get output - there should be no valid ChunkSources for unsupported
@@ -41,7 +41,7 @@ TEST(ChunkSourceFeedTest, ProcessesFiles) {
 }
 
 TEST(ChunkSourceFeedTest, HandlesPhases) {
-  Queue<FileDiscovery::File> input_queue(10);
+  Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
   ChunkSourceFeed feed(&input_queue, options);
 
@@ -49,13 +49,13 @@ TEST(ChunkSourceFeedTest, HandlesPhases) {
     auto producer = input_queue.CreateProducer();
     // Test different phases - all should be passed through even if no
     // ChunkSource is created
-    producer.Put(
-        FileDiscovery::File{.filepath = std::filesystem::path("/test1.gz"),
-                            .message_type = FileDiscovery::MessageType::kFile});
+    producer.Put(FilePathProvider::File{
+        .filepath = std::filesystem::path("/test1.gz"),
+        .message_type = FilePathProvider::MessageType::kFile});
 
-    producer.Put(
-        FileDiscovery::File{.filepath = std::filesystem::path("/test2.gz"),
-                            .message_type = FileDiscovery::MessageType::kFile});
+    producer.Put(FilePathProvider::File{
+        .filepath = std::filesystem::path("/test2.gz"),
+        .message_type = FilePathProvider::MessageType::kFile});
   }  // Producer destroyed here, closing input queue
 
   // Queue should eventually close when input is done

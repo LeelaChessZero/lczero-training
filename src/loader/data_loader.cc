@@ -7,9 +7,9 @@ namespace training {
 
 DataLoader::DataLoader(const DataLoaderConfig& config)
     : config_(config),
-      file_discovery_(FileDiscoveryOptions{
+      file_path_provifer_(FilePathProviderOptions{
           .queue_capacity = 16, .directory = config_.training_data_path}),
-      chunk_source_feed_(file_discovery_.output(),
+      chunk_source_feed_(file_path_provifer_.output(),
                          ChunkSourceFeedOptions{
                              .worker_threads = 1,
                              .output_queue_size = 16,

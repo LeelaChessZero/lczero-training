@@ -17,8 +17,8 @@
 namespace lczero {
 namespace training {
 
-// Configuration options for FileDiscovery
-struct FileDiscoveryOptions {
+// Configuration options for FilePathProvider
+struct FilePathProviderOptions {
   size_t queue_capacity = 16;
   std::filesystem::path directory;
 };
@@ -27,7 +27,7 @@ struct FileDiscoveryOptions {
 // registered observers when new files are either closed after writing or
 // renamed into.
 // Uses background thread to monitor the directory.
-class FileDiscovery {
+class FilePathProvider {
  public:
   using Path = std::filesystem::path;
 
@@ -40,8 +40,8 @@ class FileDiscovery {
     Path filepath;
     MessageType message_type;
   };
-  explicit FileDiscovery(const FileDiscoveryOptions& options);
-  ~FileDiscovery();
+  explicit FilePathProvider(const FilePathProviderOptions& options);
+  ~FilePathProvider();
 
   // Returns the output queue for this stage
   Queue<File>* output();

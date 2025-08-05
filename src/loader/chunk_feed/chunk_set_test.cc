@@ -72,8 +72,8 @@ class ChunkSetTest : public ::testing::Test {
   // Helper to add a mock chunk source to the input queue
   void AddMockChunkSourceToQueue(const std::string& sort_key,
                                  size_t chunk_count,
-                                 FileDiscovery::MessageType message_type =
-                                     FileDiscovery::MessageType::kFile,
+                                 FilePathProvider::MessageType message_type =
+                                     FilePathProvider::MessageType::kFile,
                                  const std::string& chunk_prefix = "data") {
     ChunkSourceWithPhase item;
     item.source =
@@ -85,7 +85,7 @@ class ChunkSetTest : public ::testing::Test {
   void MarkInitialScanComplete() {
     ChunkSourceWithPhase item;
     item.source = nullptr;  // No source for completion marker
-    item.message_type = FileDiscovery::MessageType::kInitialScanComplete;
+    item.message_type = FilePathProvider::MessageType::kInitialScanComplete;
     input_producer_->Put(std::move(item));
   }
 
@@ -171,9 +171,9 @@ TEST_F(ChunkSetTest, ProcessesInitialScanChunkSources) {
 
 TEST_F(ChunkSetTest, OutputWorkerProducesChunks) {
   // Create mock chunk sources
-  AddMockChunkSourceToQueue("source1", 10, FileDiscovery::MessageType::kFile,
+  AddMockChunkSourceToQueue("source1", 10, FilePathProvider::MessageType::kFile,
                             "test");
-  AddMockChunkSourceToQueue("source2", 15, FileDiscovery::MessageType::kFile,
+  AddMockChunkSourceToQueue("source2", 15, FilePathProvider::MessageType::kFile,
                             "data");
   MarkInitialScanComplete();
 
@@ -226,7 +226,7 @@ TEST_F(ChunkSetTest, NewChunkSourceProcessing) {
 
   // Add a new chunk source after initialization
   AddMockChunkSourceToQueue("new_source", 30,
-                            FileDiscovery::MessageType::kFile);
+                            FilePathProvider::MessageType::kFile);
 
   // Close input queue to stop input worker from waiting for more
   CloseInputQueue();

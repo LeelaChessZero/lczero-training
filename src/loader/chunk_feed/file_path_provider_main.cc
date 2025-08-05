@@ -8,7 +8,7 @@
 #include <string>
 #include <thread>
 
-#include "discovery.h"
+#include "loader/chunk_feed/file_path_provider.h"
 
 ABSL_FLAG(std::string, directory, "", "Directory to monitor for files");
 
@@ -25,19 +25,19 @@ int main(int argc, char* argv[]) {
   }
 
   LOG(INFO) << "Starting to monitor directory: " << directory;
-  lczero::training::FileDiscovery discovery(
-      lczero::training::FileDiscoveryOptions{.queue_capacity = 16,
-                                             .directory = directory});
+  lczero::training::FilePathProvider file_path_provider(
+      lczero::training::FilePathProviderOptions{.queue_capacity = 16,
+                                                .directory = directory});
 
   // Consumer thread to read from the queue
-  std::thread consumer_thread([&discovery]() {
-    auto* queue = discovery.output();
+  std::thread consumer_thread([&file_path_provider]() {
+    auto* queue = file_path_provider.output();
     try {
       while (true) {
         auto file = queue->Get();
         const char* type_str =
             (file.message_type ==
-             lczero::training::FileDiscovery::MessageType::kFile)
+             lczero::training::FilePathProvider::MessageType::kFile)
                 ? "File"
                 : "Initial scan complete";
         LOG(INFO) << "File " << type_str << ": " << file.filepath;
@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
   std::cin.get();
 
   // Close the queue and wait for consumer to finish
-  discovery.Close();
+  file_path_provider.Close();
   consumer_thread.join();
 
   return 0;
