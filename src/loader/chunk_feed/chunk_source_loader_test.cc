@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/chunk_source_loader.h"
 
 #include <gtest/gtest.h>
 
@@ -10,10 +10,11 @@
 namespace lczero {
 namespace training {
 
-TEST(ChunkSourceFeedTest, ProcessesFiles) {
+TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   Queue<FilePathProvider::File> input_queue(10);
-  ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
-  ChunkSourceFeed feed(&input_queue, options);
+  ChunkSourceLoaderOptions options{.worker_threads = 1,
+                                   .output_queue_size = 10};
+  ChunkSourceLoader feed(&input_queue, options);
 
   {
     auto producer = input_queue.CreateProducer();
@@ -40,10 +41,11 @@ TEST(ChunkSourceFeedTest, ProcessesFiles) {
   }
 }
 
-TEST(ChunkSourceFeedTest, HandlesPhases) {
+TEST(ChunkSourceLoaderTest, HandlesPhases) {
   Queue<FilePathProvider::File> input_queue(10);
-  ChunkSourceFeedOptions options{.worker_threads = 1, .output_queue_size = 10};
-  ChunkSourceFeed feed(&input_queue, options);
+  ChunkSourceLoaderOptions options{.worker_threads = 1,
+                                   .output_queue_size = 10};
+  ChunkSourceLoader feed(&input_queue, options);
 
   {
     auto producer = input_queue.CreateProducer();

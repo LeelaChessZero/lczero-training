@@ -11,7 +11,7 @@
 #include <thread>
 
 #include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/chunk_source_loader.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {

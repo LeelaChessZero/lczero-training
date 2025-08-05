@@ -59,7 +59,7 @@ includes = include_directories('src', 'libs/lc0/src')
 
 files = [
   'src/loader/chunk_feed/chunk_set.cc',
-  'src/loader/chunk_feed/chunk_source_feed.cc',
+  'src/loader/chunk_feed/chunk_source_loader.cc',
   'src/loader/chunk_feed/file_path_provider.cc',
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
@@ -108,9 +108,9 @@ file_path_provider_test = executable(
   link_with : loader_lib,
 )
 
-chunk_source_feed_test = executable(
-  'chunk_source_feed_test',
-  'src/loader/chunk_feed/chunk_source_feed_test.cc',
+chunk_source_loader_test = executable(
+  'chunk_source_loader_test',
+  'src/loader/chunk_feed/chunk_source_loader_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
   link_with : loader_lib,
@@ -126,7 +126,7 @@ chunk_set_test = executable(
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
-test('chunk_source_feed_test', chunk_source_feed_test)
+test('chunk_source_loader_test', chunk_source_loader_test)
 test('chunk_set_test', chunk_set_test)
 
 file_path_provider_main = executable(

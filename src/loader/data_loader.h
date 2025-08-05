@@ -4,7 +4,7 @@
 #include <string>
 
 #include "loader/chunk_feed/chunk_set.h"
-#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/chunk_source_loader.h"
 #include "loader/chunk_feed/file_path_provider.h"
 
 namespace lczero {
@@ -22,7 +22,7 @@ class DataLoader {
  private:
   DataLoaderConfig config_;
   FilePathProvider file_path_provifer_;
-  ChunkSourceFeed chunk_source_feed_;
+  ChunkSourceLoader chunk_source_loader_;
   ChunkSet chunk_set_;
 };
 

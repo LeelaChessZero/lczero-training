@@ -7,7 +7,7 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/chunk_source_loader.h"
 #include "utils/queue.h"
 #include "utils/stream_shuffler.h"
 #include "utils/thread_pool.h"

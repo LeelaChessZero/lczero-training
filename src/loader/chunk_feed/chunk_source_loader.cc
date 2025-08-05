@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/chunk_source_feed.h"
+#include "loader/chunk_feed/chunk_source_loader.h"
 
 #include <filesystem>
 
@@ -20,8 +20,8 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
   return nullptr;
 }
 
-ChunkSourceFeed::ChunkSourceFeed(Queue<InputType>* input_queue,
-                                 const ChunkSourceFeedOptions& options)
+ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
+                                     const ChunkSourceLoaderOptions& options)
     : input_queue_(input_queue),
       output_queue_(options.output_queue_size),
       thread_pool_(options.worker_threads, ThreadPoolOptions{}) {
@@ -31,11 +31,11 @@ ChunkSourceFeed::ChunkSourceFeed(Queue<InputType>* input_queue,
   }
 }
 
-Queue<ChunkSourceFeed::OutputType>* ChunkSourceFeed::output() {
+Queue<ChunkSourceLoader::OutputType>* ChunkSourceLoader::output() {
   return &output_queue_;
 }
 
-void ChunkSourceFeed::Worker() {
+void ChunkSourceLoader::Worker() {
   // Create a local producer for this worker thread
   auto producer = output_queue_.CreateProducer();
 

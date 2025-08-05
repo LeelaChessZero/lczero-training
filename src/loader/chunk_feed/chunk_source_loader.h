@@ -16,7 +16,7 @@ namespace training {
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
     const std::filesystem::path& filepath);
 
-struct ChunkSourceFeedOptions {
+struct ChunkSourceLoaderOptions {
   size_t worker_threads = 1;      // Number of worker threads.
   size_t output_queue_size = 16;  // Size of the output queue.
 };
@@ -28,13 +28,13 @@ struct ChunkSourceWithPhase {
 
 // Worker pool that converts FilePathProvider output to ChunkSource objects.
 // Takes FilePathProvider::File as input and outputs ChunkSourceWithPhase.
-class ChunkSourceFeed {
+class ChunkSourceLoader {
  public:
   using InputType = FilePathProvider::File;
   using OutputType = ChunkSourceWithPhase;
 
-  ChunkSourceFeed(Queue<InputType>* input_queue,
-                  const ChunkSourceFeedOptions& options);
+  ChunkSourceLoader(Queue<InputType>* input_queue,
+                    const ChunkSourceLoaderOptions& options);
 
   Queue<OutputType>* output();
 
