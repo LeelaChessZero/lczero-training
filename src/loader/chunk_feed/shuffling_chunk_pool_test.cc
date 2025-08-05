@@ -1,7 +1,7 @@
-// ABOUTME: Comprehensive unit tests for the ChunkSet class
+// ABOUTME: Comprehensive unit tests for the ShufflingChunkPool class
 // ABOUTME: Tests chunk source management, output workers, and dynamic windowing
 
-#include "loader/chunk_feed/chunk_set.h"
+#include "loader/chunk_feed/shuffling_chunk_pool.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/log/log.h>
@@ -56,7 +56,7 @@ class MockChunkSource : public ChunkSource {
   bool indexed_ = false;
 };
 
-class ChunkSetTest : public ::testing::Test {
+class ShufflingChunkPoolTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<ChunkSourceWithPhase>>(100);
@@ -97,21 +97,21 @@ class ChunkSetTest : public ::testing::Test {
   std::unique_ptr<Queue<ChunkSourceWithPhase>::Producer> input_producer_;
 };
 
-TEST_F(ChunkSetTest, ConstructorCreatesOutputQueue) {
+TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
   // Add some mock chunk sources with enough chunks
   AddMockChunkSourceToQueue("source1", 50);
   AddMockChunkSourceToQueue("source2", 60);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 100,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
-  auto* output_queue = chunk_set.output();
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
@@ -129,47 +129,48 @@ TEST_F(ChunkSetTest, ConstructorCreatesOutputQueue) {
   }
 }
 
-TEST_F(ChunkSetTest, HandlesEmptyInputQueue) {
+TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   // Only mark scan complete, no chunk sources
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 100,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
   // This should throw because there are no chunk sources
   EXPECT_THROW(
-      { ChunkSet chunk_set(input_queue_.get(), options); }, std::runtime_error);
+      { ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options); },
+      std::runtime_error);
 }
 
-TEST_F(ChunkSetTest, ProcessesInitialScanChunkSources) {
+TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   // Create mock chunk sources with enough chunks
   AddMockChunkSourceToQueue("source1", 30);
   AddMockChunkSourceToQueue("source2", 40);
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 100,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
   // Test that constructor completes and processes mock chunk sources
   EXPECT_NO_THROW({
-    ChunkSet chunk_set(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = chunk_set.output();
+    auto* output_queue = shuffling_chunk_pool.output();
     EXPECT_NE(output_queue, nullptr);
   });
 }
 
-TEST_F(ChunkSetTest, OutputWorkerProducesChunks) {
+TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   // Create mock chunk sources
   AddMockChunkSourceToQueue("source1", 10, FilePathProvider::MessageType::kFile,
                             "test");
@@ -177,18 +178,18 @@ TEST_F(ChunkSetTest, OutputWorkerProducesChunks) {
                             "data");
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 20,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
 
-  auto* output_queue = chunk_set.output();
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for output workers to produce at least one chunk
   output_queue->WaitForSizeAtLeast(1);
@@ -204,22 +205,22 @@ TEST_F(ChunkSetTest, OutputWorkerProducesChunks) {
               chunk.find("source2") != std::string::npos);
 }
 
-TEST_F(ChunkSetTest, NewChunkSourceProcessing) {
+TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
   // Start with initial scan and one chunk source - use enough chunks to satisfy
   // window
   AddMockChunkSourceToQueue("initial", 120);  // More chunks than window
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 100,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
   // Verify chunks are being produced from initial sources
-  auto* output_queue = chunk_set.output();
+  auto* output_queue = shuffling_chunk_pool.output();
   output_queue->WaitForSizeAtLeast(1);
   EXPECT_NE(output_queue, nullptr);
   EXPECT_GT(output_queue->Size(), 0);
@@ -236,14 +237,14 @@ TEST_F(ChunkSetTest, NewChunkSourceProcessing) {
   EXPECT_GT(output_queue->Size(), 0);
 }
 
-TEST_F(ChunkSetTest, ChunkWindowManagement) {
+TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   // Create more chunks than the window size
   AddMockChunkSourceToQueue("source1", 30);
   AddMockChunkSourceToQueue("source2", 30);
   AddMockChunkSourceToQueue("source3", 30);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{
+  ShufflingChunkPoolOptions options{
       .chunk_pool_size = 50,  // Smaller than total chunks (90)
       .num_startup_indexing_threads = 1,
       .num_indexing_threads = 1,
@@ -252,19 +253,19 @@ TEST_F(ChunkSetTest, ChunkWindowManagement) {
 
   // Should only keep sources that fit in the window
   EXPECT_NO_THROW({
-    ChunkSet chunk_set(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = chunk_set.output();
+    auto* output_queue = shuffling_chunk_pool.output();
     EXPECT_NE(output_queue, nullptr);
   });
 }
 
-// Test the ChunkSetOptions structure
-TEST_F(ChunkSetTest, ChunkSetOptionsDefaults) {
-  ChunkSetOptions options{.chunk_pool_size = 1000};
+// Test the ShufflingChunkPoolOptions structure
+TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolOptionsDefaults) {
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 1000};
 
   EXPECT_EQ(options.chunk_pool_size, 1000);
   EXPECT_EQ(options.num_startup_indexing_threads, 4);  // Default value
@@ -273,12 +274,12 @@ TEST_F(ChunkSetTest, ChunkSetOptionsDefaults) {
   EXPECT_EQ(options.output_queue_size, 16);            // Default value
 }
 
-TEST_F(ChunkSetTest, ChunkSetOptionsCustomValues) {
-  ChunkSetOptions options{.chunk_pool_size = 500,
-                          .num_startup_indexing_threads = 2,
-                          .num_indexing_threads = 3,
-                          .num_chunk_loading_threads = 4,
-                          .output_queue_size = 25};
+TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolOptionsCustomValues) {
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 500,
+                                    .num_startup_indexing_threads = 2,
+                                    .num_indexing_threads = 3,
+                                    .num_chunk_loading_threads = 4,
+                                    .output_queue_size = 25};
 
   EXPECT_EQ(options.chunk_pool_size, 500);
   EXPECT_EQ(options.num_startup_indexing_threads, 2);
@@ -287,39 +288,39 @@ TEST_F(ChunkSetTest, ChunkSetOptionsCustomValues) {
   EXPECT_EQ(options.output_queue_size, 25);
 }
 
-TEST_F(ChunkSetTest, ChunkSorting) {
+TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   // Add chunk sources in non-sorted order (by sort key)
   AddMockChunkSourceToQueue("source_b", 20);
   AddMockChunkSourceToQueue("source_a", 25);
   AddMockChunkSourceToQueue("source_c", 30);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 70,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 70,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  // ChunkSet should handle sorting internally (newest first)
+  // ShufflingChunkPool should handle sorting internally (newest first)
   EXPECT_NO_THROW({
-    ChunkSet chunk_set(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = chunk_set.output();
+    auto* output_queue = shuffling_chunk_pool.output();
     EXPECT_NE(output_queue, nullptr);
   });
 }
 
-TEST_F(ChunkSetTest, MultipleInitialIndexingThreads) {
+TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
   // Test with multiple indexing threads to ensure no crashes or hangs
   AddMockChunkSourceToQueue("source1", 30);
   AddMockChunkSourceToQueue("source2", 40);
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{
+  ShufflingChunkPoolOptions options{
       .chunk_pool_size = 100,
       .num_startup_indexing_threads = 3,  // Multiple threads
       .num_indexing_threads = 1,
@@ -328,31 +329,31 @@ TEST_F(ChunkSetTest, MultipleInitialIndexingThreads) {
 
   // Should work without hanging or crashing
   EXPECT_NO_THROW({
-    ChunkSet chunk_set(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = chunk_set.output();
+    auto* output_queue = shuffling_chunk_pool.output();
     EXPECT_NE(output_queue, nullptr);
   });
 }
 
-TEST_F(ChunkSetTest, StreamShufflerResetWhenExhausted) {
+TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   // Create a small chunk source to quickly exhaust the shuffler
   AddMockChunkSourceToQueue("source1", 3);  // Only 3 chunks for faster testing
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{
+  ShufflingChunkPoolOptions options{
       .chunk_pool_size = 3,  // Window matches chunk count
       .num_startup_indexing_threads = 1,
       .num_indexing_threads = 1,
       .num_chunk_loading_threads = 1,
       .output_queue_size = 100};  // Large enough to hold all chunks
 
-  ChunkSet chunk_set(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
-  auto* output_queue = chunk_set.output();
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Collect chunks continuously and count total chunks received
   std::vector<std::string> all_chunks_received;
@@ -385,20 +386,20 @@ TEST_F(ChunkSetTest, StreamShufflerResetWhenExhausted) {
       << all_chunks_received.size() << " chunks";
 }
 
-TEST_F(ChunkSetTest, ExplicitClose) {
+TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
   // Create chunk sources
   AddMockChunkSourceToQueue("source1", 20);
   AddMockChunkSourceToQueue("source2", 30);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 40,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 40,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
-  auto* output_queue = chunk_set.output();
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
   output_queue->WaitForSizeAtLeast(1);
@@ -407,7 +408,7 @@ TEST_F(ChunkSetTest, ExplicitClose) {
   EXPECT_GT(output_queue->Size(), 0);
 
   // Explicitly close the chunk set
-  chunk_set.Close();
+  shuffling_chunk_pool.Close();
 
   // Drain all remaining items from the queue
   while (output_queue->Size() > 0) {
@@ -420,26 +421,27 @@ TEST_F(ChunkSetTest, ExplicitClose) {
   CloseInputQueue();
 }
 
-TEST_F(ChunkSetTest, CloseStopsOutputWorkers) {
+TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
   // Create chunk sources
   AddMockChunkSourceToQueue("source1", 15);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 15,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 2,  // Multiple workers
-                          .output_queue_size = 50};
+  ShufflingChunkPoolOptions options{
+      .chunk_pool_size = 15,
+      .num_startup_indexing_threads = 1,
+      .num_indexing_threads = 1,
+      .num_chunk_loading_threads = 2,  // Multiple workers
+      .output_queue_size = 50};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
-  auto* output_queue = chunk_set.output();
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce chunks
   output_queue->WaitForSizeAtLeast(1);
   size_t chunks_before_close = output_queue->Size();
 
   // Close the chunk set
-  chunk_set.Close();
+  shuffling_chunk_pool.Close();
 
   // Drain any remaining chunks from the queue
   try {
@@ -456,42 +458,42 @@ TEST_F(ChunkSetTest, CloseStopsOutputWorkers) {
   CloseInputQueue();
 }
 
-TEST_F(ChunkSetTest, CloseIsIdempotent) {
+TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
   // Create chunk sources
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 20,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
 
   // Close multiple times - should not crash or cause issues
-  EXPECT_NO_THROW(chunk_set.Close());
-  EXPECT_NO_THROW(chunk_set.Close());
-  EXPECT_NO_THROW(chunk_set.Close());
+  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
+  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
+  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
 
   CloseInputQueue();
 }
 
-TEST_F(ChunkSetTest, DestructorCallsClose) {
+TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   // Create chunk sources
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 20,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
   // Test that destructor calls Close() and properly shuts down
   {
-    ChunkSet chunk_set(input_queue_.get(), options);
-    auto* output_queue = chunk_set.output();
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    auto* output_queue = shuffling_chunk_pool.output();
 
     // Wait for workers to produce some chunks
     output_queue->WaitForSizeAtLeast(1);
@@ -500,7 +502,7 @@ TEST_F(ChunkSetTest, DestructorCallsClose) {
     // Close input queue before destructor to allow threads to finish
     CloseInputQueue();
 
-    // ChunkSet destructor should be called here, which calls Close()
+    // ShufflingChunkPool destructor should be called here, which calls Close()
     // and waits for all threads to finish
   }
 
@@ -508,19 +510,19 @@ TEST_F(ChunkSetTest, DestructorCallsClose) {
   // (we can't test the queue state after destruction since it's destroyed)
 }
 
-TEST_F(ChunkSetTest, InputQueueClosureDoesNotCloseOutputQueue) {
+TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   // Create chunk sources
   AddMockChunkSourceToQueue("source1", 30);
   MarkInitialScanComplete();
 
-  ChunkSetOptions options{.chunk_pool_size = 30,
-                          .num_startup_indexing_threads = 1,
-                          .num_indexing_threads = 1,
-                          .num_chunk_loading_threads = 1,
-                          .output_queue_size = 100};
+  ShufflingChunkPoolOptions options{.chunk_pool_size = 30,
+                                    .num_startup_indexing_threads = 1,
+                                    .num_indexing_threads = 1,
+                                    .num_chunk_loading_threads = 1,
+                                    .output_queue_size = 100};
 
-  ChunkSet chunk_set(input_queue_.get(), options);
-  auto* output_queue = chunk_set.output();
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
   output_queue->WaitForSizeAtLeast(1);
@@ -536,7 +538,7 @@ TEST_F(ChunkSetTest, InputQueueClosureDoesNotCloseOutputQueue) {
   EXPECT_NO_THROW(output_queue->Get());
 
   // Explicitly close to clean up
-  chunk_set.Close();
+  shuffling_chunk_pool.Close();
 }
 
 }  // namespace training

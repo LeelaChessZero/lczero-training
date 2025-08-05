@@ -13,9 +13,9 @@ The Data Loader consists of the following stages connected through a
   data discovery worker (watches a directory and provides feed of filenames)
 * [ChunkSourceLoader](../src/loader/chunk_feed/chunk_source_loader.h) — Reads
   chunks from files, providing a stream of chunks.
-* [Chunk Set](../src/loader/chunk_feed/chunk_set.h) — Keeps a set of chunks,
-  managing the last `num_chunks` available and removing old ones, and outputting
-  them in shuffled order.
+* [ShufflingChunkPool](../src/loader/chunk_feed/shuffling_chunk_pool.h) — Keeps
+  a set of chunks, managing the last `num_chunks` available and removing old
+  ones, and outputting them in shuffled order.
 * [Chunk Filter](../src/loader/chunk_feed/chunk_filter.h) — Filters the chunk
   stream, filtering out invalid chunks.
 * [Chunk Rescorer](../src/loader/chunk_feed/chunk_rescorer.h) — Rescores chunks

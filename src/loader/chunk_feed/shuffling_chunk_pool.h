@@ -15,7 +15,7 @@
 namespace lczero {
 namespace training {
 
-struct ChunkSetOptions {
+struct ShufflingChunkPoolOptions {
   size_t chunk_pool_size;  // Size of the chunk shuffle buffer.
   size_t num_startup_indexing_threads = 4;
   size_t num_indexing_threads = 4;
@@ -23,11 +23,11 @@ struct ChunkSetOptions {
   size_t output_queue_size = 16;
 };
 
-class ChunkSet {
+class ShufflingChunkPool {
  public:
-  ChunkSet(Queue<ChunkSourceWithPhase>* input_queue,
-           const ChunkSetOptions& options);
-  ~ChunkSet();
+  ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
+                     const ShufflingChunkPoolOptions& options);
+  ~ShufflingChunkPool();
 
   Queue<std::string>* output();
   void Close();

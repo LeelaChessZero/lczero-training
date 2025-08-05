@@ -14,10 +14,10 @@ DataLoader::DataLoader(const DataLoaderConfig& config)
                                .worker_threads = 1,
                                .output_queue_size = 16,
                            }),
-      chunk_set_(chunk_source_loader_.output(),
-                 ChunkSetOptions{
-                     .chunk_pool_size = config_.num_chunks_window,
-                 }) {}
+      shuffling_chunk_pool_(chunk_source_loader_.output(),
+                            ShufflingChunkPoolOptions{
+                                .chunk_pool_size = config_.num_chunks_window,
+                            }) {}
 
 }  // namespace training
 }  // namespace lczero

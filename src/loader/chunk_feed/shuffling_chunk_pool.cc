@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/chunk_set.h"
+#include "loader/chunk_feed/shuffling_chunk_pool.h"
 
 #include <absl/algorithm/container.h>
 #include <absl/base/thread_annotations.h>
@@ -17,8 +17,8 @@
 namespace lczero {
 namespace training {
 
-ChunkSet::ChunkSet(Queue<ChunkSourceWithPhase>* input_queue,
-                   const ChunkSetOptions& options)
+ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
+                                       const ShufflingChunkPoolOptions& options)
     : chunk_pool_size_(options.chunk_pool_size),
       indexing_pool_(options.num_indexing_threads, ThreadPoolOptions{}),
       chunk_loading_pool_(options.num_chunk_loading_threads,
@@ -40,15 +40,16 @@ ChunkSet::ChunkSet(Queue<ChunkSourceWithPhase>* input_queue,
   }
 }
 
-ChunkSet::~ChunkSet() {
+ShufflingChunkPool::~ShufflingChunkPool() {
   Close();
   indexing_pool_.WaitAll();
   chunk_loading_pool_.WaitAll();
 }
 
-Queue<std::string>* ChunkSet::output() { return &output_queue_; }
+Queue<std::string>* ShufflingChunkPool::output() { return &output_queue_; }
 
-std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources(
+std::vector<std::unique_ptr<ChunkSource>>
+ShufflingChunkPool::InitializeChunkSources(
     size_t num_startup_indexing_threads) {
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources;
 
@@ -101,7 +102,7 @@ std::vector<std::unique_ptr<ChunkSource>> ChunkSet::InitializeChunkSources(
   return uninitialized_sources;
 }
 
-void ChunkSet::ProcessInputFiles(
+void ShufflingChunkPool::ProcessInputFiles(
     std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources) {
   // Initialize chunk sources from the initial scan.
   {
@@ -129,7 +130,7 @@ void ChunkSet::ProcessInputFiles(
   }
 }
 
-void ChunkSet::IndexingWorker() {
+void ShufflingChunkPool::IndexingWorker() {
   try {
     while (true) {
       auto chunk_source_with_phase = input_queue_->Get();
@@ -149,7 +150,7 @@ void ChunkSet::IndexingWorker() {
   }
 }
 
-void ChunkSet::OutputWorker() {
+void ShufflingChunkPool::OutputWorker() {
   // Create a local producer for this worker
   auto producer = output_queue_.CreateProducer();
 
@@ -160,7 +161,7 @@ void ChunkSet::OutputWorker() {
   }
 }
 
-std::string ChunkSet::GetNextChunkData() {
+std::string ShufflingChunkPool::GetNextChunkData() {
   absl::MutexLock lock(&chunk_sources_mutex_);
   std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
 
@@ -194,7 +195,7 @@ std::string ChunkSet::GetNextChunkData() {
   return it->source->GetChunkData(local_index);
 }
 
-void ChunkSet::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
+void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_) {
   // Add new chunk source to the end of the deque.
   size_t old_upper_bound = 0;
@@ -232,7 +233,7 @@ void ChunkSet::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
   stream_shuffler_.SetLowerBound(new_lower_bound);
 }
 
-void ChunkSet::Close() { output_queue_.Close(); }
+void ShufflingChunkPool::Close() { output_queue_.Close(); }
 
 }  // namespace training
 }  // namespace lczero
