@@ -16,11 +16,13 @@ The Data Loader consists of the following stages connected through a
 * [ShufflingChunkPool](../src/loader/chunk_feed/shuffling_chunk_pool.h) — Keeps
   a set of chunks, managing the last `num_chunks` available and removing old
   ones, and outputting them in shuffled order.
-* [Chunk Filter](../src/loader/chunk_feed/chunk_filter.h) — Filters the chunk
-  stream, filtering out invalid chunks.
-* [Chunk Rescorer](../src/loader/chunk_feed/chunk_rescorer.h) — Rescores chunks
-  based on tablebase or intentional blunders.
-* [Frame Shuffler](../src/loader/frame_shuffler.h) — Takes a stream of chunks
+* (skip for now) [ChunkValidator](../src/loader/chunk_feed/chunk_validator.h) —
+  Filters the chunk stream, filtering out invalid chunks.
+* (skip for now) [ChunkRescorer](../src/loader/chunk_feed/chunk_rescorer.h) —
+  Rescores chunks based on tablebase or intentional blunders.
+* [ChunkUnpacker](../src/loader/chunk_feed/chunk_unpacker.h) — Unpacks
+  chunks into frames, which are then processed by the next stages.
+* [Frame Shuffler](../src/loader/frame_shuffler.h) — Takes a stream of frames
   and provides shuffled batches of frames for training, using reservoir
   sampling.
 * [Tensor Generator](../src/loader/tensor_generator.h) — Takes frames and

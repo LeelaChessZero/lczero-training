@@ -60,6 +60,7 @@ includes = include_directories('src', 'libs/lc0/src')
 files = [
   'src/loader/chunk_feed/shuffling_chunk_pool.cc',
   'src/loader/chunk_feed/chunk_source_loader.cc',
+  'src/loader/chunk_feed/chunk_unpacker.cc',
   'src/loader/chunk_feed/file_path_provider.cc',
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
@@ -123,11 +124,20 @@ shuffling_chunk_pool_test = executable(
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
 )
+
+chunk_unpacker_test = executable(
+  'chunk_unpacker_test',
+  'src/loader/chunk_feed/chunk_unpacker_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
 test('chunk_source_loader_test', chunk_source_loader_test)
 test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
+test('chunk_unpacker_test', chunk_unpacker_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',

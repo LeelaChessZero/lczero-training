@@ -17,7 +17,12 @@ DataLoader::DataLoader(const DataLoaderConfig& config)
       shuffling_chunk_pool_(chunk_source_loader_.output(),
                             ShufflingChunkPoolOptions{
                                 .chunk_pool_size = config_.num_chunks_window,
-                            }) {}
+                            }),
+      chunk_unpacker_(shuffling_chunk_pool_.output(),
+                      ChunkUnpackerOptions{
+                          .worker_threads = 1,
+                          .output_queue_size = 16,
+                      }) {}
 
 }  // namespace training
 }  // namespace lczero
