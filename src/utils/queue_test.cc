@@ -820,4 +820,92 @@ TEST_F(QueueTest, WaitFunctionsEdgeCases) {
   EXPECT_EQ(queue.Size(), 0);
 }
 
+// Tests for capacity validation exceptions
+TEST_F(QueueTest, BatchPutExceedsCapacityThrowsException) {
+  Queue<int> queue(3);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  // Try to put more items than capacity
+  std::vector<int> items = {1, 2, 3, 4, 5};  // 5 items > 3 capacity
+  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
+               QueueCapacityExceededException);
+
+  // Queue should still be usable
+  EXPECT_EQ(queue.Size(), 0);
+  producer.Put(42);
+  EXPECT_EQ(queue.Size(), 1);
+}
+
+TEST_F(QueueTest, BatchPutMoveExceedsCapacityThrowsException) {
+  Queue<int> queue(2);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  // Try to put more items than capacity
+  std::vector<int> items = {1, 2, 3};  // 3 items > 2 capacity
+  EXPECT_THROW(producer.Put(absl::Span<int>(items)),
+               QueueCapacityExceededException);
+
+  // Queue should still be usable
+  EXPECT_EQ(queue.Size(), 0);
+  producer.Put(42);
+  EXPECT_EQ(queue.Size(), 1);
+}
+
+TEST_F(QueueTest, BatchGetExceedsCapacityThrowsException) {
+  Queue<int> queue(3);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+
+  // Try to get more items than capacity
+  EXPECT_THROW(queue.Get(5), QueueCapacityExceededException);
+
+  // Queue should still be usable
+  EXPECT_EQ(queue.Size(), 2);
+  EXPECT_EQ(queue.Get(), 1);
+}
+
+TEST_F(QueueTest, BatchPutAtCapacityWorks) {
+  Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
+
+  // Putting exactly capacity worth of items should work
+  std::vector<int> items = {1, 2, 3};
+  producer.Put(absl::Span<const int>(items));
+  EXPECT_EQ(queue.Size(), 3);
+}
+
+TEST_F(QueueTest, BatchGetAtCapacityWorks) {
+  Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+
+  // Getting exactly capacity worth of items should work
+  auto result = queue.Get(3);
+  EXPECT_EQ(result.size(), 3);
+  EXPECT_EQ(result[0], 1);
+  EXPECT_EQ(result[1], 2);
+  EXPECT_EQ(result[2], 3);
+}
+
+TEST_F(QueueTest, CapacityValidationExceptionMessage) {
+  Queue<int> queue(2);
+  auto producer = queue.CreateProducer();
+
+  std::vector<int> items = {1, 2, 3, 4, 5};
+  try {
+    producer.Put(absl::Span<const int>(items));
+    FAIL() << "Expected QueueCapacityExceededException";
+  } catch (const QueueCapacityExceededException& e) {
+    std::string msg = e.what();
+    EXPECT_NE(msg.find("5"),
+              std::string::npos);  // Should contain requested count
+    EXPECT_NE(msg.find("2"), std::string::npos);  // Should contain capacity
+  }
+}
+
 }  // namespace lczero

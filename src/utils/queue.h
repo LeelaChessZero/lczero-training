@@ -15,6 +15,15 @@ class QueueClosedException : public std::runtime_error {
   QueueClosedException() : std::runtime_error("Queue is closed") {}
 };
 
+// Exception thrown when operation would exceed queue capacity.
+class QueueCapacityExceededException : public std::invalid_argument {
+ public:
+  explicit QueueCapacityExceededException(size_t requested, size_t capacity)
+      : std::invalid_argument("Requested " + std::to_string(requested) +
+                              " elements exceeds queue capacity " +
+                              std::to_string(capacity)) {}
+};
+
 // Thread-safe fixed-size circular buffer queue with blocking operations.
 // Supports both single and batch put/get operations.
 // The queue automatically closes when all Producer tokens are destroyed.
@@ -224,6 +233,9 @@ void Queue<T>::PutInternal(T&& item) {
 template <typename T>
 void Queue<T>::PutInternal(absl::Span<const T> items) {
   if (items.empty()) return;
+  if (items.size() > capacity_) {
+    throw QueueCapacityExceededException(items.size(), capacity_);
+  }
 
   struct Args {
     Queue<T>* queue;
@@ -249,6 +261,9 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
 template <typename T>
 void Queue<T>::PutInternal(absl::Span<T> items) {
   if (items.empty()) return;
+  if (items.size() > capacity_) {
+    throw QueueCapacityExceededException(items.size(), capacity_);
+  }
 
   struct Args {
     Queue<T>* queue;
@@ -287,6 +302,9 @@ T Queue<T>::Get() {
 template <typename T>
 absl::FixedArray<T> Queue<T>::Get(size_t count) {
   if (count == 0) return absl::FixedArray<T>(0);
+  if (count > capacity_) {
+    throw QueueCapacityExceededException(count, capacity_);
+  }
 
   struct Args {
     Queue<T>* queue;
