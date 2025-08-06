@@ -132,12 +132,20 @@ chunk_unpacker_test = executable(
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
 )
+
+tensor_test = executable(
+  'tensor_test',
+  'src/utils/tensor_test.cc',
+  include_directories : includes,
+  dependencies : test_deps,
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
 test('chunk_source_loader_test', chunk_source_loader_test)
 test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
+test('tensor_test', tensor_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',
