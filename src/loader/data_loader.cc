@@ -22,7 +22,22 @@ DataLoader::DataLoader(const DataLoaderConfig& config)
                       ChunkUnpackerOptions{
                           .worker_threads = 1,
                           .output_queue_size = 16,
-                      }) {}
+                      }),
+      shuffling_frame_sampler_(
+          chunk_unpacker_.output(),
+          ShufflingFrameSamplerOptions{
+              .num_worker_threads = 1,
+              .reservoir_size_per_thread = config_.reservoir_size_per_thread,
+              .output_queue_size = 16,
+          }),
+      tensor_generator_(shuffling_frame_sampler_.output(),
+                        TensorGeneratorOptions{
+                            .worker_threads = 1,
+                            .batch_size = config_.batch_size,
+                            .output_queue_size = 4,
+                        }) {}
+
+Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
 
 }  // namespace training
 }  // namespace lczero

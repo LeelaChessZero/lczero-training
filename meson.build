@@ -65,6 +65,7 @@ files = [
   'src/loader/chunk_feed/rawfile_chunk_source.cc',
   'src/loader/chunk_feed/tar_chunk_source.cc',
   'src/loader/shuffling_frame_sampler.cc',
+  'src/loader/tensor_generator.cc',
   'src/loader/data_loader.cc',
   'src/utils/gz.cc',
   'src/utils/stream_shuffler.cc',
@@ -148,6 +149,14 @@ tensor_test = executable(
   include_directories : includes,
   dependencies : test_deps + [absl_deps['throw_delegate']],
 )
+
+tensor_generator_test = executable(
+  'tensor_generator_test',
+  'src/loader/tensor_generator_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization']],
+  link_with : loader_lib,
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
@@ -156,6 +165,7 @@ test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
 test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
 test('tensor_test', tensor_test)
+test('tensor_generator_test', tensor_generator_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',
