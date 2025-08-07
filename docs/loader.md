@@ -22,9 +22,9 @@ The Data Loader consists of the following stages connected through a
   Rescores chunks based on tablebase or intentional blunders.
 * [ChunkUnpacker](../src/loader/chunk_feed/chunk_unpacker.h) — Unpacks
   chunks into frames, which are then processed by the next stages.
-* [Frame Shuffler](../src/loader/frame_shuffler.h) — Takes a stream of frames
-  and provides shuffled batches of frames for training, using reservoir
-  sampling.
+* [ShufflingFrameSampler](../src/loader/shuffling_frame_sampler.h) — Takes a
+  stream of frames and provides shuffled batches of frames for training, using
+  reservoir sampling.
 * [Tensor Generator](../src/loader/tensor_generator.h) — Takes frames and
   provides tensor buffers for the training process.
 
@@ -76,3 +76,17 @@ constructor), and then starts:
 
 If `stream_shuffler_` runs out of numbers, it's reset to the range
 (`last - chunk_window_`, `last`) (and warning message is logged).
+
+## ShufflingFrameSampler
+
+The sampler uses reservoir sampling:
+
+* It has a reservoir of predefined size (1000000 is quite typical)
+* Initially it just fills the reservoir with frames from the input queue until
+  it's full.
+* After that, it picks random frames from the reservoir and outputs them,
+  refilling the used spot from the input queue.
+* It closes the output queue when either explicit Close() is called or the input
+  queue is closed.
+* `using FrameType = V6TrainingData;`, use `absl::FixedArray<FrameType>` for
+  the reservoir.

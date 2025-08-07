@@ -5,6 +5,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/container/fixed_array.h"
 #include "absl/types/span.h"
 
@@ -24,15 +25,6 @@ class TensorBase {
 
 template <typename T>
 class TypedTensor : public TensorBase {
- private:
-  static size_t CalculateTotalSize(std::initializer_list<size_t> shape) {
-    size_t total_size = 1;
-    for (size_t dim : shape) {
-      total_size *= dim;
-    }
-    return total_size;
-  }
-
  public:
   TypedTensor(std::initializer_list<size_t> shape)
       : data_(CalculateTotalSize(shape)), shape_(shape.begin(), shape.end()) {
@@ -74,11 +66,7 @@ class TypedTensor : public TensorBase {
       throw std::invalid_argument(
           "Number of dimensions must match tensor rank");
     }
-    size_t offset = 0;
-    for (size_t i = 0; i < dims.size(); ++i) {
-      offset += dims[i] * strides_[i] / sizeof(T);
-    }
-    return data_[offset];
+    return data_[CalculateOffset(dims)];
   }
 
   const T& operator[](absl::Span<const ssize_t> dims) const {
@@ -86,11 +74,7 @@ class TypedTensor : public TensorBase {
       throw std::invalid_argument(
           "Number of dimensions must match tensor rank");
     }
-    size_t offset = 0;
-    for (size_t i = 0; i < dims.size(); ++i) {
-      offset += dims[i] * strides_[i] / sizeof(T);
-    }
-    return data_[offset];
+    return data_[CalculateOffset(dims)];
   }
 
   absl::Span<T> slice(absl::Span<const ssize_t> dims) {
@@ -98,15 +82,8 @@ class TypedTensor : public TensorBase {
       throw std::invalid_argument(
           "Number of dimensions cannot exceed tensor rank");
     }
-    size_t offset = 0;
-    for (size_t i = 0; i < dims.size(); ++i) {
-      offset += dims[i] * strides_[i] / sizeof(T);
-    }
-    size_t slice_size = 1;
-    for (size_t i = dims.size(); i < shape_.size(); ++i) {
-      slice_size *= shape_[i];
-    }
-    return absl::Span<T>(data_.data() + offset, slice_size);
+    return absl::Span<T>(data_.data() + CalculateOffset(dims),
+                         CalculateSliceSize(dims.size()));
   }
 
   absl::Span<const T> slice(absl::Span<const ssize_t> dims) const {
@@ -114,18 +91,26 @@ class TypedTensor : public TensorBase {
       throw std::invalid_argument(
           "Number of dimensions cannot exceed tensor rank");
     }
-    size_t offset = 0;
-    for (size_t i = 0; i < dims.size(); ++i) {
-      offset += dims[i] * strides_[i] / sizeof(T);
-    }
-    size_t slice_size = 1;
-    for (size_t i = dims.size(); i < shape_.size(); ++i) {
-      slice_size *= shape_[i];
-    }
-    return absl::Span<const T>(data_.data() + offset, slice_size);
+    return absl::Span<const T>(data_.data() + CalculateOffset(dims),
+                               CalculateSliceSize(dims.size()));
   }
 
  private:
+  size_t CalculateOffset(absl::Span<const ssize_t> dims) const {
+    return absl::c_inner_product(
+        dims, strides_, size_t{0}, std::plus<>{},
+        [](ssize_t dim, ssize_t stride) { return dim * stride / sizeof(T); });
+  }
+
+  size_t CalculateSliceSize(size_t dims_size) const {
+    return absl::c_accumulate(absl::MakeConstSpan(shape_).subspan(dims_size),
+                              size_t{1}, std::multiplies<size_t>{});
+  }
+
+  static size_t CalculateTotalSize(std::initializer_list<size_t> shape) {
+    return absl::c_accumulate(shape, size_t{1}, std::multiplies<size_t>{});
+  }
+
   absl::FixedArray<T> data_;
   std::vector<ssize_t> shape_;
   std::vector<ssize_t> strides_;

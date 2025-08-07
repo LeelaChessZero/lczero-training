@@ -7,10 +7,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "shuffling_chunk_pool_test",
-            "program": "${workspaceFolder}/builddir/shuffling_chunk_pool_test",
+            "name": "shuffling_frame_sampler_test",
+            "program": "${workspaceFolder}/builddir/shuffling_frame_sampler_test",
             "args": [
-                "--gtest_filter=ShufflingChunkPoolTest.DestructorCallsClose",
+                // "--gtest_filter=ShufflingChunkPoolTest.DestructorCallsClose",
                 // "--gather-threads=1",
                 // "--eval-threads=1",
                 // "--backprop-threads=1",
