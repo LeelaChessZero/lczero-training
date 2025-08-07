@@ -84,7 +84,7 @@ exe = executable(
   'loader',
   'src/loader/loader_main.cpp',
   include_directories : includes,
-  dependencies : main_deps,
+  dependencies : cli_deps,
   link_with : loader_lib,
 )
 

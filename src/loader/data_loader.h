@@ -15,20 +15,22 @@ namespace lczero {
 namespace training {
 
 struct DataLoaderConfig {
-  std::string training_data_path;
-  size_t num_chunks_window;
-  size_t batch_size = 1024;
-  size_t reservoir_size_per_thread = 1000000;
+  FilePathProviderOptions file_path_provider;
+  ChunkSourceLoaderOptions chunk_source_loader;
+  ShufflingChunkPoolOptions shuffling_chunk_pool;
+  ChunkUnpackerOptions chunk_unpacker;
+  ShufflingFrameSamplerOptions shuffling_frame_sampler;
+  TensorGeneratorOptions tensor_generator;
 };
 
 class DataLoader {
  public:
   DataLoader(const DataLoaderConfig& config);
 
-  Queue<TensorTuple>* output();
+  TensorTuple GetNext();
 
  private:
-  DataLoaderConfig config_;
+  Queue<TensorTuple>* output();
   FilePathProvider file_path_provifer_;
   ChunkSourceLoader chunk_source_loader_;
   ShufflingChunkPool shuffling_chunk_pool_;
