@@ -25,6 +25,8 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
                           ThreadPoolOptions{}),
       input_queue_(input_queue),
       output_queue_(options.output_queue_size) {
+  LOG(INFO) << "Starting ShufflingChunkPool with pool size "
+            << options.chunk_pool_size;
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
       InitializeChunkSources(options.num_startup_indexing_threads);
   ProcessInputFiles(std::move(uninitialized_sources));
@@ -35,6 +37,7 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
   }
 
   // Start output workers after everything is fully initialized.
+  LOG(INFO) << "ShufflingChunkPool initialization complete, starting workers";
   for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
     chunk_loading_pool_.Enqueue([this]() { OutputWorker(); });
   }

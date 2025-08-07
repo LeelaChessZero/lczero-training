@@ -20,6 +20,7 @@ namespace training {
 FilePathProvider::FilePathProvider(const FilePathProviderOptions& options)
     : output_queue_(options.queue_capacity),
       producer_(output_queue_.CreateProducer()) {
+  LOG(INFO) << "Starting FilePathProvider for directory: " << options.directory;
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
@@ -57,6 +58,7 @@ void FilePathProvider::AddDirectory(const Path& directory) {
   ScanDirectoryWithWatch(directory);
 
   // Signal that initial scan is complete
+  LOG(INFO) << "FilePathProvider initial scan complete";
   producer_.Put({{.filepath = Path{},
                   .message_type = MessageType::kInitialScanComplete}});
 }

@@ -19,6 +19,8 @@ TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
       output_queue_(options.output_queue_size),
       thread_pool_(options.worker_threads, ThreadPoolOptions{}),
       batch_size_(options.batch_size) {
+  LOG(INFO) << "Starting TensorGenerator with " << options.worker_threads
+            << " threads, batch size " << options.batch_size;
   for (size_t i = 0; i < options.worker_threads; ++i) {
     thread_pool_.Enqueue([this]() { Worker(); });
   }

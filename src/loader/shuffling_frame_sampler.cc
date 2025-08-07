@@ -13,6 +13,9 @@ ShufflingFrameSampler::ShufflingFrameSampler(
       output_queue_(options.output_queue_size),
       thread_pool_(options.num_worker_threads, ThreadPoolOptions{}),
       reservoir_size_per_thread_(options.reservoir_size_per_thread) {
+  LOG(INFO) << "Starting ShufflingFrameSampler with "
+            << options.num_worker_threads << " threads, reservoir size "
+            << options.reservoir_size_per_thread;
   // Start the worker threads.
   for (size_t i = 0; i < options.num_worker_threads; ++i) {
     thread_pool_.Enqueue([this]() { Worker(); });
@@ -31,6 +34,7 @@ void ShufflingFrameSampler::Worker() {
 
   try {
     // Phase 1: Prefill the reservoir
+    LOG(INFO) << "ShufflingFrameSampler worker prefilling reservoir";
     absl::c_generate(reservoir, [this]() { return input_queue_->Get(); });
 
     // Phase 2: Main sampling loop
