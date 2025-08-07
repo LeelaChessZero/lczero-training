@@ -820,51 +820,7 @@ TEST_F(QueueTest, WaitFunctionsEdgeCases) {
   EXPECT_EQ(queue.Size(), 0);
 }
 
-// Tests for capacity validation exceptions
-TEST_F(QueueTest, BatchPutExceedsCapacityThrowsException) {
-  Queue<int> queue(3);  // Small capacity
-  auto producer = queue.CreateProducer();
-
-  // Try to put more items than capacity
-  std::vector<int> items = {1, 2, 3, 4, 5};  // 5 items > 3 capacity
-  EXPECT_THROW(producer.Put(absl::Span<const int>(items)),
-               QueueCapacityExceededException);
-
-  // Queue should still be usable
-  EXPECT_EQ(queue.Size(), 0);
-  producer.Put(42);
-  EXPECT_EQ(queue.Size(), 1);
-}
-
-TEST_F(QueueTest, BatchPutMoveExceedsCapacityThrowsException) {
-  Queue<int> queue(2);  // Small capacity
-  auto producer = queue.CreateProducer();
-
-  // Try to put more items than capacity
-  std::vector<int> items = {1, 2, 3};  // 3 items > 2 capacity
-  EXPECT_THROW(producer.Put(absl::Span<int>(items)),
-               QueueCapacityExceededException);
-
-  // Queue should still be usable
-  EXPECT_EQ(queue.Size(), 0);
-  producer.Put(42);
-  EXPECT_EQ(queue.Size(), 1);
-}
-
-TEST_F(QueueTest, BatchGetExceedsCapacityThrowsException) {
-  Queue<int> queue(3);  // Small capacity
-  auto producer = queue.CreateProducer();
-
-  producer.Put(1);
-  producer.Put(2);
-
-  // Try to get more items than capacity
-  EXPECT_THROW(queue.Get(5), QueueCapacityExceededException);
-
-  // Queue should still be usable
-  EXPECT_EQ(queue.Size(), 2);
-  EXPECT_EQ(queue.Get(), 1);
-}
+// Tests for gradual large range operations
 
 TEST_F(QueueTest, BatchPutAtCapacityWorks) {
   Queue<int> queue(3);
@@ -892,20 +848,176 @@ TEST_F(QueueTest, BatchGetAtCapacityWorks) {
   EXPECT_EQ(result[2], 3);
 }
 
-TEST_F(QueueTest, CapacityValidationExceptionMessage) {
-  Queue<int> queue(2);
+TEST_F(QueueTest, LargeRangePutGetGradual) {
+  Queue<int> queue(3);  // Small capacity
   auto producer = queue.CreateProducer();
 
-  std::vector<int> items = {1, 2, 3, 4, 5};
-  try {
-    producer.Put(absl::Span<const int>(items));
-    FAIL() << "Expected QueueCapacityExceededException";
-  } catch (const QueueCapacityExceededException& e) {
-    std::string msg = e.what();
-    EXPECT_NE(msg.find("5"),
-              std::string::npos);  // Should contain requested count
-    EXPECT_NE(msg.find("2"), std::string::npos);  // Should contain capacity
+  // Put more items than capacity - should work gradually
+  std::vector<int> large_items = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+  std::thread put_thread([&producer, &large_items]() {
+    producer.Put(absl::Span<const int>(large_items));
+  });
+
+  // Consume items as they become available
+  std::vector<int> consumed;
+  for (int i = 0; i < 10; ++i) {
+    consumed.push_back(queue.Get());
   }
+
+  put_thread.join();
+
+  // Verify all items were transferred correctly
+  EXPECT_EQ(consumed.size(), 10);
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(consumed[i], i + 1);
+  }
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, LargeRangePutMove) {
+  Queue<std::unique_ptr<int>> queue(2);  // Very small capacity
+  auto producer = queue.CreateProducer();
+
+  // Create large batch of move-only items
+  std::vector<std::unique_ptr<int>> large_items;
+  for (int i = 1; i <= 5; ++i) {
+    large_items.push_back(std::make_unique<int>(i));
+  }
+
+  std::thread put_thread([&producer, &large_items]() {
+    producer.Put(absl::Span<std::unique_ptr<int>>(large_items));
+  });
+
+  // Consume items as they become available
+  std::vector<std::unique_ptr<int>> consumed;
+  for (int i = 0; i < 5; ++i) {
+    consumed.push_back(queue.Get());
+  }
+
+  put_thread.join();
+
+  // Verify all items were transferred correctly
+  EXPECT_EQ(consumed.size(), 5);
+  for (int i = 0; i < 5; ++i) {
+    EXPECT_EQ(*consumed[i], i + 1);
+  }
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, LargeRangeGetGradual) {
+  Queue<int> queue(3);  // Small capacity
+  auto producer = queue.CreateProducer();
+
+  // Start a thread that will gradually produce items
+  std::thread producer_thread([&producer]() {
+    for (int i = 1; i <= 10; ++i) {
+      producer.Put(i);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+
+  // Get more items than capacity - should work gradually
+  auto result = queue.Get(10);
+
+  producer_thread.join();
+
+  // Verify all items were retrieved correctly
+  EXPECT_EQ(result.size(), 10);
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(result[i], i + 1);
+  }
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, LargeRangePutGetConcurrent) {
+  Queue<int> queue(5);  // Medium capacity
+
+  constexpr int total_items = 100;
+  constexpr int batch_size = 25;
+
+  auto producer1 = queue.CreateProducer();
+  auto producer2 = queue.CreateProducer();
+
+  std::vector<int> batch1, batch2;
+  for (int i = 0; i < batch_size; ++i) {
+    batch1.push_back(i);
+    batch2.push_back(i + batch_size);
+  }
+
+  std::atomic<int> items_consumed{0};
+  std::vector<int> all_consumed;
+  all_consumed.reserve(total_items);
+
+  // Multiple producers
+  std::thread producer_thread1([&producer1, &batch1]() {
+    producer1.Put(absl::Span<const int>(batch1));
+    producer1.Put(absl::Span<const int>(batch1));  // Put twice
+  });
+
+  std::thread producer_thread2([&producer2, &batch2]() {
+    producer2.Put(absl::Span<const int>(batch2));
+    producer2.Put(absl::Span<const int>(batch2));  // Put twice
+  });
+
+  // Consumer getting in large batches
+  std::thread consumer_thread([&queue, &all_consumed, &items_consumed]() {
+    while (items_consumed < total_items) {
+      try {
+        auto batch = queue.Get(std::min(15, total_items - items_consumed));
+        for (const auto& item : batch) {
+          all_consumed.push_back(item);
+        }
+        items_consumed += batch.size();
+      } catch (const QueueClosedException&) {
+        break;
+      }
+    }
+  });
+
+  producer_thread1.join();
+  producer_thread2.join();
+
+  // Close the queue by destroying producers
+  producer1.Close();
+  producer2.Close();
+
+  consumer_thread.join();
+
+  EXPECT_EQ(all_consumed.size(), total_items);
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, GradualOperationsWithQueueClosure) {
+  Queue<int> queue(2);  // Very small capacity
+  auto producer = queue.CreateProducer();
+
+  std::vector<int> large_batch = {1, 2, 3, 4, 5};
+  std::atomic<bool> exception_caught{false};
+
+  std::thread producer_thread([&producer, &large_batch, &exception_caught]() {
+    try {
+      producer.Put(absl::Span<const int>(large_batch));
+    } catch (const QueueClosedException&) {
+      exception_caught = true;
+    }
+  });
+
+  // Let producer start putting items
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+  // Consume a couple items
+  queue.Get();  // Should get 1
+  queue.Get();  // Should get 2
+
+  // Close the queue while producer is still trying to put items
+  queue.Close();
+
+  producer_thread.join();
+
+  EXPECT_TRUE(exception_caught);
+  // Queue might have some items that were put before closure
+  // but we can't predict exactly how many due to timing
 }
 
 }  // namespace lczero

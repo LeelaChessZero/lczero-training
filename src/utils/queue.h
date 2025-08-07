@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "absl/base/thread_annotations.h"
@@ -13,15 +14,6 @@ namespace lczero {
 class QueueClosedException : public std::runtime_error {
  public:
   QueueClosedException() : std::runtime_error("Queue is closed") {}
-};
-
-// Exception thrown when operation would exceed queue capacity.
-class QueueCapacityExceededException : public std::invalid_argument {
- public:
-  explicit QueueCapacityExceededException(size_t requested, size_t capacity)
-      : std::invalid_argument("Requested " + std::to_string(requested) +
-                              " elements exceeds queue capacity " +
-                              std::to_string(capacity)) {}
 };
 
 // Thread-safe fixed-size circular buffer queue with blocking operations.
@@ -119,9 +111,7 @@ class Queue {
 
   // Condition predicates for blocking operations
   bool CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  bool CanPutMultiple(size_t count) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool CanGet() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  bool CanGetMultiple(size_t count) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Additional condition predicates for wait functions
   bool HasRoomAtLeast(size_t room) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -233,56 +223,54 @@ void Queue<T>::PutInternal(T&& item) {
 template <typename T>
 void Queue<T>::PutInternal(absl::Span<const T> items) {
   if (items.empty()) return;
-  if (items.size() > capacity_) {
-    throw QueueCapacityExceededException(items.size(), capacity_);
-  }
 
-  struct Args {
-    Queue<T>* queue;
-    size_t count;
-  };
-  Args args{this, items.size()};
-  absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->CanPutMultiple(args->count);
-      },
-      &args));
-  if (closed_) throw QueueClosedException();
+  size_t remaining = items.size();
+  size_t offset = 0;
 
-  for (const auto& item : items) {
-    buffer_[tail_] = item;
-    tail_ = (tail_ + 1) % capacity_;
-    ++size_;
+  while (remaining > 0) {
+    absl::MutexLock lock(&mutex_);
+    mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+    if (closed_) throw QueueClosedException();
+
+    // Put as many items as possible in this batch
+    size_t available_space = capacity_ - size_;
+    size_t batch_size = std::min(remaining, available_space);
+
+    for (size_t i = 0; i < batch_size; ++i) {
+      buffer_[tail_] = items[offset + i];
+      tail_ = (tail_ + 1) % capacity_;
+      ++size_;
+    }
+
+    offset += batch_size;
+    remaining -= batch_size;
   }
 }
 
 template <typename T>
 void Queue<T>::PutInternal(absl::Span<T> items) {
   if (items.empty()) return;
-  if (items.size() > capacity_) {
-    throw QueueCapacityExceededException(items.size(), capacity_);
-  }
 
-  struct Args {
-    Queue<T>* queue;
-    size_t count;
-  };
-  Args args{this, items.size()};
-  absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->CanPutMultiple(args->count);
-      },
-      &args));
-  if (closed_) throw QueueClosedException();
+  size_t remaining = items.size();
+  size_t offset = 0;
 
-  for (auto& item : items) {
-    buffer_[tail_] = std::move(item);
-    tail_ = (tail_ + 1) % capacity_;
-    ++size_;
+  while (remaining > 0) {
+    absl::MutexLock lock(&mutex_);
+    mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+    if (closed_) throw QueueClosedException();
+
+    // Put as many items as possible in this batch
+    size_t available_space = capacity_ - size_;
+    size_t batch_size = std::min(remaining, available_space);
+
+    for (size_t i = 0; i < batch_size; ++i) {
+      buffer_[tail_] = std::move(items[offset + i]);
+      tail_ = (tail_ + 1) % capacity_;
+      ++size_;
+    }
+
+    offset += batch_size;
+    remaining -= batch_size;
   }
 }
 
@@ -302,30 +290,27 @@ T Queue<T>::Get() {
 template <typename T>
 absl::FixedArray<T> Queue<T>::Get(size_t count) {
   if (count == 0) return absl::FixedArray<T>(0);
-  if (count > capacity_) {
-    throw QueueCapacityExceededException(count, capacity_);
-  }
-
-  struct Args {
-    Queue<T>* queue;
-    size_t count;
-  };
-  Args args{this, count};
-  absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->CanGetMultiple(args->count);
-      },
-      &args));
-  if (closed_ && size_ < count) throw QueueClosedException();
 
   absl::FixedArray<T> result(count);
+  size_t remaining = count;
+  size_t offset = 0;
 
-  for (size_t i = 0; i < count; ++i) {
-    result[i] = std::move(buffer_[head_]);
-    head_ = (head_ + 1) % capacity_;
-    --size_;
+  while (remaining > 0) {
+    absl::MutexLock lock(&mutex_);
+    mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
+    if (closed_ && size_ == 0) throw QueueClosedException();
+
+    // Get as many items as possible in this batch
+    size_t batch_size = std::min(remaining, size_);
+
+    for (size_t i = 0; i < batch_size; ++i) {
+      result[offset + i] = std::move(buffer_[head_]);
+      head_ = (head_ + 1) % capacity_;
+      --size_;
+    }
+
+    offset += batch_size;
+    remaining -= batch_size;
   }
 
   return result;
@@ -418,20 +403,8 @@ bool Queue<T>::CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
 }
 
 template <typename T>
-bool Queue<T>::CanPutMultiple(size_t count)
-    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return closed_ || size_ + count <= capacity_;
-}
-
-template <typename T>
 bool Queue<T>::CanGet() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
   return closed_ || size_ > 0;
-}
-
-template <typename T>
-bool Queue<T>::CanGetMultiple(size_t count)
-    ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  return closed_ || size_ >= count;
 }
 
 template <typename T>
