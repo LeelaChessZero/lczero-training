@@ -25,8 +25,17 @@ The Data Loader consists of the following stages connected through a
 * [ShufflingFrameSampler](../src/loader/shuffling_frame_sampler.h) — Takes a
   stream of frames and provides shuffled batches of frames for training, using
   reservoir sampling.
-* [Tensor Generator](../src/loader/tensor_generator.h) — Takes frames and
+* [TensorGenerator](../src/loader/tensor_generator.h) — Takes frames and
   provides tensor buffers for the training process.
+
+## TensorGenerator
+
+Batch size is configurable in the stage options.
+
+The `TensorGenerator` stage takes frames from the input queue and produces tuple
+of tensors for tensor returned as [TensorTuple](../src/utils/tensor.h).
+The first dimension of every tensor in the tuple is the batch size, and the
+rest are described in the [Training Tuple Format](training_tuple.md).
 
 ## Stage interface
 
