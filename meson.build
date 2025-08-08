@@ -157,6 +157,13 @@ tensor_generator_test = executable(
   dependencies : test_deps + [absl_deps['synchronization']],
   link_with : loader_lib,
 )
+
+stats_test = executable(
+  'stats_test',
+  'src/utils/metrics/stats_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization']],
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
@@ -166,6 +173,7 @@ test('chunk_unpacker_test', chunk_unpacker_test)
 test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
 test('tensor_test', tensor_test)
 test('tensor_generator_test', tensor_generator_test)
+test('stats_test', stats_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',
