@@ -66,6 +66,7 @@ class FilePathProvider {
   absl::flat_hash_map<int, Path> watch_descriptors_;
 
   Queue<File> output_queue_;
+  Path directory_;  // Directory to monitor
   Queue<File>::Producer producer_;
 
   std::thread monitor_thread_;

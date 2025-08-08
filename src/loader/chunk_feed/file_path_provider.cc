@@ -19,13 +19,13 @@ namespace training {
 
 FilePathProvider::FilePathProvider(const FilePathProviderOptions& options)
     : output_queue_(options.queue_capacity),
+      directory_(options.directory),
       producer_(output_queue_.CreateProducer()) {
   LOG(INFO) << "Starting FilePathProvider for directory: " << options.directory;
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
   monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
-  AddDirectory(options.directory);
 }
 
 FilePathProvider::~FilePathProvider() {
@@ -193,6 +193,9 @@ void FilePathProvider::RemoveWatchRecursive(const Path& base) {
 }
 
 void FilePathProvider::MonitorThread() {
+  // Perform directory scanning in background thread
+  AddDirectory(directory_);
+
   int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd";
   absl::Cleanup epoll_cleanup([epoll_fd]() { close(epoll_fd); });
