@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
@@ -58,6 +59,7 @@ class ShufflingChunkPool {
   std::deque<ChunkSourceItem> chunk_sources_
       ABSL_GUARDED_BY(chunk_sources_mutex_);
   StreamShuffler stream_shuffler_ ABSL_GUARDED_BY(chunk_sources_mutex_);
+  std::jthread initialization_thread_;
 };
 
 }  // namespace training

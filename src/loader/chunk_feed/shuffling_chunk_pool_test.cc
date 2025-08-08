@@ -139,10 +139,25 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
                                     .num_chunk_loading_threads = 1,
                                     .output_queue_size = 100};
 
-  // This should throw because there are no chunk sources
-  EXPECT_THROW(
-      { ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options); },
-      std::runtime_error);
+  // Constructor should now succeed (initialization is asynchronous)
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+
+  // The initialization thread should handle the error case
+  auto* output_queue = shuffling_chunk_pool.output();
+
+  // Give the initialization thread time to complete and discover the error
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  // Close input queue to clean up
+  CloseInputQueue();
+
+  // Output queue should exist but should be closed due to initialization
+  // failure
+  EXPECT_NE(output_queue, nullptr);
+
+  // Trying to get from the output queue should throw because it was closed due
+  // to init failure
+  EXPECT_THROW(output_queue->Get(), QueueClosedException);
 }
 
 TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {

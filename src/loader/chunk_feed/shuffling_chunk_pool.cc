@@ -24,27 +24,40 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
       chunk_loading_pool_(options.num_chunk_loading_threads,
                           ThreadPoolOptions{}),
       input_queue_(input_queue),
-      output_queue_(options.output_queue_size) {
-  LOG(INFO) << "Starting ShufflingChunkPool with pool size "
-            << options.chunk_pool_size;
-  std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
-      InitializeChunkSources(options.num_startup_indexing_threads);
-  ProcessInputFiles(std::move(uninitialized_sources));
+      output_queue_(options.output_queue_size),
+      initialization_thread_([this, options]() {
+        try {
+          LOG(INFO) << "Starting ShufflingChunkPool with pool size "
+                    << options.chunk_pool_size;
+          std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
+              InitializeChunkSources(options.num_startup_indexing_threads);
+          ProcessInputFiles(std::move(uninitialized_sources));
 
-  // Start input processing worker that continuously processes new files.
-  for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
-    indexing_pool_.Enqueue([this]() { IndexingWorker(); });
-  }
+          // Start input processing worker that continuously processes new
+          // files.
+          for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
+            indexing_pool_.Enqueue([this]() { IndexingWorker(); });
+          }
 
-  // Start output workers after everything is fully initialized.
-  LOG(INFO) << "ShufflingChunkPool initialization complete, starting workers";
-  for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
-    chunk_loading_pool_.Enqueue([this]() { OutputWorker(); });
-  }
-}
+          // Start output workers after everything is fully initialized.
+          LOG(INFO)
+              << "ShufflingChunkPool initialization complete, starting workers";
+          for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
+            chunk_loading_pool_.Enqueue([this]() { OutputWorker(); });
+          }
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "ShufflingChunkPool initialization failed: "
+                     << e.what();
+          // Close output queue to signal failure to consumers
+          output_queue_.Close();
+        }
+      }) {}
 
 ShufflingChunkPool::~ShufflingChunkPool() {
   Close();
+  if (initialization_thread_.joinable()) {
+    initialization_thread_.join();
+  }
   indexing_pool_.WaitAll();
   chunk_loading_pool_.WaitAll();
 }
