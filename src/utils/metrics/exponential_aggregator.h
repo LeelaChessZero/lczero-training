@@ -49,7 +49,15 @@ enum class TimePeriod {
 // The template parameter `Metric` must satisfy the following requirements:
 // * It must have a `Reset()` method that clears its state.
 // * It must have a `MergeFrom(const Metric& other)` method to merge another
-//  metric into itself.
+//   metric into itself (used for bucket-to-bucket merging).
+// * It must have a `MergeLive(Metric&& other)` method to ingest live data
+//   and reset the source. Most metrics can implement this as:
+//   `void MergeLive(Metric&& other) { MergeFrom(other); other.Reset(); }`
+//   However, timing-sensitive metrics may need custom logic that considers
+//   the moment of ingestion.
+//
+//   **BREAKING CHANGE**: If you get compile errors about missing MergeLive,
+//   add the method above to your Metric class.
 // * It must behave like a monoid (actually, unital magma is sufficient):
 //   * Merging with a default-constructed (empty) metric is a no-op.
 //   * The `MergeFrom` operation must be associative (actually, not really;
@@ -65,7 +73,7 @@ class ExponentialAggregator {
   // Resets the aggregator, clearing all buckets and pending metrics.
   void Reset(Clock::time_point now = Clock::now());
 
-  // Merges the passed metric into the pending bucket, and clears it.
+  // Ingests the passed metric into the pending bucket using MergeLive.
   template <typename T>
   void RecordMetrics(T&& metric);
 
@@ -148,8 +156,7 @@ template <typename Metric, TimePeriod Resolution>
 template <typename T>
 void ExponentialAggregator<Metric, Resolution>::RecordMetrics(T&& metric) {
   absl::MutexLock lock(&pending_bucket_mutex_);
-  pending_bucket_.MergeFrom(std::forward<T>(metric));
-  metric.Reset();
+  pending_bucket_.MergeLive(std::forward<T>(metric));
 }
 
 template <typename Metric, TimePeriod Resolution>

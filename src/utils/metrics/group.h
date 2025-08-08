@@ -11,7 +11,9 @@ namespace lczero {
 // - void MergeFrom(const Metric& other);  // Merges another metric into this
 // one. Note that the incoming always happens later in time, so if e.g. merge
 // keeps the latest value, it should update the current value with the incoming
-// one.
+// one. Used for bucket-to-bucket merging.
+// - void MergeLive(Metric&& other);  // Ingests live data and resets source.
+// Most metrics can implement as: MergeFrom(other); other.Reset();
 // - (optional) std::string_view name() const;
 // - (optional) std::string ToString() const; // If provided, returns a string
 // representation of the metric.
@@ -30,9 +32,16 @@ class MetricGroup {
   // Merges each individual stat from `other` into this group.
   void MergeFrom(const MetricGroup<StatRecords...>& other);
 
+  // Ingests live data from `other` group into this group, resetting the source.
+  void MergeLive(MetricGroup<StatRecords...>&& other);
+
   // Merges a single stat from `other` into this group.
   template <typename T>
   void MergeFrom(const T& other);
+
+  // Ingests live data from `other` into this group, resetting the source.
+  template <typename T>
+  void MergeLive(T&& other);
 
   // Gets a const reference to a specific stat record.
   template <typename T>
@@ -62,11 +71,29 @@ void MetricGroup<StatRecords...>::MergeFrom(
 }
 
 template <typename... StatRecords>
+void MetricGroup<StatRecords...>::MergeLive(
+    MetricGroup<StatRecords...>&& other) {
+  (std::get<StatRecords>(stats_).MergeLive(
+       std::move(std::get<StatRecords>(other.stats_))),
+   ...);
+}
+
+template <typename... StatRecords>
 template <typename T>
 void MetricGroup<StatRecords...>::MergeFrom(const T& other) {
   static_assert((std::is_same_v<T, StatRecords> || ...),
                 "Type T must be one of the Stats types");
   std::get<T>(stats_).MergeFrom(other);
+}
+
+template <typename... StatRecords>
+template <typename T>
+void MetricGroup<StatRecords...>::MergeLive(T&& other) {
+  static_assert(
+      (std::is_same_v<std::remove_reference_t<T>, StatRecords> || ...),
+      "Type T must be one of the Stats types");
+  std::get<std::remove_reference_t<T>>(stats_).MergeLive(
+      std::forward<T>(other));
 }
 
 template <typename... StatRecords>

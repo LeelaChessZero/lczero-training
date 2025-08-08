@@ -20,6 +20,11 @@ class CounterMetric {
 
   void MergeFrom(const CounterMetric& other) { count_ += other.count_; }
 
+  void MergeLive(CounterMetric&& other) {
+    MergeFrom(other);
+    other.Reset();
+  }
+
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("CounterMetric");
     printer.Print("count", static_cast<size_t>(count_));
@@ -46,6 +51,11 @@ class AverageMetric {
   void MergeFrom(const AverageMetric& other) {
     sum_ += other.sum_;
     count_ += other.count_;
+  }
+
+  void MergeLive(AverageMetric&& other) {
+    MergeFrom(other);
+    other.Reset();
   }
 
   void Print(MetricPrinter& printer) const {
@@ -91,6 +101,11 @@ class MaxMetric {
     }
   }
 
+  void MergeLive(MaxMetric&& other) {
+    MergeFrom(other);
+    other.Reset();
+  }
+
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("MaxMetric");
     if (has_value_) {
@@ -129,6 +144,12 @@ class OptionalValueMetric {
     if (other.value_.has_value()) {
       value_ = other.value_;
     }
+  }
+
+  // Example of timing-aware MergeLive - could add timestamp logic here
+  void MergeLive(OptionalValueMetric&& other) {
+    MergeFrom(other);
+    other.Reset();
   }
 
   void Print(MetricPrinter& printer) const {
