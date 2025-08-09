@@ -50,10 +50,10 @@ class AverageMetric {
 
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("AverageMetric");
-    printer.Print("sum", std::to_string(sum_));
+    printer.Print("sum", sum_);
     printer.Print("count", static_cast<size_t>(count_));
     if (count_ > 0) {
-      printer.Print("average", std::to_string(sum_ / count_));
+      printer.Print("average", sum_ / count_);
     }
     printer.EndGroup();
   }
@@ -94,7 +94,7 @@ class MaxMetric {
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("MaxMetric");
     if (has_value_) {
-      printer.Print("max_value", std::to_string(max_value_));
+      printer.Print("max_value", max_value_);
       printer.Print("has_value", static_cast<size_t>(1));
     } else {
       printer.Print("has_value", static_cast<size_t>(0));
@@ -134,7 +134,7 @@ class OptionalValueMetric {
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("OptionalValueMetric");
     if (value_.has_value()) {
-      printer.Print("value", std::to_string(value_.value()));
+      printer.Print("value", value_.value());
       printer.Print("has_value", static_cast<size_t>(1));
     } else {
       printer.Print("has_value", static_cast<size_t>(0));

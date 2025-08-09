@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <string_view>
+
 namespace lczero {
 
 // ABOUTME: Simple additive metric that accumulates values.
@@ -22,6 +25,13 @@ class AdditiveMetric {
 
   // Merges another additive metric into this one.
   void MergeFrom(const AdditiveMetric<T>& other) { value_ += other.value_; }
+
+  // Prints the metric value with the given name.
+  template <typename MetricPrinter>
+  void Print(MetricPrinter& printer,
+             std::string_view name = "AdditiveMetric") const {
+    printer.Print(name, value_);
+  }
 
  private:
   T value_;

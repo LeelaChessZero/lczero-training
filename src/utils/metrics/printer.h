@@ -12,10 +12,7 @@ class MetricPrinter {
   virtual ~MetricPrinter() = default;
   virtual void StartGroup(std::string_view group_name) = 0;
   virtual void Print(std::string_view metric_name,
-                     const std::string& value) = 0;
-  virtual void Print(std::string_view metric_name, size_t value) {
-    Print(metric_name, std::to_string(value));
-  }
+                     const absl::AlphaNum& value) = 0;
   virtual void EndGroup() = 0;
 };
 
@@ -29,7 +26,8 @@ class StringMetricPrinter : public MetricPrinter {
     first_metric_ = true;
   }
 
-  void Print(std::string_view metric_name, const std::string& value) override {
+  void Print(std::string_view metric_name,
+             const absl::AlphaNum& value) override {
     if (!first_metric_) absl::StrAppend(output_, ", ");
     absl::StrAppend(output_, metric_name, "=", value);
     first_metric_ = false;
