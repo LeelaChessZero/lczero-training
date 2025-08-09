@@ -2,12 +2,17 @@
 #include <absl/flags/parse.h>
 #include <absl/log/globals.h>
 #include <absl/log/initialize.h>
+#include <absl/log/log.h>
+#include <absl/strings/str_cat.h>
+#include <absl/strings/str_format.h>
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 
+#include <chrono>
 #include <iostream>
 
 #include "data_loader.h"
+#include "utils/metrics/printer.h"
 
 ABSL_FLAG(std::string, directory, "/home/crem/tmp/2025-07/lczero-training/",
           "Directory to watch for training data files");
@@ -32,26 +37,29 @@ void Run() {
 
   size_t batch_count = 0;
   auto start_time = absl::Now();
-  auto last_report_time = start_time;
 
   while (true) {
     TensorTuple batch = loader.GetNext();
     ++batch_count;
 
     auto current_time = absl::Now();
-    auto elapsed_since_report = current_time - last_report_time;
+    auto total_elapsed = current_time - start_time;
+    double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
 
-    // Report every 10 seconds
-    if (elapsed_since_report >= absl::Seconds(10)) {
-      auto total_elapsed = current_time - start_time;
-      double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
+    // Log metrics every second
+    LOG_EVERY_N_SEC(INFO, 1) << [&]() {
+      auto [metrics, duration] =
+          loader.GetMetricsAggregator().GetAggregateEndingNow(
+              std::chrono::seconds(1));
+      std::string metrics_str;
+      lczero::StringMetricPrinter printer(&metrics_str);
+      metrics.Print(printer);
 
-      std::cout << "Processed " << batch_count << " batches in "
-                << absl::ToDoubleSeconds(total_elapsed) << " seconds. "
-                << "Rate: " << rate << " batches/sec" << std::endl;
-
-      last_report_time = current_time;
-    }
+      return absl::StrCat("Processed ", batch_count, " batches in ",
+                          absl::ToDoubleSeconds(total_elapsed),
+                          "s. Rate: ", absl::StrFormat("%.2f", rate),
+                          " batches/sec. ", "Metrics: ", metrics_str);
+    }();
   }
 }
 

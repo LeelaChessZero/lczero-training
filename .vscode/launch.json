@@ -7,10 +7,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "stats_test",
-            "program": "${workspaceFolder}/builddir/stats_test",
+            "name": "loader",
+            "program": "${workspaceFolder}/builddir/loader",
             "args": [
-                "--gtest_filter=LoadMetricTest.DelayedRecordMetricsFlushesActiveLoad",
+                // "--gtest_filter=LoadMetricTest.DelayedRecordMetricsFlushesActiveLoad",
                 // "--gather-threads=1",
                 // "--eval-threads=1",
                 // "--backprop-threads=1",

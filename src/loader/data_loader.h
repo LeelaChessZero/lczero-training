@@ -30,9 +30,16 @@ struct DataLoaderConfig {
 
 class DataLoader {
  public:
+  using MetricsAggregator =
+      ExponentialAggregator<DataLoaderMetric, TimePeriod::k250Milliseconds>;
+
   DataLoader(const DataLoaderConfig& config);
 
   TensorTuple GetNext();
+
+  const MetricsAggregator& GetMetricsAggregator() const {
+    return metrics_aggregator_;
+  }
 
  private:
   Queue<TensorTuple>* output();
@@ -42,8 +49,7 @@ class DataLoader {
   ChunkUnpacker chunk_unpacker_;
   ShufflingFrameSampler shuffling_frame_sampler_;
   TensorGenerator tensor_generator_;
-  ExponentialAggregator<DataLoaderMetric, TimePeriod::k250Milliseconds>
-      metrics_aggregator_;
+  MetricsAggregator metrics_aggregator_;
   std::jthread metrics_thread_;
 };
 

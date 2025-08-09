@@ -22,6 +22,7 @@ DataLoader::DataLoader(const DataLoaderConfig& config)
         while (!stop_token.stop_requested()) {
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           file_path_provider_.RecordMetricsTo(&metrics_aggregator_);
+          metrics_aggregator_.Advance(std::chrono::steady_clock::now());
         }
       }) {}
 
