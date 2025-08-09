@@ -52,7 +52,7 @@ class LoadMetricUpdater {
   }
 
   // Flushes any uncounted load time into the metric.
-  void Flush(Clock::time_point now) {
+  void Flush(Clock::time_point now = Clock::now()) {
     if (!uncounted_load_start_.has_value()) return;
 
     Duration elapsed = now - *uncounted_load_start_;
