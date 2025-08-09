@@ -10,7 +10,18 @@ check-cpp:
 format-cpp:
     find csrc/ -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" -o -name "*.h" -o -name "*.hpp" | xargs clang-format -i
 
-format: format-cpp
+# Check if all Python files in src/ are formatted according to ruff
+check-python:
+    source .venv/bin/activate && ruff check src/
+    source .venv/bin/activate && ruff format --check src/
+    source .venv/bin/activate && mypy src/
+
+# Format all Python files in src/ using ruff
+format-python:
+    source .venv/bin/activate && ruff format src/
+    source .venv/bin/activate && ruff check --fix src/
+
+format: format-cpp format-python
 
 # Build the project
 build:
@@ -20,7 +31,7 @@ build:
 test:
     meson test -C builddir/
 
-check: check-cpp
+check: check-cpp check-python
 
 # Run all checks (formatting, build, and tests)
 pre-commit: check build test

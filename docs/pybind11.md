@@ -28,6 +28,8 @@ The project will be restructured to separate C++ and Python code:
    - Create `uv` virtual environment
    - Install pybind11, numpy as initial dependencies
    - Plan for JAX integration (but start with numpy for easier dependency management)
+   - Install ruff to ensure formatting and linting, mypy for type checking
+   - Update justfile to have python checks and formatting like for C++
 
 ### Phase 3: Python Configuration Layer
 1. **Create Configuration Dataclasses**
