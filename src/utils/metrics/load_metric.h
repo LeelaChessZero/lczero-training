@@ -2,31 +2,32 @@
 
 #include <chrono>
 #include <optional>
+#include <string>
+
+#include "src/utils/metrics/additive_metric.h"
 
 namespace lczero {
 
 // ABOUTME: Simple load metric that accumulates seconds of load time.
 // ABOUTME: Use LoadMetricUpdater to manage timing and flush into this metric.
-class LoadMetric {
+class LoadMetric : public AdditiveMetric<double> {
  public:
   using Clock = std::chrono::steady_clock;
 
-  LoadMetric() : load_seconds_(0.0) {}
+  LoadMetric() = default;
 
   // Returns the total load in seconds.
-  double LoadSeconds() const { return load_seconds_; }
+  double LoadSeconds() const { return Get(); }
 
-  // Resets the load metric to initial state.
-  void Reset() { load_seconds_ = 0.0; }
-
-  // Merges another load metric into this one.
-  void MergeFrom(const LoadMetric& other) {
-    load_seconds_ += other.load_seconds_;
+  // Prints the metric value with the given name.
+  template <typename MetricPrinter>
+  void Print(MetricPrinter& printer,
+             std::string_view name = "LoadMetric") const {
+    AdditiveMetric<double>::Print(printer, name);
   }
 
  private:
   friend class LoadMetricUpdater;
-  double load_seconds_;
 };
 
 // ABOUTME: Helper class to manage timing logic for LoadMetric.
@@ -55,7 +56,7 @@ class LoadMetricUpdater {
     if (!uncounted_load_start_.has_value()) return;
 
     Duration elapsed = now - *uncounted_load_start_;
-    metric_->load_seconds_ += elapsed.count();
+    metric_->Add(elapsed.count());
     uncounted_load_start_ = now;
   }
 

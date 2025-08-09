@@ -15,6 +15,7 @@
 
 #include "src/utils/metrics/additive_metric.h"
 #include "src/utils/metrics/load_metric.h"
+#include "src/utils/metrics/printer.h"
 #include "src/utils/metrics/statistics_metric.h"
 #include "src/utils/queue.h"
 
@@ -26,6 +27,29 @@ struct FilePathProviderMetrics {
   AdditiveMetric<size_t> total_files_discovered;
   LoadMetric load;
   StatisticsMetric<size_t, true> queue_size;
+
+  // Resets all metrics to their initial state.
+  void Reset() {
+    total_files_discovered.Reset();
+    load.Reset();
+    queue_size.Reset();
+  }
+
+  // Merges another FilePathProviderMetrics into this one.
+  void MergeFrom(const FilePathProviderMetrics& other) {
+    total_files_discovered.MergeFrom(other.total_files_discovered);
+    load.MergeFrom(other.load);
+    queue_size.MergeFrom(other.queue_size);
+  }
+
+  // Prints all metrics as a group.
+  void Print(lczero::MetricPrinter& printer) const {
+    printer.StartGroup("FilePathProviderMetrics");
+    queue_size.Print(printer, "queue_size");
+    total_files_discovered.Print(printer, "total_files_discovered");
+    load.Print(printer, "load_seconds");
+    printer.EndGroup();
+  }
 };
 
 // Configuration options for FilePathProvider
