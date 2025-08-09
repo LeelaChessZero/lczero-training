@@ -2,6 +2,7 @@
 
 #include <absl/base/thread_annotations.h>
 #include <absl/container/flat_hash_map.h>
+#include <absl/synchronization/mutex.h>
 #include <absl/synchronization/notification.h>
 #include <sys/inotify.h>
 
@@ -12,10 +13,20 @@
 #include <thread>
 #include <vector>
 
+#include "src/utils/metrics/additive_metric.h"
+#include "src/utils/metrics/load_metric.h"
+#include "src/utils/metrics/statistics_metric.h"
 #include "src/utils/queue.h"
 
 namespace lczero {
 namespace training {
+
+// Metrics for FilePathProvider performance monitoring.
+struct FilePathProviderMetrics {
+  AdditiveMetric<size_t> total_files_discovered;
+  LoadMetric load;
+  StatisticsMetric<size_t, true> queue_size;
+};
 
 // Configuration options for FilePathProvider
 struct FilePathProviderOptions {
@@ -71,6 +82,10 @@ class FilePathProvider {
 
   std::thread monitor_thread_;
   absl::Notification stop_condition_;
+
+  mutable absl::Mutex metrics_mutex_;
+  FilePathProviderMetrics metrics_ ABSL_GUARDED_BY(metrics_mutex_);
+  LoadMetricUpdater load_metric_updater_ ABSL_GUARDED_BY(metrics_mutex_);
 };
 
 }  // namespace training

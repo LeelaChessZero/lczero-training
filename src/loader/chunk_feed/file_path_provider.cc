@@ -20,7 +20,8 @@ namespace training {
 FilePathProvider::FilePathProvider(const FilePathProviderOptions& options)
     : output_queue_(options.queue_capacity),
       directory_(options.directory),
-      producer_(output_queue_.CreateProducer()) {
+      producer_(output_queue_.CreateProducer()),
+      load_metric_updater_(&metrics_.load) {
   LOG(INFO) << "Starting FilePathProvider for directory: " << options.directory;
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
@@ -59,6 +60,10 @@ void FilePathProvider::AddDirectory(const Path& directory) {
 
   // Signal that initial scan is complete
   LOG(INFO) << "FilePathProvider initial scan complete";
+  {
+    absl::MutexLock lock(&metrics_mutex_);
+    metrics_.queue_size.AddSample(output_queue_.Size());
+  }
   producer_.Put({{.filepath = Path{},
                   .message_type = MessageType::kInitialScanComplete}});
 }
@@ -94,6 +99,11 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
+    {
+      absl::MutexLock lock(&metrics_mutex_);
+      metrics_.queue_size.AddSample(output_queue_.Size());
+      metrics_.total_files_discovered.Add(batch.size());
+    }
     producer_.Put(batch);
     batch.clear();
   };
@@ -158,6 +168,11 @@ void FilePathProvider::ProcessWatchEventsForNewItems(
 
   // Send notifications for any new files discovered through watch events
   if (!new_files.empty()) {
+    {
+      absl::MutexLock lock(&metrics_mutex_);
+      metrics_.queue_size.AddSample(output_queue_.Size());
+      metrics_.total_files_discovered.Add(new_files.size());
+    }
     producer_.Put(new_files);
   }
 }
@@ -193,6 +208,10 @@ void FilePathProvider::RemoveWatchRecursive(const Path& base) {
 }
 
 void FilePathProvider::MonitorThread() {
+  {
+    absl::MutexLock lock(&metrics_mutex_);
+    load_metric_updater_.LoadStart();
+  }
   // Perform directory scanning in background thread
   AddDirectory(directory_);
 
@@ -207,9 +226,17 @@ void FilePathProvider::MonitorThread() {
       << "Failed to add inotify fd to epoll";
 
   while (true) {
+    {
+      absl::MutexLock lock(&metrics_mutex_);
+      load_metric_updater_.LoadStop();
+    }
     if (stop_condition_.WaitForNotificationWithTimeout(
             absl::Milliseconds(50))) {
       break;  // Exit if stop condition is notified
+    }
+    {
+      absl::MutexLock lock(&metrics_mutex_);
+      load_metric_updater_.LoadStart();
     }
 
     struct epoll_event event;
@@ -232,6 +259,11 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
+    {
+      absl::MutexLock lock(&metrics_mutex_);
+      metrics_.queue_size.AddSample(output_queue_.Size());
+      metrics_.total_files_discovered.Add(files.size());
+    }
     producer.Put(files);
     files.clear();
   };
