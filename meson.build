@@ -22,6 +22,10 @@ add_project_arguments('-Werror', language : 'cpp')
 libarchive_dep = dependency('libarchive')
 zlib_dep = dependency('zlib')
 
+# Python and PyBind11 dependencies for Python extension
+python3 = import('python').find_installation()
+pybind11_dep = dependency('pybind11')
+
 # Abseil dependencies
 absl_deps = {}
 foreach name : [
@@ -189,4 +193,15 @@ file_path_provider_main = executable(
   include_directories : includes,
   dependencies : cli_deps,
   link_with : loader_lib,
+)
+
+# Python extension module
+python3.extension_module(
+  '_lczero_training',
+  'src/lczero_training/pybind_module.cc',
+  include_directories : includes,
+  dependencies : [pybind11_dep] + loader_deps,
+  link_with : loader_lib,
+  install : true,
+  subdir : 'lczero_training',
 )

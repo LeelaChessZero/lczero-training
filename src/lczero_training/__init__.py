@@ -1,5 +1,5 @@
 # ABOUTME: Python package initialization for lczero-training data loader.
-# ABOUTME: This will eventually expose the DataLoader class through pybind11.
+# ABOUTME: Exposes DataLoader class and configuration through high-level Python API.
 
 from .data_loader_config import (
     DataLoaderConfig,
@@ -11,8 +11,11 @@ from .data_loader_config import (
     TensorGeneratorConfig,
     create_default_config,
 )
+from .data_loader import DataLoader, create_dataloader
 
 __all__ = [
+    "DataLoader",
+    "create_dataloader",
     "DataLoaderConfig",
     "FilePathProviderConfig",
     "ChunkSourceLoaderConfig",
