@@ -60,12 +60,6 @@ class StatisticsMetric {
     count_ += other.count_;
   }
 
-  // Merges live data and resets the source.
-  void MergeLive(StatisticsMetric<T>&& other, Clock::time_point now) {
-    MergeFrom(other);
-    other.Reset();
-  }
-
  private:
   T min_;
   T max_;

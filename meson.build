@@ -164,6 +164,13 @@ stats_test = executable(
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
 )
+
+load_metric_test = executable(
+  'load_metric_test',
+  'src/utils/metrics/load_metric_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization']],
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
@@ -174,6 +181,7 @@ test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
 test('tensor_test', tensor_test)
 test('tensor_generator_test', tensor_generator_test)
 test('stats_test', stats_test)
+test('load_metric_test', load_metric_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',

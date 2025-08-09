@@ -7,7 +7,6 @@
 
 #include "utils/metrics/exponential_aggregator.h"
 #include "utils/metrics/group.h"
-#include "utils/metrics/load_metric.h"
 #include "utils/metrics/printer.h"
 
 namespace lczero {
@@ -20,11 +19,6 @@ class CounterMetric {
   void Reset() { count_ = 0; }
 
   void MergeFrom(const CounterMetric& other) { count_ += other.count_; }
-
-  void MergeLive(CounterMetric&& other, std::chrono::steady_clock::time_point) {
-    MergeFrom(other);
-    other.Reset();
-  }
 
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("CounterMetric");
@@ -52,11 +46,6 @@ class AverageMetric {
   void MergeFrom(const AverageMetric& other) {
     sum_ += other.sum_;
     count_ += other.count_;
-  }
-
-  void MergeLive(AverageMetric&& other, std::chrono::steady_clock::time_point) {
-    MergeFrom(other);
-    other.Reset();
   }
 
   void Print(MetricPrinter& printer) const {
@@ -102,11 +91,6 @@ class MaxMetric {
     }
   }
 
-  void MergeLive(MaxMetric&& other, std::chrono::steady_clock::time_point) {
-    MergeFrom(other);
-    other.Reset();
-  }
-
   void Print(MetricPrinter& printer) const {
     printer.StartGroup("MaxMetric");
     if (has_value_) {
@@ -145,13 +129,6 @@ class OptionalValueMetric {
     if (other.value_.has_value()) {
       value_ = other.value_;
     }
-  }
-
-  // Example of timing-aware MergeLive - could add timestamp logic here
-  void MergeLive(OptionalValueMetric&& other,
-                 std::chrono::steady_clock::time_point) {
-    MergeFrom(other);
-    other.Reset();
   }
 
   void Print(MetricPrinter& printer) const {
@@ -532,229 +509,6 @@ TEST_F(ExponentialAggregatorTest, AggregationTest) {
                   224 + 225 + 226 + 227 + 228 + 229 + 230 + 231 + 232 + 233 +
                       234 + 235 + 236,
                   136, kRes * (5 + 8));
-}
-
-class LoadMetricTest : public ::testing::Test {
- protected:
-  using TestAggregator =
-      ExponentialAggregator<LoadMetric, TimePeriod::k16Milliseconds>;
-  using Clock = TestAggregator::Clock;
-
-  void SetUp() override {
-    aggregator_ = std::make_unique<TestAggregator>();
-    start_time_ = Clock::now();
-    aggregator_->Reset(start_time_);
-  }
-
-  std::unique_ptr<TestAggregator> aggregator_;
-  Clock::time_point start_time_;
-};
-
-TEST_F(LoadMetricTest, BasicStartStopLoad) {
-  LoadMetric metric;
-  auto now = start_time_;
-
-  // Start load and verify initial state
-  metric.StartLoad(now);
-  EXPECT_EQ(metric.LoadSeconds(), 0.0);
-
-  // Advance time and stop load
-  now += std::chrono::milliseconds(100);
-  metric.StopLoad(now);
-  EXPECT_NEAR(metric.LoadSeconds(), 0.1, 1e-6);
-
-  // Start again
-  now += std::chrono::milliseconds(50);
-  metric.StartLoad(now);
-  now += std::chrono::milliseconds(200);
-  metric.StopLoad(now);
-  EXPECT_NEAR(metric.LoadSeconds(), 0.3, 1e-6);  // 0.1 + 0.2
-}
-
-TEST_F(LoadMetricTest, MergeLiveFlushesCorrectly) {
-  auto now = start_time_;
-
-  // Create a source metric with active load
-  LoadMetric source;
-  source.StartLoad(now);
-  now += std::chrono::milliseconds(100);
-
-  // Create destination metric with some existing load
-  LoadMetric dest;
-  dest.StartLoad(now - std::chrono::milliseconds(200));
-  dest.StopLoad(now - std::chrono::milliseconds(100));
-  EXPECT_NEAR(dest.LoadSeconds(), 0.1, 1e-6);
-
-  // MergeLive should flush source before merging
-  dest.MergeLive(std::move(source), now);
-
-  // Destination should have combined load (0.1 + 0.1 = 0.2)
-  EXPECT_NEAR(dest.LoadSeconds(), 0.2, 1e-6);
-
-  // Source should be reset to 0 but keep active state if it was active
-  EXPECT_EQ(source.LoadSeconds(), 0.0);
-}
-
-TEST_F(LoadMetricTest, MergeLiveWithActiveDestination) {
-  auto now = start_time_;
-
-  // Create source with completed load
-  LoadMetric source;
-  source.StartLoad(now);
-  source.StopLoad(now + std::chrono::milliseconds(100));
-  double source_load = source.LoadSeconds();
-  EXPECT_NEAR(source_load, 0.1, 1e-6);
-
-  // Create destination with completed load
-  LoadMetric dest;
-  dest.StartLoad(now + std::chrono::milliseconds(50));
-  dest.StopLoad(now + std::chrono::milliseconds(150));
-  double dest_load_before = dest.LoadSeconds();
-  EXPECT_NEAR(dest_load_before, 0.1, 1e-6);  // 100ms of load
-
-  // MergeLive should merge both loads
-  dest.MergeLive(std::move(source), now + std::chrono::milliseconds(150));
-
-  // Debug output
-  double dest_load_after = dest.LoadSeconds();
-  double source_load_after = source.LoadSeconds();
-
-  // Destination should have both loads combined
-  EXPECT_NEAR(dest_load_after, 0.2, 1e-5)
-      << "dest before: " << dest_load_before << ", source: " << source_load
-      << ", dest after: " << dest_load_after;
-
-  // Source should be reset
-  EXPECT_EQ(source_load_after, 0.0);
-}
-
-TEST_F(LoadMetricTest, LoadMetricMoveSemantics) {
-  // Test that LoadMetric move semantics work correctly
-  LoadMetric source;
-  source.StartLoad(start_time_);
-  source.StopLoad(start_time_ + std::chrono::milliseconds(100));
-  EXPECT_NEAR(source.LoadSeconds(), 0.1, 1e-6) << "source should have 0.1";
-
-  // Test move construction
-  LoadMetric moved_constructed(std::move(source));
-  EXPECT_NEAR(moved_constructed.LoadSeconds(), 0.1, 1e-6)
-      << "moved_constructed should have 0.1";
-
-  // Test move assignment
-  LoadMetric move_assigned;
-  LoadMetric another_source;
-  another_source.StartLoad(start_time_);
-  another_source.StopLoad(start_time_ + std::chrono::milliseconds(50));
-  EXPECT_NEAR(another_source.LoadSeconds(), 0.05, 1e-6)
-      << "another_source should have 0.05";
-
-  move_assigned = std::move(another_source);
-  EXPECT_NEAR(move_assigned.LoadSeconds(), 0.05, 1e-6)
-      << "move_assigned should have 0.05";
-
-  // Test MergeFrom and MergeLive
-  LoadMetric dest;
-  dest.MergeFrom(moved_constructed);
-  EXPECT_NEAR(dest.LoadSeconds(), 0.1, 1e-6)
-      << "dest should have 0.1 after MergeFrom";
-
-  dest.MergeFrom(move_assigned);
-  EXPECT_NEAR(dest.LoadSeconds(), 0.15, 1e-6)
-      << "dest should have 0.15 after merging both";
-
-  // Test MergeLive
-  LoadMetric dest2;
-  LoadMetric live_source;
-  live_source.StartLoad(start_time_);
-  live_source.StopLoad(start_time_ + std::chrono::milliseconds(75));
-  EXPECT_NEAR(live_source.LoadSeconds(), 0.075, 1e-6)
-      << "live_source should have 0.075";
-
-  dest2.MergeLive(std::move(live_source), start_time_);
-  EXPECT_NEAR(dest2.LoadSeconds(), 0.075, 1e-6)
-      << "dest2 should have 0.075 after MergeLive";
-  EXPECT_NEAR(live_source.LoadSeconds(), 0.0, 1e-6)
-      << "live_source should be reset after MergeLive";
-}
-
-TEST_F(LoadMetricTest, MergeLivePreservesActiveState) {
-  auto now = start_time_;
-
-  // Create source metric that's actively loading
-  LoadMetric source;
-  source.StartLoad(now);
-  now += std::chrono::milliseconds(100);
-
-  // Create empty destination
-  LoadMetric dest;
-
-  // MergeLive should flush and merge
-  dest.MergeLive(std::move(source), now);
-
-  // Destination gets the flushed load
-  EXPECT_NEAR(dest.LoadSeconds(), 0.1, 1e-6);
-
-  // Source should have load_seconds reset but may keep timing state
-  EXPECT_EQ(source.LoadSeconds(), 0.0);
-
-  // Add more load to source and verify it can continue
-  now += std::chrono::milliseconds(50);
-  source.StopLoad(now);
-  EXPECT_NEAR(source.LoadSeconds(), 0.05, 1e-6);  // 50ms from the reset point
-}
-
-TEST_F(LoadMetricTest, DelayedRecordMetricsFlushesActiveLoad) {
-  auto current_time = start_time_;
-
-  // Start load tracking
-  LoadMetric metric;
-  metric.StartLoad(current_time);
-
-  // Advance time without calling StopLoad
-  current_time += std::chrono::milliseconds(150);
-
-  // Advance to just before the tick boundary - this ensures we advance exactly
-  // one tick
-  current_time = start_time_ + aggregator_->GetResolution();
-
-  // Record metrics at the tick boundary - this flushes the "external" metric
-  // during the last tick
-  aggregator_->RecordMetrics(std::move(metric), current_time);
-
-  // Advance exactly one tick
-  aggregator_->Advance(current_time);
-
-  // After advance, check that the metric was moved to buckets
-  auto [agg_no_pending, _] = aggregator_->GetAggregateEndingNow(
-      aggregator_->GetResolution(), std::nullopt);
-
-  // Expected time is exactly one resolution period
-  double expected_time =
-      aggregator_->GetResolution().count() / 1e9;  // nanoseconds to seconds
-  EXPECT_NEAR(agg_no_pending.LoadSeconds(), expected_time, 1e-5)
-      << "Should have exactly one tick of load time. Expected: "
-      << expected_time << ", got: " << agg_no_pending.LoadSeconds();
-}
-
-TEST_F(LoadMetricTest, MultipleDelayedRecordMetrics) {
-  auto current_time = start_time_;
-
-  // First metric: start load and record after some time
-  LoadMetric metric1;
-  metric1.StartLoad(current_time);
-  current_time += std::chrono::milliseconds(100);
-  aggregator_->RecordMetrics(std::move(metric1), current_time);
-
-  // Second metric: start load and record after different time
-  LoadMetric metric2;
-  metric2.StartLoad(current_time);
-  current_time += std::chrono::milliseconds(75);
-  aggregator_->RecordMetrics(std::move(metric2), current_time);
-
-  // Get live metrics - should have both loads combined
-  auto [live_metrics, age] = aggregator_->GetAggregateEndingNow(
-      TestAggregator::Duration::zero(), current_time);
-  EXPECT_NEAR(live_metrics.LoadSeconds(), 0.175, 1e-6);  // 0.1 + 0.075
 }
 
 }  // namespace lczero
