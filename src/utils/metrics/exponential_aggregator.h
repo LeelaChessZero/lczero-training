@@ -50,11 +50,13 @@ enum class TimePeriod {
 // * It must have a `Reset()` method that clears its state.
 // * It must have a `MergeFrom(const Metric& other)` method to merge another
 //   metric into itself (used for bucket-to-bucket merging).
-// * It must have a `MergeLive(Metric&& other)` method to ingest live data
+// * It must have a `MergeLive(Metric&& other, Clock::time_point now)` method to
+// ingest live data
 //   and reset the source. Most metrics can implement this as:
-//   `void MergeLive(Metric&& other) { MergeFrom(other); other.Reset(); }`
-//   However, timing-sensitive metrics may need custom logic that considers
-//   the moment of ingestion.
+//   `void MergeLive(Metric&& other, Clock::time_point now) { MergeFrom(other);
+//   other.Reset(); }` However, timing-sensitive metrics may need custom logic
+//   that considers the moment of ingestion. The timepoint parameter allows
+//   metrics to track ingestion timing for more precise temporal aggregations.
 //
 //   **BREAKING CHANGE**: If you get compile errors about missing MergeLive,
 //   add the method above to your Metric class.
@@ -69,13 +71,14 @@ class ExponentialAggregator {
  public:
   using Duration = std::chrono::nanoseconds;
   using Clock = std::chrono::steady_clock;
+  static constexpr TimePeriod kResolution = Resolution;
 
   // Resets the aggregator, clearing all buckets and pending metrics.
   void Reset(Clock::time_point now = Clock::now());
 
   // Ingests the passed metric into the pending bucket using MergeLive.
   template <typename T>
-  void RecordMetrics(T&& metric);
+  void RecordMetrics(T&& metric, Clock::time_point now = Clock::now());
 
   // Returns the latest completed metrics bucket for the given time period and
   // duration since that period finished last time. If now is nullopt, it
@@ -96,6 +99,11 @@ class ExponentialAggregator {
   // advances time by the elapsed duration, potentially processing multiple
   // ticks. Returns the largest time period that was updated by this advance
   // (all smaller periods are also updated).
+  //
+  // Note: Advance() should typically be called more frequently than the tick
+  // frequency. When called less frequently (advancing multiple ticks at once),
+  // live statistics go into the first bucket and subsequent buckets are padded
+  // with empty metrics.
   TimePeriod Advance(Clock::time_point now = Clock::now());
 
   constexpr Duration GetResolution() const { return kPeriodDuration; }
@@ -154,9 +162,10 @@ void ExponentialAggregator<Metric, Resolution>::Reset(
 
 template <typename Metric, TimePeriod Resolution>
 template <typename T>
-void ExponentialAggregator<Metric, Resolution>::RecordMetrics(T&& metric) {
+void ExponentialAggregator<Metric, Resolution>::RecordMetrics(
+    T&& metric, Clock::time_point now) {
   absl::MutexLock lock(&pending_bucket_mutex_);
-  pending_bucket_.MergeLive(std::forward<T>(metric));
+  pending_bucket_.MergeLive(std::forward<T>(metric), now);
 }
 
 template <typename Metric, TimePeriod Resolution>

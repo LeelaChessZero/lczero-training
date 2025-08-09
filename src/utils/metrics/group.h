@@ -12,8 +12,9 @@ namespace lczero {
 // one. Note that the incoming always happens later in time, so if e.g. merge
 // keeps the latest value, it should update the current value with the incoming
 // one. Used for bucket-to-bucket merging.
-// - void MergeLive(Metric&& other);  // Ingests live data and resets source.
-// Most metrics can implement as: MergeFrom(other); other.Reset();
+// - void MergeLive(Metric&& other, std::chrono::steady_clock::time_point now);
+// // Ingests live data and resets source. Most metrics can implement as:
+// MergeFrom(other); other.Reset();
 // - (optional) std::string_view name() const;
 // - (optional) std::string ToString() const; // If provided, returns a string
 // representation of the metric.
@@ -33,7 +34,8 @@ class MetricGroup {
   void MergeFrom(const MetricGroup<StatRecords...>& other);
 
   // Ingests live data from `other` group into this group, resetting the source.
-  void MergeLive(MetricGroup<StatRecords...>&& other);
+  void MergeLive(MetricGroup<StatRecords...>&& other,
+                 std::chrono::steady_clock::time_point now);
 
   // Merges a single stat from `other` into this group.
   template <typename T>
@@ -41,7 +43,7 @@ class MetricGroup {
 
   // Ingests live data from `other` into this group, resetting the source.
   template <typename T>
-  void MergeLive(T&& other);
+  void MergeLive(T&& other, std::chrono::steady_clock::time_point now);
 
   // Gets a const reference to a specific stat record.
   template <typename T>
@@ -72,9 +74,10 @@ void MetricGroup<StatRecords...>::MergeFrom(
 
 template <typename... StatRecords>
 void MetricGroup<StatRecords...>::MergeLive(
-    MetricGroup<StatRecords...>&& other) {
+    MetricGroup<StatRecords...>&& other,
+    std::chrono::steady_clock::time_point now) {
   (std::get<StatRecords>(stats_).MergeLive(
-       std::move(std::get<StatRecords>(other.stats_))),
+       std::move(std::get<StatRecords>(other.stats_)), now),
    ...);
 }
 
@@ -88,12 +91,13 @@ void MetricGroup<StatRecords...>::MergeFrom(const T& other) {
 
 template <typename... StatRecords>
 template <typename T>
-void MetricGroup<StatRecords...>::MergeLive(T&& other) {
+void MetricGroup<StatRecords...>::MergeLive(
+    T&& other, std::chrono::steady_clock::time_point now) {
   static_assert(
       (std::is_same_v<std::remove_reference_t<T>, StatRecords> || ...),
       "Type T must be one of the Stats types");
-  std::get<std::remove_reference_t<T>>(stats_).MergeLive(
-      std::forward<T>(other));
+  std::get<std::remove_reference_t<T>>(stats_).MergeLive(std::forward<T>(other),
+                                                         now);
 }
 
 template <typename... StatRecords>
