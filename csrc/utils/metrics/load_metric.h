@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 
-#include "src/utils/metrics/additive_metric.h"
+#include "utils/metrics/additive_metric.h"
 
 namespace lczero {
 

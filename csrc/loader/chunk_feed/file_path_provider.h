@@ -13,11 +13,11 @@
 #include <thread>
 #include <vector>
 
-#include "src/utils/metrics/additive_metric.h"
-#include "src/utils/metrics/load_metric.h"
-#include "src/utils/metrics/printer.h"
-#include "src/utils/metrics/statistics_metric.h"
-#include "src/utils/queue.h"
+#include "utils/metrics/additive_metric.h"
+#include "utils/metrics/load_metric.h"
+#include "utils/metrics/printer.h"
+#include "utils/metrics/statistics_metric.h"
+#include "utils/queue.h"
 
 namespace lczero {
 namespace training {

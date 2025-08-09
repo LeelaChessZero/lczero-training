@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for tensor classes and their data access methods.
 // ABOUTME: Tests construction, element access, slicing, and error conditions.
 
-#include "src/utils/tensor.h"
+#include "utils/tensor.h"
 
 #include <gtest/gtest.h>
 
