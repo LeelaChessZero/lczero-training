@@ -9,7 +9,7 @@
 
 namespace lczero {
 
-template <typename T>
+template <typename T, bool kOneSamplePerTick = false>
 class StatisticsMetric {
  public:
   using ValueType = T;
@@ -21,8 +21,11 @@ class StatisticsMetric {
   void AddSample(const T& value) {
     min_ = std::min(min_, value);
     max_ = std::max(max_, value);
-    sum_ += value;
     latest_ = value;
+    if constexpr (kOneSamplePerTick) {
+      if (count_ > 0) return;
+    }
+    sum_ += value;
     ++count_;
   }
 
