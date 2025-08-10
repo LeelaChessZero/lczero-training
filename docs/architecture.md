@@ -28,7 +28,8 @@ process.
 The main (in terms of importance) class of the training code is
 `TrainingDaemon`, which:
 
-* Is a jsonl server operating through stdin/stdout.
+* Is a jsonl server operating through stdin/stdout, implementing the protocol
+  described in [JSONL IPC Protocol](jsonl.md).
   * Receives a command to start training with the location of the config file.
     * Other commands are possible in the future.
   * Sends periodic progress notifications.
