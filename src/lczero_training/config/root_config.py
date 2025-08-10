@@ -19,6 +19,23 @@ class RootConfig:
 
     data_loader: DataLoaderConfig
 
+    @classmethod
+    def from_yaml_file(cls, file_path: str) -> "RootConfig":
+        """Load RootConfig from YAML file.
+
+        Args:
+            file_path: Path to YAML configuration file
+
+        Returns:
+            RootConfig instance populated from YAML
+
+        Raises:
+            ConfigParseError: If parsing fails due to validation errors
+        """
+        from .yaml_parser import from_yaml_file
+
+        return from_yaml_file(file_path, cls)
+
 
 def create_default_root_config(
     directory: str, chunk_pool_size: int

@@ -24,12 +24,16 @@ in the `builddir/`.
 * Run tests: `meson test -C builddir/`
 * Build: `meson compile -C builddir/` from build directory
 * Format code: `just format`
+* There is a commit hook that runs `just pre-commit`, which runs tests and
+  checks formatting. You may want to run it before attempting to commit.
 * We use Google C++ style guide.
   * That means 80 columns.
   * That means comments should be in full sentences with periods in the end.
   * When conditional or loop fits one line, we prefere form without braces.
   * Prefer `absl` to `std` (e.g. `absl::c_` algorithms, `absl::Mutex`,
     `absl::StrCat`, etc.)
+* We use `uv` for Python package and venv management, and to running the
+  application.
 
 ## Documentation
 

@@ -151,7 +151,7 @@ class DataLoader:
         Raises:
             RuntimeError: If data loading fails or reaches end of data
         """
-        return self._cpp_loader.get_next()
+        return self._cpp_loader.get_next()  # type: ignore[no-any-return]
 
     @property
     def config(self) -> DataLoaderConfig:

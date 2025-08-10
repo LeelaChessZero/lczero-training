@@ -12,6 +12,7 @@ from .data_loader_config import (
     create_default_config,
 )
 from .root_config import RootConfig, create_default_root_config
+from .yaml_parser import from_yaml_file, ConfigParseError
 
 __all__ = [
     "RootConfig",
@@ -24,4 +25,6 @@ __all__ = [
     "ShufflingFrameSamplerConfig",
     "TensorGeneratorConfig",
     "create_default_config",
+    "from_yaml_file",
+    "ConfigParseError",
 ]
