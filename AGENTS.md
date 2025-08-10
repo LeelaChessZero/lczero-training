@@ -44,6 +44,9 @@ meson compile -C build/release/
 cp build/release/lczero_training.so src/lczero_training/
 ```
 
+* Do not attempt to run TUI — it messes up the Agent interface and session has
+  to be killed. Ask me to check it for you manually instead.
+
 ## IMPORTANT
 
 * NEVER add `# type: ignore` or other ways to mask/silence errors instead of
