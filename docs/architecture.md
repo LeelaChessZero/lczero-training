@@ -23,22 +23,19 @@ API to Python (GetNextBatch(), GetStats()).
 We'd like to have a fancy TUI dashboard to monitor the loading and training
 process.
 
-## Components overview
+## TrainingDaemon
 
 The main (in terms of importance) class of the training code is
 `TrainingDaemon`, which:
 
-* Takes configs (as dataclass) in the constructor.
+* Is a jsonl server operating through stdin/stdout.
+  * Receives a command to start training with the location of the config file.
+    * Other commands are possible in the future.
+  * Sends periodic progress notifications.
 * Owns the data loader.
 * Waits for the data loader to ingest enough new chunks.
 * Starts the training loop when enough data is available.
 * Finalizes and uploads the trained network.
-* Allows observers to subscribe to the stats, which `TrainingDaemon` will
-  periodically (≈every second) update with the `TrainingMetrics` dataclass.
-
-The root component of the app is `TrainingTui`, which is a TUI application which
-uses `Textual` to render the user interface. It creates the `TrainingDaemon` in
-a separate thread and subscribes to its stats.
 
 ## Configuration
 
@@ -70,10 +67,11 @@ From python perspective, it has the following interface:
 
 ## TUI
 
+TUI is a separate frontend app, implemented as `TrainingTuiApp`, which runs
+`TrainingDaemon` as a subprocess (and communicates through jsonl via
+stdin/stdout).
+
 * TUI is `Textual`-based app.
 * Located in `src/lczero_training/tui/`.
 * UI ideas are described in [TUI](tui.md).
-* The main component is called `TrainingTuiApp`.
-* It takes a config from the command line, then creates `TrainingDaemon` in
-  background thread and subscribes to its stats updates.
-* TUI will have a log pane which would show whatever is printed to stderr.
+* TUI will have a log pane which shows stderr of `TrainingDaemon`.

@@ -45,8 +45,9 @@ This pane visualizes the flow of data through the C++ pipeline. It will use a re
 - **Train/Validation/Test Splitter:**
   - The pipeline view will show a "Stream Splitter" stage.
   - Hotkeys (e.g., F1, F2, F3) will allow the user to instantly switch the view
-  - After this stage, the UI will display the pipeline stats for **one** stream at a time (defaulting to 'Training').
-    to show the stats for the 'Training', 'Validation', or 'Test' streams.
+  - After this stage, the UI will display the pipeline stats for **one** stream
+    at a time (defaulting to 'Training'). to show the stats for the 'Training',
+    'Validation', or 'Test' streams.
 
 ### 4. JAX Training Status Pane
 
