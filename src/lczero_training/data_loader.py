@@ -5,7 +5,7 @@ from typing import Tuple
 import numpy as np
 
 from .config.data_loader_config import DataLoaderConfig, create_default_config
-from . import _lczero_training  # type: ignore[attr-defined]
+from . import _lczero_training
 
 
 def _convert_python_config_to_cpp(
@@ -151,7 +151,7 @@ class DataLoader:
         Raises:
             RuntimeError: If data loading fails or reaches end of data
         """
-        return self._cpp_loader.get_next()  # type: ignore[no-any-return]
+        return self._cpp_loader.get_next()
 
     @property
     def config(self) -> DataLoaderConfig:

@@ -6,7 +6,7 @@ data_loader:
   # File Path Provider - Watches directory for new training data files
   file_path_provider:
     # Directory containing training data files (.gz, .tar, etc.)
-    directory: "/path/to/training/data"
+    directory: "/home/crem/tmp/2025-07/lczero-training/data"
     
     # Size of internal file queue (default: 16)
     # Controls how many files can be queued for processing
@@ -74,28 +74,3 @@ data_loader:
     # Size of output queue for batched tensors (default: 4)
     # Smaller than other queues since tensors are larger
     output_queue_size: 4
-
-# Future configuration sections (not yet implemented):
-# 
-# training_coordinator:
-#   # Configuration for training coordination and scheduling
-#   min_chunks_before_training: 100
-#   max_training_time_hours: 24
-# 
-# model:
-#   # Neural network architecture configuration
-#   blocks: 20
-#   channels: 256
-#   policy_head_channels: 32
-#   value_head_channels: 32
-# 
-# training:
-#   # Training hyperparameters
-#   learning_rate: 0.001
-#   weight_decay: 0.0001
-#   epochs: 10
-# 
-# export:
-#   # Model export configuration  
-#   output_directory: "/path/to/export/models"
-#   export_format: ["onnx", "lczero"]

@@ -34,6 +34,20 @@ in the `builddir/`.
     `absl::StrCat`, etc.)
 * We use `uv` for Python package and venv management, and to running the
   application.
+* Run TUI app: `uv run python -m lczero_training` (skeleton mode) or
+  `uv run python -m lczero_training config.yaml` (with config)
+* To compile data loader:
+
+```sh
+CXX=clang++ CC=clang meson build/release/ --buildtype release
+meson compile -C build/release/
+cp build/release/lczero_training.so src/lczero_training/
+```
+
+## IMPORTANT
+
+* NEVER add `# type: ignore` or other ways to mask/silence errors instead of
+  fixing them.
 
 ## Documentation
 

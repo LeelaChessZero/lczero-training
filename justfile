@@ -14,7 +14,7 @@ format-cpp:
 check-python:
     source .venv/bin/activate && ruff check src/
     source .venv/bin/activate && ruff format --check src/
-    source .venv/bin/activate && mypy src/
+    source .venv/bin/activate && mypy -p lczero_training
 
 # Format all Python files in src/ using ruff
 format-python:

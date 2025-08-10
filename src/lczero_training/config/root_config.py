@@ -11,10 +11,6 @@ class RootConfig:
 
     This is the top-level configuration structure that encompasses:
     - Data loader configuration for training data ingestion
-    - (Future) Training coordinator configuration
-    - (Future) Model definition and architecture parameters
-    - (Future) Training parameters like batch size, epochs, etc.
-    - (Future) Export parameters for model output
     """
 
     data_loader: DataLoaderConfig

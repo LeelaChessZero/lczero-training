@@ -26,7 +26,7 @@ process.
 ## Components overview
 
 The main (in terms of importance) class of the training code is
-`TrainingCoordinator`, which:
+`TrainingDaemon`, which:
 
 * Takes configs (as dataclass) in the constructor.
 * Owns the data loader.
@@ -46,7 +46,7 @@ The configuration is a large nested dataclass structure, which covers:
 
 * [Data loader](../src/lczero_training/config/data_loader_config.py) to be
   passed to the C++ data loader.
-* Information for the training coordinator, e.g. how many chunks to wait for
+* Information for the training daemon, e.g. how many chunks to wait for
   before starting the training.
 * Model definition, for model builder.
 * Training parameters, such as batch size, number of epochs, etc.
@@ -67,3 +67,13 @@ From python perspective, it has the following interface:
     or validation batch.
 * `GetStats()` returns a DataClass (exact structure TBD) with the current
   statistics of the data loader.
+
+## TUI
+
+* TUI is `Textual`-based app.
+* Located in `src/lczero_training/tui/`.
+* UI ideas are described in [TUI](tui.md).
+* The main component is called `TrainingTuiApp`.
+* It takes a config from the command line, then creates `TrainingDaemon` in
+  background thread and subscribes to its stats updates.
+* TUI will have a log pane which would show whatever is printed to stderr.

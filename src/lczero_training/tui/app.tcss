@@ -1,0 +1,51 @@
+Screen {
+    background: #0066cc;
+}
+
+HeaderBar {
+    dock: top;
+    height: 1;
+    background: #004499;
+    color: white;
+}
+
+#content {
+    height: 1fr;
+}
+
+#main-content {
+    height: 40%;
+}
+
+DataPipelinePane {
+    width: 2fr;
+    background: #003366;
+    color: white;
+    border: solid #0088ff;
+    margin: 1;
+    overflow-y: scroll;
+}
+
+TrainingStatusPane {
+    width: 1fr;
+    background: #003366;
+    color: white;
+    border: solid #0088ff;
+    margin: 1;
+    overflow-y: scroll;
+}
+
+LogPane {
+    height: 1fr;
+    background: #002244;
+    color: white;
+    overflow-y: scroll;
+}
+
+.pipeline-content, .training-content {
+    padding: 1;
+}
+
+.log-content {
+    padding: 0;
+}
