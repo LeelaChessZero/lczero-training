@@ -44,8 +44,8 @@ uses `Textual` to render the user interface. It creates the
 
 The configuration is a large nested dataclass structure, which covers:
 
-* [Data loader](../src/lczero_training/data_loader_config.py) to be passed to
-  the C++ data loader.
+* [Data loader](../src/lczero_training/config/data_loader_config.py) to be
+  passed to the C++ data loader.
 * Information for the training coordinator, e.g. how many chunks to wait for
   before starting the training.
 * Model definition, for model builder.

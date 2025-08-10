@@ -4,7 +4,7 @@
 from typing import Tuple
 import numpy as np
 
-from .data_loader_config import DataLoaderConfig, create_default_config
+from .config.data_loader_config import DataLoaderConfig, create_default_config
 from . import _lczero_training  # type: ignore[attr-defined]
 
 

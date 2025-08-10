@@ -1,9 +1,7 @@
-# ABOUTME: Python package initialization for lczero-training data loader.
-# ABOUTME: Exposes DataLoader class and configuration through high-level Python API.
+# ABOUTME: Configuration package for lczero-training containing all config dataclasses.
+# ABOUTME: Provides structured configuration system for data loading and training components.
 
-from .config import (
-    RootConfig,
-    create_default_root_config,
+from .data_loader_config import (
     DataLoaderConfig,
     FilePathProviderConfig,
     ChunkSourceLoaderConfig,
@@ -13,11 +11,9 @@ from .config import (
     TensorGeneratorConfig,
     create_default_config,
 )
-from .data_loader import DataLoader, create_dataloader
+from .root_config import RootConfig, create_default_root_config
 
 __all__ = [
-    "DataLoader",
-    "create_dataloader",
     "RootConfig",
     "create_default_root_config",
     "DataLoaderConfig",
