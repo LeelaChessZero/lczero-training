@@ -198,7 +198,7 @@ file_path_provider_main = executable(
 # Python extension module
 python3.extension_module(
   '_lczero_training',
-  'src/lczero_training/pybind_module.cc',
+  'csrc/loader/pybind_module.cc',
   include_directories : includes,
   dependencies : [pybind11_dep] + loader_deps,
   link_with : loader_lib,
