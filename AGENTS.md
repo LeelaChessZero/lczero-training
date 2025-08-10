@@ -4,7 +4,8 @@ This repository contains training script for the Leela Chess Zero project.
 They are being rewritten.
 
 * Old code is located in the `tf/` directory.
-* New code is located in the `src/` directory.
+* New python code is located in the `src/` directory.
+* New C++ code is located in the `csrc/` directory.
 
 The old code is Python/TensorFlow-based, new code is Python/JAX-based with
 modules written in C++, operating through pybind11.
@@ -22,7 +23,7 @@ in the `builddir/`.
     `builddir/test`
 * Run tests: `meson test -C builddir/`
 * Build: `meson compile -C builddir/` from build directory
-* Format C++ code: `just format-cpp`
+* Format code: `just format`
 * We use Google C++ style guide.
   * That means 80 columns.
   * That means comments should be in full sentences with periods in the end.
