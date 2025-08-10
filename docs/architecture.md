@@ -33,12 +33,12 @@ The main (in terms of importance) class of the training code is
 * Waits for the data loader to ingest enough new chunks.
 * Starts the training loop when enough data is available.
 * Finalizes and uploads the trained network.
-* Allows observers to subscribe to the stats, which `TrainingCoordinator`
-  will periodically (≈every second) update with the `TrainingMetrics` dataclass.
+* Allows observers to subscribe to the stats, which `TrainingDaemon` will
+  periodically (≈every second) update with the `TrainingMetrics` dataclass.
 
 The root component of the app is `TrainingTui`, which is a TUI application which
-uses `Textual` to render the user interface. It creates the
-`TrainingCoordinator` in a separate thread and subscribes to its stats.
+uses `Textual` to render the user interface. It creates the `TrainingDaemon` in
+a separate thread and subscribes to its stats.
 
 ## Configuration
 
@@ -54,3 +54,16 @@ The configuration is a large nested dataclass structure, which covers:
 
 From user perspective, the configuration is a YAML file, which is parsed
 into the dataclass structure.
+
+## Data Loader
+
+The internals of the data loader are described in detail in [Data Loader](loader.md).
+
+From python perspective, it has the following interface:
+
+* Constructor takes a `DataLoaderConfig` dataclass.
+* `GetNextBatch()` returns a tuple of buffer-protocol-compliant tensors.
+  * Later it will have a parameter that specifies wether we need training, test
+    or validation batch.
+* `GetStats()` returns a DataClass (exact structure TBD) with the current
+  statistics of the data loader.
