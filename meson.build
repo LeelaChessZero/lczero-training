@@ -59,6 +59,14 @@ cli_deps = [
   absl_deps['flags_parse'],
 ]
 
+# Protobuf compilation setup
+compile_proto = find_program('libs/lc0/scripts/compile_proto.py')
+proto_gen = generator(compile_proto, output: ['@BASENAME@.pb.h'],
+  arguments : [
+    '--proto_path=@CURRENT_SOURCE_DIR@',
+    '--cpp_out=@BUILD_DIR@',
+    '@INPUT@'])
+
 includes = include_directories('csrc', 'libs/lc0/src')
 
 files = [
@@ -75,7 +83,16 @@ files = [
   'csrc/utils/stream_shuffler.cc',
   'libs/lc0/src/utils/files.cc',
   'libs/lc0/src/utils/logging.cc',
+  'libs/lc0/src/utils/protomessage.cc',
 ]
+
+# Process protobuf files
+proto_files = [
+  proto_gen.process('proto/data_loader_config.proto',
+    preserve_path_from : meson.current_source_dir())
+]
+
+files += proto_files
 
 loader_lib = static_library(
   'loader',

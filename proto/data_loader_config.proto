@@ -1,47 +1,47 @@
-syntax = "proto3";
+syntax = "proto2";
 
 package lczero.training;
 
 message FilePathProviderConfig {
-  uint64 queue_capacity = 1;
-  string directory = 2;
+  optional uint64 queue_capacity = 1;
+  optional string directory = 2;
 }
 
 message ChunkSourceLoaderConfig {
-  uint64 worker_threads = 1;
-  uint64 output_queue_size = 2;
+  optional uint64 worker_threads = 1;
+  optional uint64 output_queue_size = 2;
 }
 
 message ShufflingChunkPoolConfig {
-  uint64 chunk_pool_size = 1;
-  uint64 num_startup_indexing_threads = 2;
-  uint64 num_indexing_threads = 3;
-  uint64 num_chunk_loading_threads = 4;
-  uint64 output_queue_size = 5;
+  optional uint64 chunk_pool_size = 1;
+  optional uint64 num_startup_indexing_threads = 2;
+  optional uint64 num_indexing_threads = 3;
+  optional uint64 num_chunk_loading_threads = 4;
+  optional uint64 output_queue_size = 5;
 }
 
 message ChunkUnpackerConfig {
-  uint64 worker_threads = 1;
-  uint64 output_queue_size = 2;
+  optional uint64 worker_threads = 1;
+  optional uint64 output_queue_size = 2;
 }
 
 message ShufflingFrameSamplerConfig {
-  uint64 num_worker_threads = 1;
-  uint64 reservoir_size_per_thread = 2;
-  uint64 output_queue_size = 3;
+  optional uint64 num_worker_threads = 1;
+  optional uint64 reservoir_size_per_thread = 2;
+  optional uint64 output_queue_size = 3;
 }
 
 message TensorGeneratorConfig {
-  uint64 worker_threads = 1;
-  uint64 batch_size = 2;
-  uint64 output_queue_size = 3;
+  optional uint64 worker_threads = 1;
+  optional uint64 batch_size = 2;
+  optional uint64 output_queue_size = 3;
 }
 
 message DataLoaderConfig {
-  FilePathProviderConfig file_path_provider = 1;
-  ChunkSourceLoaderConfig chunk_source_loader = 2;
-  ShufflingChunkPoolConfig shuffling_chunk_pool = 3;
-  ChunkUnpackerConfig chunk_unpacker = 4;
-  ShufflingFrameSamplerConfig shuffling_frame_sampler = 5;
-  TensorGeneratorConfig tensor_generator = 6;
+  optional FilePathProviderConfig file_path_provider = 1;
+  optional ChunkSourceLoaderConfig chunk_source_loader = 2;
+  optional ShufflingChunkPoolConfig shuffling_chunk_pool = 3;
+  optional ChunkUnpackerConfig chunk_unpacker = 4;
+  optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 5;
+  optional TensorGeneratorConfig tensor_generator = 6;
 }
