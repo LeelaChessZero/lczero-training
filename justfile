@@ -10,6 +10,14 @@ check-cpp:
 format-cpp:
     find csrc/ -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" -o -name "*.h" -o -name "*.hpp" | xargs clang-format -i
 
+# Check if all protobuf files are formatted according to clang-format
+check-proto:
+    find proto/ -name "*.proto" | xargs clang-format --dry-run --Werror
+
+# Format all protobuf files using clang-format
+format-proto:
+    find proto/ -name "*.proto" | xargs clang-format -i
+
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
     source .venv/bin/activate && ruff check src/
@@ -21,7 +29,7 @@ format-python:
     source .venv/bin/activate && ruff format src/
     source .venv/bin/activate && ruff check --fix src/
 
-format: format-cpp format-python
+format: format-cpp format-proto format-python
 
 # Build the project
 build:
@@ -31,7 +39,7 @@ build:
 test:
     meson test -C builddir/
 
-check: check-cpp check-python
+check: check-cpp check-proto check-python
 
 # Run all checks (formatting, build, and tests)
 pre-commit: check build test
