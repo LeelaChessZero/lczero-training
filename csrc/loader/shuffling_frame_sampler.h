@@ -7,6 +7,7 @@
 #include "absl/container/fixed_array.h"
 #include "absl/random/random.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 
@@ -14,13 +15,6 @@ namespace lczero {
 namespace training {
 
 using FrameType = V6TrainingData;
-
-struct ShufflingFrameSamplerOptions {
-  size_t num_worker_threads = 1;  // Number of worker threads.
-  size_t reservoir_size_per_thread =
-      1000000;                    // Size of the reservoir for sampling.
-  size_t output_queue_size = 16;  // Size of the output queue.
-};
 
 // Worker that implements reservoir sampling for training frames.
 // Takes V6TrainingData frames as input and outputs them in shuffled order
@@ -31,7 +25,7 @@ class ShufflingFrameSampler {
   using OutputType = FrameType;
 
   ShufflingFrameSampler(Queue<InputType>* input_queue,
-                        const ShufflingFrameSamplerOptions& options);
+                        const ShufflingFrameSamplerConfig& config);
 
   Queue<OutputType>* output();
 

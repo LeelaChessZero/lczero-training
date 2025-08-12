@@ -4,20 +4,29 @@
 
 #include <chrono>
 
+#include "proto/data_loader_config.pb.h"
+
 namespace lczero {
 namespace training {
 
-DataLoader::DataLoader(const DataLoaderConfig& config)
-    : file_path_provider_(config.file_path_provider),
+DataLoaderConfig DataLoader::ParseConfig(const std::string& config_string) {
+  DataLoaderConfig config;
+  config.ParseFromString(config_string);
+  return config;
+}
+
+DataLoader::DataLoader(const std::string& config_string)
+    : config_(ParseConfig(config_string)),
+      file_path_provider_(config_.file_path_provider()),
       chunk_source_loader_(file_path_provider_.output(),
-                           config.chunk_source_loader),
+                           config_.chunk_source_loader()),
       shuffling_chunk_pool_(chunk_source_loader_.output(),
-                            config.shuffling_chunk_pool),
-      chunk_unpacker_(shuffling_chunk_pool_.output(), config.chunk_unpacker),
+                            config_.shuffling_chunk_pool()),
+      chunk_unpacker_(shuffling_chunk_pool_.output(), config_.chunk_unpacker()),
       shuffling_frame_sampler_(chunk_unpacker_.output(),
-                               config.shuffling_frame_sampler),
+                               config_.shuffling_frame_sampler()),
       tensor_generator_(shuffling_frame_sampler_.output(),
-                        config.tensor_generator),
+                        config_.tensor_generator()),
       metrics_thread_([this](std::stop_token stop_token) {
         while (!stop_token.stop_requested()) {
           std::this_thread::sleep_for(std::chrono::milliseconds(100));

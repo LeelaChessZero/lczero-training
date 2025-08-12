@@ -5,6 +5,7 @@
 #include <string>
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 
@@ -12,11 +13,6 @@ namespace lczero {
 namespace training {
 
 using FrameType = V6TrainingData;
-
-struct ChunkUnpackerOptions {
-  size_t worker_threads = 1;      // Number of worker threads.
-  size_t output_queue_size = 16;  // Size of the output queue.
-};
 
 // Worker pool that unpacks chunks into frames.
 // Takes std::string chunks containing packed V6TrainingData as input and
@@ -27,7 +23,7 @@ class ChunkUnpacker {
   using OutputType = FrameType;
 
   ChunkUnpacker(Queue<InputType>* input_queue,
-                const ChunkUnpackerOptions& options);
+                const ChunkUnpackerConfig& config);
 
   Queue<OutputType>* output();
 

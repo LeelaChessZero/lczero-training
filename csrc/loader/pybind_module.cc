@@ -47,71 +47,12 @@ py::tuple tensor_tuple_to_numpy_tuple(TensorTuple tensor_tuple) {
 PYBIND11_MODULE(_lczero_training, m) {
   m.doc() = "Leela Chess Zero training data loader";
 
-  // Expose configuration structures.
-  py::class_<FilePathProviderOptions>(m, "FilePathProviderOptions")
-      .def(py::init<>())
-      .def_readwrite("queue_capacity", &FilePathProviderOptions::queue_capacity)
-      .def_readwrite("directory", &FilePathProviderOptions::directory);
-
-  py::class_<ChunkSourceLoaderOptions>(m, "ChunkSourceLoaderOptions")
-      .def(py::init<>())
-      .def_readwrite("worker_threads",
-                     &ChunkSourceLoaderOptions::worker_threads)
-      .def_readwrite("output_queue_size",
-                     &ChunkSourceLoaderOptions::output_queue_size);
-
-  py::class_<ShufflingChunkPoolOptions>(m, "ShufflingChunkPoolOptions")
-      .def(py::init<>())
-      .def_readwrite("chunk_pool_size",
-                     &ShufflingChunkPoolOptions::chunk_pool_size)
-      .def_readwrite("num_startup_indexing_threads",
-                     &ShufflingChunkPoolOptions::num_startup_indexing_threads)
-      .def_readwrite("num_indexing_threads",
-                     &ShufflingChunkPoolOptions::num_indexing_threads)
-      .def_readwrite("num_chunk_loading_threads",
-                     &ShufflingChunkPoolOptions::num_chunk_loading_threads)
-      .def_readwrite("output_queue_size",
-                     &ShufflingChunkPoolOptions::output_queue_size);
-
-  py::class_<ChunkUnpackerOptions>(m, "ChunkUnpackerOptions")
-      .def(py::init<>())
-      .def_readwrite("worker_threads", &ChunkUnpackerOptions::worker_threads)
-      .def_readwrite("output_queue_size",
-                     &ChunkUnpackerOptions::output_queue_size);
-
-  py::class_<ShufflingFrameSamplerOptions>(m, "ShufflingFrameSamplerOptions")
-      .def(py::init<>())
-      .def_readwrite("num_worker_threads",
-                     &ShufflingFrameSamplerOptions::num_worker_threads)
-      .def_readwrite("reservoir_size_per_thread",
-                     &ShufflingFrameSamplerOptions::reservoir_size_per_thread)
-      .def_readwrite("output_queue_size",
-                     &ShufflingFrameSamplerOptions::output_queue_size);
-
-  py::class_<TensorGeneratorOptions>(m, "TensorGeneratorOptions")
-      .def(py::init<>())
-      .def_readwrite("worker_threads", &TensorGeneratorOptions::worker_threads)
-      .def_readwrite("batch_size", &TensorGeneratorOptions::batch_size)
-      .def_readwrite("output_queue_size",
-                     &TensorGeneratorOptions::output_queue_size);
-
-  py::class_<DataLoaderConfig>(m, "DataLoaderConfig")
-      .def(py::init<>())
-      .def_readwrite("file_path_provider",
-                     &DataLoaderConfig::file_path_provider)
-      .def_readwrite("chunk_source_loader",
-                     &DataLoaderConfig::chunk_source_loader)
-      .def_readwrite("shuffling_chunk_pool",
-                     &DataLoaderConfig::shuffling_chunk_pool)
-      .def_readwrite("chunk_unpacker", &DataLoaderConfig::chunk_unpacker)
-      .def_readwrite("shuffling_frame_sampler",
-                     &DataLoaderConfig::shuffling_frame_sampler)
-      .def_readwrite("tensor_generator", &DataLoaderConfig::tensor_generator);
+  // Configuration is now handled via protobuf serialized strings
 
   // Expose the main DataLoader class.
   py::class_<DataLoader>(m, "DataLoader")
-      .def(py::init<const DataLoaderConfig&>(),
-           "Create DataLoader with the given configuration")
+      .def(py::init<const std::string&>(),
+           "Create DataLoader with serialized protobuf configuration string")
       .def(
           "get_next",
           [](DataLoader& self) {

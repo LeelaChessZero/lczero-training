@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.24.0",
     "PyYAML>=6.0",
     "textual>=0.47.0",
+    "protobuf>=3.20.0",
 ]
 
 [project.optional-dependencies]

@@ -65,8 +65,10 @@ class FilePathProviderTest : public ::testing::Test {
 };
 
 TEST_F(FilePathProviderTest, ConstructorCreatesQueue) {
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
   auto* queue = file_path_provider.output();
   EXPECT_NE(queue, nullptr);
   EXPECT_EQ(queue->Capacity(), 100);
@@ -84,8 +86,10 @@ TEST_F(FilePathProviderTest, InitialScanFindsExistingFiles) {
   CreateFile(test_dir_ / "file2.txt");
   CreateFile(test_dir_ / "subdir" / "file3.txt");
 
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   // Collect files from queue
   std::unordered_set<std::string> found_files;
@@ -118,8 +122,10 @@ TEST_F(FilePathProviderTest, InitialScanIgnoresDirectories) {
   CreateDirectory(test_dir_ / "subdir");
   CreateDirectory(test_dir_ / "empty_dir");
 
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   // Should only find the file, not directories
   std::vector<FilePathProvider::File> files;
@@ -141,8 +147,10 @@ TEST_F(FilePathProviderTest, InitialScanIgnoresDirectories) {
 }
 
 TEST_F(FilePathProviderTest, DetectsNewFiles) {
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   auto* queue = file_path_provider.output();
   // Consume initial scan results
@@ -162,8 +170,10 @@ TEST_F(FilePathProviderTest, DetectsFilesInNewSubdirectory) {
   auto subdir = test_dir_ / "new_subdir";
   CreateDirectory(subdir);
 
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   auto* queue = file_path_provider.output();
   // Consume initial scan results
@@ -180,8 +190,10 @@ TEST_F(FilePathProviderTest, DetectsFilesInNewSubdirectory) {
 
 TEST_F(FilePathProviderTest, HandlesEmptyDirectory) {
   // Test with empty directory
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   auto* queue = file_path_provider.output();
   auto file = queue->Get();
@@ -196,8 +208,10 @@ TEST_F(FilePathProviderTest, MultipleFilesInBatch) {
     CreateFile(test_dir_ / ("batch_file_" + std::to_string(i) + ".txt"));
   }
 
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   // Collect all files
   std::unordered_set<std::string> found_files;
@@ -222,8 +236,10 @@ TEST_F(FilePathProviderTest, MultipleFilesInBatch) {
 }
 
 TEST_F(FilePathProviderTest, QueueClosurePreventsNewFiles) {
-  FilePathProvider file_path_provider(
-      FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+  FilePathProviderConfig config;
+  config.set_queue_capacity(100);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   auto* queue = file_path_provider.output();
   // Consume initial scan results
@@ -237,8 +253,10 @@ TEST_F(FilePathProviderTest, QueueClosurePreventsNewFiles) {
 
 TEST_F(FilePathProviderTest, DestructorCleansUpProperly) {
   auto test_cleanup = [&]() {
-    FilePathProvider file_path_provider(
-        FilePathProviderOptions{.queue_capacity = 100, .directory = test_dir_});
+    FilePathProviderConfig config;
+    config.set_queue_capacity(100);
+    config.set_directory(test_dir_.string());
+    FilePathProvider file_path_provider(config);
 
     CreateFile(test_dir_ / "cleanup_test.txt");
 
@@ -255,9 +273,10 @@ TEST_F(FilePathProviderTest, DestructorCleansUpProperly) {
 
 // Stress test with rapid file creation
 TEST_F(FilePathProviderTest, RapidFileCreation) {
-  FilePathProvider file_path_provider(FilePathProviderOptions{
-      .queue_capacity = 1000,
-      .directory = test_dir_});  // Larger queue for stress test
+  FilePathProviderConfig config;
+  config.set_queue_capacity(1000);
+  config.set_directory(test_dir_.string());
+  FilePathProvider file_path_provider(config);
 
   auto* queue = file_path_provider.output();
   // Consume initial scan results

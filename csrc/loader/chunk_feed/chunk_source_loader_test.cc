@@ -12,9 +12,10 @@ namespace training {
 
 TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   Queue<FilePathProvider::File> input_queue(10);
-  ChunkSourceLoaderOptions options{.worker_threads = 1,
-                                   .output_queue_size = 10};
-  ChunkSourceLoader feed(&input_queue, options);
+  ChunkSourceLoaderConfig config;
+  config.set_worker_threads(1);
+  config.set_output_queue_size(10);
+  ChunkSourceLoader feed(&input_queue, config);
 
   {
     auto producer = input_queue.CreateProducer();
@@ -43,9 +44,10 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
 
 TEST(ChunkSourceLoaderTest, HandlesPhases) {
   Queue<FilePathProvider::File> input_queue(10);
-  ChunkSourceLoaderOptions options{.worker_threads = 1,
-                                   .output_queue_size = 10};
-  ChunkSourceLoader feed(&input_queue, options);
+  ChunkSourceLoaderConfig config;
+  config.set_worker_threads(1);
+  config.set_output_queue_size(10);
+  ChunkSourceLoader feed(&input_queue, config);
 
   {
     auto producer = input_queue.CreateProducer();

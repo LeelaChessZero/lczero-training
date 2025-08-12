@@ -14,8 +14,8 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
-    options_.reservoir_size_per_thread = 10;  // Small size for testing
-    options_.output_queue_size = 20;
+    config_.set_reservoir_size_per_thread(10);  // Small size for testing
+    config_.set_output_queue_size(20);
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -27,11 +27,11 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
   }
 
   std::unique_ptr<Queue<V6TrainingData>> input_queue_;
-  ShufflingFrameSamplerOptions options_;
+  ShufflingFrameSamplerConfig config_;
 };
 
 TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), options_);
+  ShufflingFrameSampler sampler(input_queue_.get(), config_);
 
   // Send 5 frames (less than reservoir size)
   auto producer = input_queue_->CreateProducer();
@@ -58,7 +58,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), options_);
+  ShufflingFrameSampler sampler(input_queue_.get(), config_);
 
   // Send 20 frames (more than reservoir size of 10)
   auto producer = input_queue_->CreateProducer();
@@ -92,7 +92,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), options_);
+  ShufflingFrameSampler sampler(input_queue_.get(), config_);
 
   // Close input queue without sending data
   input_queue_->Close();
@@ -102,12 +102,12 @@ TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
-  ShufflingFrameSampler sampler(input_queue_.get(), options_);
+  ShufflingFrameSampler sampler(input_queue_.get(), config_);
 
   // Send exactly reservoir_size_per_thread frames
   auto producer = input_queue_->CreateProducer();
   std::vector<uint32_t> input_versions;
-  for (uint32_t i = 1; i <= options_.reservoir_size_per_thread; ++i) {
+  for (uint32_t i = 1; i <= config_.reservoir_size_per_thread(); ++i) {
     input_versions.push_back(i);
     producer.Put(CreateTestFrame(i));
   }
@@ -130,8 +130,8 @@ TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
-  options_.reservoir_size_per_thread = 2;
-  ShufflingFrameSampler sampler(input_queue_.get(), options_);
+  config_.set_reservoir_size_per_thread(2);
+  ShufflingFrameSampler sampler(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
 

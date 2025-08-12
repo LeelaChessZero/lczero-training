@@ -25,9 +25,10 @@ int main(int argc, char* argv[]) {
   }
 
   LOG(INFO) << "Starting to monitor directory: " << directory;
-  lczero::training::FilePathProvider file_path_provider(
-      lczero::training::FilePathProviderOptions{.queue_capacity = 16,
-                                                .directory = directory});
+  lczero::training::FilePathProviderConfig config;
+  config.set_queue_capacity(16);
+  config.set_directory(directory);
+  lczero::training::FilePathProvider file_path_provider(config);
 
   // Consumer thread to read from the queue
   std::thread consumer_thread([&file_path_provider]() {

@@ -9,6 +9,7 @@
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/chunk_source_loader.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 #include "utils/stream_shuffler.h"
 #include "utils/thread_pool.h"
@@ -16,18 +17,10 @@
 namespace lczero {
 namespace training {
 
-struct ShufflingChunkPoolOptions {
-  size_t chunk_pool_size;  // Size of the chunk shuffle buffer.
-  size_t num_startup_indexing_threads = 4;
-  size_t num_indexing_threads = 4;
-  size_t num_chunk_loading_threads = 4;
-  size_t output_queue_size = 16;
-};
-
 class ShufflingChunkPool {
  public:
   ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
-                     const ShufflingChunkPoolOptions& options);
+                     const ShufflingChunkPoolConfig& config);
   ~ShufflingChunkPool();
 
   Queue<std::string>* output();

@@ -14,15 +14,18 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "proto/data_loader_config.pb.h"
+
 namespace lczero {
 namespace training {
 
-FilePathProvider::FilePathProvider(const FilePathProviderOptions& options)
-    : output_queue_(options.queue_capacity),
-      directory_(options.directory),
+FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
+    : output_queue_(config.queue_capacity()),
+      directory_(config.directory()),
       producer_(output_queue_.CreateProducer()),
       load_metric_updater_(&metrics_.load) {
-  LOG(INFO) << "Starting FilePathProvider for directory: " << options.directory;
+  LOG(INFO) << "Starting FilePathProvider for directory: "
+            << config.directory();
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);

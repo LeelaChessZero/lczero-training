@@ -19,9 +19,9 @@ class TensorGeneratorTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
-    options_.batch_size = 4;
-    options_.worker_threads = 1;
-    options_.output_queue_size = 10;
+    config_.set_batch_size(4);
+    config_.set_worker_threads(1);
+    config_.set_output_queue_size(10);
   }
 
   V6TrainingData CreateTestFrame() {
@@ -192,15 +192,15 @@ class TensorGeneratorTest : public ::testing::Test {
   }
 
   std::unique_ptr<Queue<V6TrainingData>> input_queue_;
-  TensorGeneratorOptions options_;
+  TensorGeneratorConfig config_;
 };
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
-  TensorGenerator generator(input_queue_.get(), options_);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
-  for (size_t i = 0; i < options_.batch_size; ++i) {
+  for (size_t i = 0; i < config_.batch_size(); ++i) {
     frames.push_back(CreateTestFrame());
     producer.Put(frames.back());
   }
@@ -211,11 +211,11 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 }
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
-  TensorGenerator generator(input_queue_.get(), options_);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
-  for (size_t i = 0; i < options_.batch_size; ++i) {
+  for (size_t i = 0; i < config_.batch_size(); ++i) {
     frames.push_back(CreateTestFrame());
     producer.Put(frames.back());
   }
@@ -227,14 +227,14 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
-  TensorGenerator generator(input_queue_.get(), options_);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
 
   // Send two full batches.
   std::vector<V6TrainingData> all_frames;
   for (ssize_t batch = 0; batch < 2; ++batch) {
-    for (size_t i = 0; i < options_.batch_size; ++i) {
+    for (size_t i = 0; i < config_.batch_size(); ++i) {
       auto frame = CreateTestFrame();
       frame.version = batch * 1000 + i;  // Unique version for each frame
       all_frames.push_back(frame);
@@ -246,13 +246,13 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
   // Get first batch.
   auto tensors1 = generator.output()->Get();
   std::vector<V6TrainingData> batch1_frames(
-      all_frames.begin(), all_frames.begin() + options_.batch_size);
+      all_frames.begin(), all_frames.begin() + config_.batch_size());
   VerifyTensorTuple(tensors1, batch1_frames);
 
   // Get second batch.
   auto tensors2 = generator.output()->Get();
   std::vector<V6TrainingData> batch2_frames(
-      all_frames.begin() + options_.batch_size, all_frames.end());
+      all_frames.begin() + config_.batch_size(), all_frames.end());
   VerifyTensorTuple(tensors2, batch2_frames);
 
   // No more batches should be available.
@@ -260,12 +260,12 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
-  options_.batch_size = 2;
-  TensorGenerator generator(input_queue_.get(), options_);
+  config_.set_batch_size(2);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
-  for (size_t i = 0; i < options_.batch_size; ++i) {
+  for (size_t i = 0; i < config_.batch_size(); ++i) {
     frames.push_back(CreateTestFrame());
     producer.Put(frames.back());
   }
@@ -276,7 +276,7 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
-  TensorGenerator generator(input_queue_.get(), options_);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   // Close input queue without sending data.
   input_queue_->Close();
@@ -286,8 +286,8 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 }
 
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
-  options_.batch_size = 1;
-  TensorGenerator generator(input_queue_.get(), options_);
+  config_.set_batch_size(1);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
 
@@ -322,8 +322,8 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 }
 
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
-  options_.batch_size = 1;
-  TensorGenerator generator(input_queue_.get(), options_);
+  config_.set_batch_size(1);
+  TensorGenerator generator(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
 

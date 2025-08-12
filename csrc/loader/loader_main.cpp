@@ -12,6 +12,7 @@
 #include <iostream>
 
 #include "data_loader.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/metrics/printer.h"
 
 ABSL_FLAG(std::string, directory, "/home/crem/tmp/2025-07/lczero-training/",
@@ -24,16 +25,25 @@ namespace lczero {
 namespace training {
 
 void Run() {
-  DataLoaderConfig config{
-      .file_path_provider = {.directory = absl::GetFlag(FLAGS_directory)},
-      .chunk_source_loader = {},
-      .shuffling_chunk_pool = {.chunk_pool_size =
-                                   absl::GetFlag(FLAGS_chunk_pool_size)},
-      .chunk_unpacker = {},
-      .shuffling_frame_sampler = {.reservoir_size_per_thread = absl::GetFlag(
-                                      FLAGS_reservoir_size_per_thread)},
-      .tensor_generator = {}};
-  DataLoader loader(config);
+  DataLoaderConfig config;
+
+  // Configure file path provider
+  auto* file_path_provider = config.mutable_file_path_provider();
+  file_path_provider->set_directory(absl::GetFlag(FLAGS_directory));
+
+  // Configure shuffling chunk pool
+  auto* shuffling_chunk_pool = config.mutable_shuffling_chunk_pool();
+  shuffling_chunk_pool->set_chunk_pool_size(
+      absl::GetFlag(FLAGS_chunk_pool_size));
+
+  // Configure shuffling frame sampler
+  auto* shuffling_frame_sampler = config.mutable_shuffling_frame_sampler();
+  shuffling_frame_sampler->set_reservoir_size_per_thread(
+      absl::GetFlag(FLAGS_reservoir_size_per_thread));
+
+  // Serialize config and create loader
+  std::string config_string = config.OutputAsString();
+  DataLoader loader(config_string);
 
   size_t batch_count = 0;
   auto start_time = absl::Now();

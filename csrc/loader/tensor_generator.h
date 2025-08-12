@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 #include "utils/tensor.h"
 #include "utils/thread_pool.h"
@@ -13,12 +14,6 @@ namespace lczero {
 namespace training {
 
 using FrameType = V6TrainingData;
-
-struct TensorGeneratorOptions {
-  size_t worker_threads = 1;     // Number of worker threads.
-  size_t batch_size = 1024;      // Batch size for tensor generation.
-  size_t output_queue_size = 4;  // Size of the output queue.
-};
 
 // Worker pool that converts V6TrainingData frames into tensor batches.
 // Takes individual V6TrainingData frames as input and outputs TensorTuple
@@ -29,7 +24,7 @@ class TensorGenerator {
   using OutputType = TensorTuple;
 
   TensorGenerator(Queue<InputType>* input_queue,
-                  const TensorGeneratorOptions& options);
+                  const TensorGeneratorConfig& config);
 
   Queue<OutputType>* output();
 

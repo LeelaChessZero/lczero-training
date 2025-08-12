@@ -5,6 +5,7 @@
 #include "absl/log/log.h"
 #include "loader/chunk_feed/rawfile_chunk_source.h"
 #include "loader/chunk_feed/tar_chunk_source.h"
+#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
@@ -22,14 +23,14 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
 }
 
 ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
-                                     const ChunkSourceLoaderOptions& options)
+                                     const ChunkSourceLoaderConfig& config)
     : input_queue_(input_queue),
-      output_queue_(options.output_queue_size),
-      thread_pool_(options.worker_threads, ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ChunkSourceLoader with " << options.worker_threads
+      output_queue_(config.output_queue_size()),
+      thread_pool_(config.worker_threads(), ThreadPoolOptions{}) {
+  LOG(INFO) << "Starting ChunkSourceLoader with " << config.worker_threads()
             << " worker threads";
   // Start the worker threads.
-  for (size_t i = 0; i < options.worker_threads; ++i) {
+  for (size_t i = 0; i < config.worker_threads(); ++i) {
     thread_pool_.Enqueue([this]() { Worker(); });
   }
 }

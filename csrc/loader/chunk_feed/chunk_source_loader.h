@@ -5,6 +5,7 @@
 
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/file_path_provider.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 
@@ -15,11 +16,6 @@ namespace training {
 // .gz files, TarChunkSource for .tar files, or nullptr for unsupported types.
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
     const std::filesystem::path& filepath);
-
-struct ChunkSourceLoaderOptions {
-  size_t worker_threads = 1;      // Number of worker threads.
-  size_t output_queue_size = 16;  // Size of the output queue.
-};
 
 struct ChunkSourceWithPhase {
   std::unique_ptr<ChunkSource> source;
@@ -34,7 +30,7 @@ class ChunkSourceLoader {
   using OutputType = ChunkSourceWithPhase;
 
   ChunkSourceLoader(Queue<InputType>* input_queue,
-                    const ChunkSourceLoaderOptions& options);
+                    const ChunkSourceLoaderConfig& config);
 
   Queue<OutputType>* output();
 

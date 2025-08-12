@@ -3,19 +3,20 @@
 #include <cstring>
 
 #include "absl/log/log.h"
+#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
 
 ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
-                             const ChunkUnpackerOptions& options)
+                             const ChunkUnpackerConfig& config)
     : input_queue_(input_queue),
-      output_queue_(options.output_queue_size),
-      thread_pool_(options.worker_threads, ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ChunkUnpacker with " << options.worker_threads
+      output_queue_(config.output_queue_size()),
+      thread_pool_(config.worker_threads(), ThreadPoolOptions{}) {
+  LOG(INFO) << "Starting ChunkUnpacker with " << config.worker_threads()
             << " worker threads";
   // Start the worker threads.
-  for (size_t i = 0; i < options.worker_threads; ++i) {
+  for (size_t i = 0; i < config.worker_threads(); ++i) {
     thread_pool_.Enqueue([this]() { Worker(); });
   }
 }

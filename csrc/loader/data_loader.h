@@ -10,6 +10,7 @@
 #include "loader/chunk_feed/shuffling_chunk_pool.h"
 #include "loader/shuffling_frame_sampler.h"
 #include "loader/tensor_generator.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
 #include "utils/metrics/group.h"
 #include "utils/tensor.h"
@@ -19,21 +20,12 @@ namespace training {
 
 using DataLoaderMetric = MetricGroup<FilePathProviderMetrics>;
 
-struct DataLoaderConfig {
-  FilePathProviderOptions file_path_provider;
-  ChunkSourceLoaderOptions chunk_source_loader;
-  ShufflingChunkPoolOptions shuffling_chunk_pool;
-  ChunkUnpackerOptions chunk_unpacker;
-  ShufflingFrameSamplerOptions shuffling_frame_sampler;
-  TensorGeneratorOptions tensor_generator;
-};
-
 class DataLoader {
  public:
   using MetricsAggregator =
       ExponentialAggregator<DataLoaderMetric, TimePeriod::k250Milliseconds>;
 
-  DataLoader(const DataLoaderConfig& config);
+  DataLoader(const std::string& config_string);
 
   TensorTuple GetNext();
 
@@ -42,7 +34,10 @@ class DataLoader {
   }
 
  private:
+  static DataLoaderConfig ParseConfig(const std::string& config_string);
   Queue<TensorTuple>* output();
+
+  DataLoaderConfig config_;
   FilePathProvider file_path_provider_;
   ChunkSourceLoader chunk_source_loader_;
   ShufflingChunkPool shuffling_chunk_pool_;

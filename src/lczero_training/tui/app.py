@@ -8,9 +8,6 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
 from textual.css.query import NoMatches
 
-from ..config.root_config import RootConfig
-from ..daemon.training_daemon import TrainingDaemon
-
 
 class HeaderBar(Static):
     """Top header bar showing uptime and overall status."""
@@ -91,15 +88,13 @@ class TrainingTuiApp(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, config: RootConfig):
+    def __init__(self):
         """Initialize the TUI app.
 
         Args:
             config: Training configuration.
         """
         super().__init__()
-        self._config = config
-        self._training_daemon = TrainingDaemon(config)
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""
@@ -117,11 +112,11 @@ class TrainingTuiApp(App):
         self.exit()
 
 
-def run_tui_app(config: RootConfig) -> None:
+def run_tui_app() -> None:
     """Run the TUI application.
 
     Args:
         config: Training configuration.
     """
-    app = TrainingTuiApp(config)
+    app = TrainingTuiApp()
     app.run()

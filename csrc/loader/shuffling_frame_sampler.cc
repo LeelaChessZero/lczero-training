@@ -3,21 +3,22 @@
 #include "absl/algorithm/container.h"
 #include "absl/log/log.h"
 #include "absl/random/uniform_int_distribution.h"
+#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
 
 ShufflingFrameSampler::ShufflingFrameSampler(
-    Queue<InputType>* input_queue, const ShufflingFrameSamplerOptions& options)
+    Queue<InputType>* input_queue, const ShufflingFrameSamplerConfig& config)
     : input_queue_(input_queue),
-      output_queue_(options.output_queue_size),
-      thread_pool_(options.num_worker_threads, ThreadPoolOptions{}),
-      reservoir_size_per_thread_(options.reservoir_size_per_thread) {
+      output_queue_(config.output_queue_size()),
+      thread_pool_(config.num_worker_threads(), ThreadPoolOptions{}),
+      reservoir_size_per_thread_(config.reservoir_size_per_thread()) {
   LOG(INFO) << "Starting ShufflingFrameSampler with "
-            << options.num_worker_threads << " threads, reservoir size "
-            << options.reservoir_size_per_thread;
+            << config.num_worker_threads() << " threads, reservoir size "
+            << config.reservoir_size_per_thread();
   // Start the worker threads.
-  for (size_t i = 0; i < options.num_worker_threads; ++i) {
+  for (size_t i = 0; i < config.num_worker_threads(); ++i) {
     thread_pool_.Enqueue([this]() { Worker(); });
   }
 }

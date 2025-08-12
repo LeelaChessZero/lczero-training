@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "proto/data_loader_config.pb.h"
 #include "utils/metrics/additive_metric.h"
 #include "utils/metrics/load_metric.h"
 #include "utils/metrics/printer.h"
@@ -52,12 +53,6 @@ struct FilePathProviderMetrics {
   }
 };
 
-// Configuration options for FilePathProvider
-struct FilePathProviderOptions {
-  size_t queue_capacity = 16;
-  std::filesystem::path directory;
-};
-
 // This class watches for new files in a directory (recursively) and notifies
 // registered observers when new files are either closed after writing or
 // renamed into.
@@ -75,7 +70,7 @@ class FilePathProvider {
     Path filepath;
     MessageType message_type;
   };
-  explicit FilePathProvider(const FilePathProviderOptions& options);
+  explicit FilePathProvider(const FilePathProviderConfig& config);
   ~FilePathProvider();
 
   // Returns the output queue for this stage

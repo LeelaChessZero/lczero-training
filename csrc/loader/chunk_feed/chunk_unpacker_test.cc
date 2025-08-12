@@ -6,6 +6,7 @@
 
 #include "gtest/gtest.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 
 namespace lczero {
@@ -15,8 +16,8 @@ class ChunkUnpackerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<std::string>>(10);
-    options_.worker_threads = 1;
-    options_.output_queue_size = 10;
+    config_.set_worker_threads(1);
+    config_.set_output_queue_size(10);
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -39,11 +40,11 @@ class ChunkUnpackerTest : public ::testing::Test {
   }
 
   std::unique_ptr<Queue<std::string>> input_queue_;
-  ChunkUnpackerOptions options_;
+  ChunkUnpackerConfig config_;
 };
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   V6TrainingData test_frame = CreateTestFrame(6);
   std::string chunk = PackFrames({test_frame});
@@ -59,7 +60,7 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   std::vector<V6TrainingData> test_frames = {
       CreateTestFrame(6), CreateTestFrame(7), CreateTestFrame(8)};
@@ -78,7 +79,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
 
@@ -102,7 +103,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
   producer.Put(std::string());  // Empty chunk
@@ -113,7 +114,7 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   auto producer = input_queue_->CreateProducer();
   // Create chunk with invalid size (not multiple of sizeof(V6TrainingData))
@@ -126,7 +127,7 @@ TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
-  ChunkUnpacker unpacker(input_queue_.get(), options_);
+  ChunkUnpacker unpacker(input_queue_.get(), config_);
 
   // Close input queue without sending data
   input_queue_->Close();

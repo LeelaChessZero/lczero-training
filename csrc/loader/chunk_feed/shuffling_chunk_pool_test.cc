@@ -103,13 +103,14 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
   AddMockChunkSourceToQueue("source2", 60);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   auto* output_queue = shuffling_chunk_pool.output();
 
@@ -133,14 +134,15 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   // Only mark scan complete, no chunk sources
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // Constructor should now succeed (initialization is asynchronous)
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   // The initialization thread should handle the error case
   auto* output_queue = shuffling_chunk_pool.output();
@@ -167,15 +169,16 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // Test that constructor completes and processes mock chunk sources
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -193,13 +196,14 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
                             "data");
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(20);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
@@ -226,13 +230,14 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
   AddMockChunkSourceToQueue("initial", 120);  // More chunks than window
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 100,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   // Verify chunks are being produced from initial sources
   auto* output_queue = shuffling_chunk_pool.output();
@@ -259,16 +264,16 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   AddMockChunkSourceToQueue("source3", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{
-      .chunk_pool_size = 50,  // Smaller than total chunks (90)
-      .num_startup_indexing_threads = 1,
-      .num_indexing_threads = 1,
-      .num_chunk_loading_threads = 1,
-      .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(50);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // Should only keep sources that fit in the window
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -278,29 +283,31 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   });
 }
 
-// Test the ShufflingChunkPoolOptions structure
-TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolOptionsDefaults) {
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 1000};
+// Test the ShufflingChunkPoolConfig structure
+TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigDefaults) {
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(1000);
 
-  EXPECT_EQ(options.chunk_pool_size, 1000);
-  EXPECT_EQ(options.num_startup_indexing_threads, 4);  // Default value
-  EXPECT_EQ(options.num_indexing_threads, 4);          // Default value
-  EXPECT_EQ(options.num_chunk_loading_threads, 4);     // Default value
-  EXPECT_EQ(options.output_queue_size, 16);            // Default value
+  EXPECT_EQ(config.chunk_pool_size(), 1000);
+  EXPECT_EQ(config.num_startup_indexing_threads(), 4);  // Default value
+  EXPECT_EQ(config.num_indexing_threads(), 4);          // Default value
+  EXPECT_EQ(config.num_chunk_loading_threads(), 4);     // Default value
+  EXPECT_EQ(config.output_queue_size(), 16);            // Default value
 }
 
-TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolOptionsCustomValues) {
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 500,
-                                    .num_startup_indexing_threads = 2,
-                                    .num_indexing_threads = 3,
-                                    .num_chunk_loading_threads = 4,
-                                    .output_queue_size = 25};
+TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigCustomValues) {
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(500);
+  config.set_num_startup_indexing_threads(2);
+  config.set_num_indexing_threads(3);
+  config.set_num_chunk_loading_threads(4);
+  config.set_output_queue_size(25);
 
-  EXPECT_EQ(options.chunk_pool_size, 500);
-  EXPECT_EQ(options.num_startup_indexing_threads, 2);
-  EXPECT_EQ(options.num_indexing_threads, 3);
-  EXPECT_EQ(options.num_chunk_loading_threads, 4);
-  EXPECT_EQ(options.output_queue_size, 25);
+  EXPECT_EQ(config.chunk_pool_size(), 500);
+  EXPECT_EQ(config.num_startup_indexing_threads(), 2);
+  EXPECT_EQ(config.num_indexing_threads(), 3);
+  EXPECT_EQ(config.num_chunk_loading_threads(), 4);
+  EXPECT_EQ(config.output_queue_size(), 25);
 }
 
 TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
@@ -310,15 +317,16 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   AddMockChunkSourceToQueue("source_c", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 70,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(70);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // ShufflingChunkPool should handle sorting internally (newest first)
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -335,16 +343,16 @@ TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{
-      .chunk_pool_size = 100,
-      .num_startup_indexing_threads = 3,  // Multiple threads
-      .num_indexing_threads = 1,
-      .num_chunk_loading_threads = 1,
-      .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_num_startup_indexing_threads(3);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // Should work without hanging or crashing
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -359,14 +367,14 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   AddMockChunkSourceToQueue("source1", 3);  // Only 3 chunks for faster testing
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{
-      .chunk_pool_size = 3,  // Window matches chunk count
-      .num_startup_indexing_threads = 1,
-      .num_indexing_threads = 1,
-      .num_chunk_loading_threads = 1,
-      .output_queue_size = 100};  // Large enough to hold all chunks
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(3);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);  // Large enough to hold all chunks
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   auto* output_queue = shuffling_chunk_pool.output();
 
@@ -407,13 +415,14 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
   AddMockChunkSourceToQueue("source2", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 40,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(40);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
@@ -441,14 +450,14 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
   AddMockChunkSourceToQueue("source1", 15);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{
-      .chunk_pool_size = 15,
-      .num_startup_indexing_threads = 1,
-      .num_indexing_threads = 1,
-      .num_chunk_loading_threads = 2,  // Multiple workers
-      .output_queue_size = 50};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(15);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(2);
+  config.set_output_queue_size(50);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce chunks
@@ -478,13 +487,14 @@ TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(20);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
   // Close multiple times - should not crash or cause issues
   EXPECT_NO_THROW(shuffling_chunk_pool.Close());
@@ -499,15 +509,16 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 20,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(20);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
   // Test that destructor calls Close() and properly shuts down
   {
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
     auto* output_queue = shuffling_chunk_pool.output();
 
     // Wait for workers to produce some chunks
@@ -530,13 +541,14 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   AddMockChunkSourceToQueue("source1", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolOptions options{.chunk_pool_size = 30,
-                                    .num_startup_indexing_threads = 1,
-                                    .num_indexing_threads = 1,
-                                    .num_chunk_loading_threads = 1,
-                                    .output_queue_size = 100};
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(30);
+  config.set_num_startup_indexing_threads(1);
+  config.set_num_indexing_threads(1);
+  config.set_num_chunk_loading_threads(1);
+  config.set_output_queue_size(100);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), options);
+  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks

@@ -12,25 +12,26 @@
 
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/chunk_source_loader.h"
+#include "proto/data_loader_config.pb.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
 
 ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
-                                       const ShufflingChunkPoolOptions& options)
-    : chunk_pool_size_(options.chunk_pool_size),
-      indexing_pool_(options.num_indexing_threads, ThreadPoolOptions{}),
-      chunk_loading_pool_(options.num_chunk_loading_threads,
+                                       const ShufflingChunkPoolConfig& config)
+    : chunk_pool_size_(config.chunk_pool_size()),
+      indexing_pool_(config.num_indexing_threads(), ThreadPoolOptions{}),
+      chunk_loading_pool_(config.num_chunk_loading_threads(),
                           ThreadPoolOptions{}),
       input_queue_(input_queue),
-      output_queue_(options.output_queue_size),
-      initialization_thread_([this, options]() {
+      output_queue_(config.output_queue_size()),
+      initialization_thread_([this, config]() {
         try {
           LOG(INFO) << "Starting ShufflingChunkPool with pool size "
-                    << options.chunk_pool_size;
+                    << config.chunk_pool_size();
           std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
-              InitializeChunkSources(options.num_startup_indexing_threads);
+              InitializeChunkSources(config.num_startup_indexing_threads());
           ProcessInputFiles(std::move(uninitialized_sources));
 
           // Start input processing worker that continuously processes new
