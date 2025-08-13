@@ -46,29 +46,35 @@ void Run() {
   std::string config_string = config.OutputAsString();
   DataLoader loader(config_string);
 
-  size_t batch_count = 0;
+  std::atomic<size_t> batch_count = 0;
   auto start_time = absl::Now();
 
-  while (true) {
-    TensorTuple batch = loader.GetNext();
-    ++batch_count;
+  // Start logging thread
+  std::atomic<bool> should_stop{false};
+  std::thread logging_thread([&]() {
+    while (!should_stop.load()) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    auto current_time = absl::Now();
-    auto total_elapsed = current_time - start_time;
-    double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
+      auto current_time = absl::Now();
+      auto total_elapsed = current_time - start_time;
+      double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
 
-    // Log metrics every second
-    LOG_EVERY_N_SEC(INFO, 1) << [&]() {
       std::string stats_string = loader.GetStat();
       DataLoaderMetricsProto metrics;
       metrics.ParseFromString(stats_string);
       std::string metrics_json = metrics.OutputAsJson();
 
-      return absl::StrCat("Processed ", batch_count, " batches in ",
-                          absl::ToDoubleSeconds(total_elapsed),
-                          "s. Rate: ", absl::StrFormat("%.2f", rate),
-                          " batches/sec. ", "Metrics: ", metrics_json);
-    }();
+      LOG(INFO) << absl::StrCat("Processed ", batch_count.load(),
+                                " batches in ",
+                                absl::ToDoubleSeconds(total_elapsed),
+                                "s. Rate: ", absl::StrFormat("%.2f", rate),
+                                " batches/sec. ", "Metrics: ", metrics_json);
+    }
+  });
+
+  while (true) {
+    TensorTuple batch = loader.GetNext();
+    ++batch_count;
   }
 }
 
