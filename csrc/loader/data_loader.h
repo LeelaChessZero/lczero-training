@@ -12,30 +12,24 @@
 #include "loader/tensor_generator.h"
 #include "proto/data_loader_config.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
-#include "utils/metrics/group.h"
 #include "utils/tensor.h"
 
 namespace lczero {
 namespace training {
 
-using DataLoaderMetric = MetricGroup<FilePathProviderMetrics>;
-
 class DataLoader {
  public:
-  using MetricsAggregator =
-      ExponentialAggregator<DataLoaderMetric, TimePeriod::k250Milliseconds>;
+  using MetricsAggregator = ExponentialAggregator<DataLoaderMetricsProto,
+                                                  TimePeriod::k250Milliseconds>;
 
   DataLoader(const std::string& config_string);
 
   TensorTuple GetNext();
 
-  const MetricsAggregator& GetMetricsAggregator() const {
-    return metrics_aggregator_;
-  }
-
  private:
   static DataLoaderConfig ParseConfig(const std::string& config_string);
   Queue<TensorTuple>* output();
+  void MetricsThread(std::stop_token stop_token);
 
   DataLoaderConfig config_;
   FilePathProvider file_path_provider_;

@@ -1,0 +1,41 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Load metric that accumulates seconds of load time.
+// Separate proto to support LoadMetricUpdaterProto functionality.
+message LoadMetricProto {
+  optional double load_seconds = 1 [default = 0.0];
+}
+
+// Statistics metric for integer values.
+message StatisticsProtoInt64 {
+  optional int64 min = 1 [default = 9223372036854775807];
+  optional int64 max = 2 [default = -9223372036854775807];
+  optional int64 sum = 3 [default = 0];
+  optional int64 count = 4 [default = 0];
+  optional int64 latest = 5 [default = 0];
+}
+
+// Statistics metric for double values.
+message StatisticsProtoDouble {
+  optional double min = 1 [default = 1.7976931348623157e+308];
+  optional double max = 2 [default = -1.7976931348623157e+308];
+  optional double sum = 3 [default = 0.0];
+  optional int64 count = 4 [default = 0];
+  optional double latest = 5 [default = 0.0];
+}
+
+// Metrics for FilePathProvider performance monitoring.
+// Replaces the old FilePathProviderMetrics struct.
+message FilePathProviderMetricsProto {
+  optional int64 total_files_discovered = 1 [default = 0];
+  optional LoadMetricProto load = 2;
+  optional StatisticsProtoInt64 queue_size = 3;
+}
+
+// Top-level metrics for the DataLoader.
+// Replaces the old MetricGroup<FilePathProviderMetrics>.
+message DataLoaderMetricsProto {
+  optional FilePathProviderMetricsProto file_path_provider = 1;
+}

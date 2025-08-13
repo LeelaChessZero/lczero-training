@@ -79,6 +79,7 @@ files = [
   'csrc/loader/shuffling_frame_sampler.cc',
   'csrc/loader/tensor_generator.cc',
   'csrc/loader/data_loader.cc',
+  'csrc/loader/data_loader_metrics.cc',
   'csrc/utils/gz.cc',
   'csrc/utils/stream_shuffler.cc',
   'libs/lc0/src/utils/files.cc',
@@ -89,6 +90,8 @@ files = [
 # Process protobuf files for C++
 proto_files = [
   proto_gen.process('proto/data_loader_config.proto',
+    preserve_path_from : meson.current_source_dir()),
+  proto_gen.process('proto/data_loader_metrics.proto',
     preserve_path_from : meson.current_source_dir())
 ]
 
@@ -105,8 +108,12 @@ python_proto_gen = generator(find_program('protoc'),
     '@INPUT@'])
 
 # Generate Python protobuf files  
-python_proto_files = python_proto_gen.process('proto/data_loader_config.proto',
-  preserve_path_from : meson.current_source_dir())
+python_proto_files = [
+  python_proto_gen.process('proto/data_loader_config.proto',
+    preserve_path_from : meson.current_source_dir()),
+  python_proto_gen.process('proto/data_loader_metrics.proto',
+    preserve_path_from : meson.current_source_dir())
+]
 
 files += proto_files
 
@@ -200,6 +207,7 @@ stats_test = executable(
   'csrc/utils/metrics/stats_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
+  link_with : loader_lib,
 )
 
 load_metric_test = executable(
@@ -207,6 +215,7 @@ load_metric_test = executable(
   'csrc/utils/metrics/load_metric_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
+  link_with : loader_lib,
 )
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)

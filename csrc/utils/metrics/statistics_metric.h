@@ -1,92 +1,51 @@
 #pragma once
 
-#include <absl/synchronization/mutex.h>
-
 #include <algorithm>
-#include <chrono>
-#include <limits>
-#include <string>
-#include <string_view>
-#include <type_traits>
+
+#include "proto/data_loader_metrics.pb.h"
 
 namespace lczero {
 
-template <typename T, bool kOneSamplePerTick = false>
-class StatisticsMetric {
- public:
-  using ValueType = T;
-  using Clock = std::chrono::steady_clock;
+// Helper function to add a sample to StatisticsProtoInt64
+inline void AddSample(training::StatisticsProtoInt64& stats, int64_t value) {
+  stats.set_min(std::min(stats.min(), value));
+  stats.set_max(std::max(stats.max(), value));
+  stats.set_sum(stats.sum() + value);
+  stats.set_count(stats.count() + 1);
+  stats.set_latest(value);
+}
 
-  StatisticsMetric() { Reset(); }
+// Helper function to add a sample to StatisticsProtoDouble
+inline void AddSample(training::StatisticsProtoDouble& stats, double value) {
+  stats.set_min(std::min(stats.min(), value));
+  stats.set_max(std::max(stats.max(), value));
+  stats.set_sum(stats.sum() + value);
+  stats.set_count(stats.count() + 1);
+  stats.set_latest(value);
+}
 
-  // Adds a sample to the statistics.
-  void AddSample(const T& value) {
-    min_ = std::min(min_, value);
-    max_ = std::max(max_, value);
-    latest_ = value;
-    if constexpr (kOneSamplePerTick) {
-      if (count_ > 0) return;
-    }
-    sum_ += value;
-    ++count_;
-  }
+// UpdateFrom function for StatisticsProtoInt64 - merges statistics
+inline void UpdateFrom(training::StatisticsProtoInt64& dest,
+                       const training::StatisticsProtoInt64& src) {
+  if (src.count() == 0) return;  // Nothing to merge from empty source
 
-  // Returns the mean of all samples.
-  double Mean() const {
-    if (count_ == 0) return 0.0;
-    return static_cast<double>(sum_) / static_cast<double>(count_);
-  }
+  dest.set_min(std::min(dest.min(), src.min()));
+  dest.set_max(std::max(dest.max(), src.max()));
+  dest.set_sum(dest.sum() + src.sum());
+  dest.set_count(dest.count() + src.count());
+  dest.set_latest(src.latest());  // Source is newer, use its latest value
+}
 
-  // Returns the minimum value seen.
-  T Min() const { return min_; }
+// UpdateFrom function for StatisticsProtoDouble - merges statistics
+inline void UpdateFrom(training::StatisticsProtoDouble& dest,
+                       const training::StatisticsProtoDouble& src) {
+  if (src.count() == 0) return;  // Nothing to merge from empty source
 
-  // Returns the maximum value seen.
-  T Max() const { return max_; }
-
-  // Returns the number of samples.
-  size_t Count() const { return count_; }
-
-  // Returns the most recent sample.
-  T Latest() const { return latest_; }
-
-  // Returns the sum of all samples.
-  T Sum() const { return sum_; }
-
-  void Reset() {
-    min_ = std::numeric_limits<T>::max();
-    max_ = std::numeric_limits<T>::lowest();
-    sum_ = T{};
-    count_ = 0;
-    latest_ = T{};
-  }
-
-  void MergeFrom(const StatisticsMetric<T, kOneSamplePerTick>& other) {
-    min_ = std::min(min_, other.min_);
-    max_ = std::max(max_, other.max_);
-    sum_ += other.sum_;
-    latest_ = other.latest_;
-    count_ += other.count_;
-  }
-
-  // Prints the statistics with the given name as a group.
-  template <typename MetricPrinter>
-  void Print(MetricPrinter& printer,
-             std::string_view name = "StatisticsMetric") const {
-    printer.StartGroup(name);
-    printer.Print("min", min_);
-    printer.Print("max", max_);
-    printer.Print("count", count_);
-    printer.Print("latest", latest_);
-    printer.Print("mean", Mean());
-    printer.EndGroup();
-  }
-
- private:
-  T min_;
-  T max_;
-  T sum_;
-  size_t count_;
-  T latest_;
-};
+  dest.set_min(std::min(dest.min(), src.min()));
+  dest.set_max(std::max(dest.max(), src.max()));
+  dest.set_sum(dest.sum() + src.sum());
+  dest.set_count(dest.count() + src.count());
+  dest.set_latest(src.latest());  // Source is newer, use its latest value
+}
 
 }  // namespace lczero

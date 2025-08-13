@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "proto/data_loader_config.pb.h"
-#include "utils/metrics/additive_metric.h"
+#include "proto/data_loader_metrics.pb.h"
 #include "utils/metrics/load_metric.h"
 #include "utils/metrics/printer.h"
 #include "utils/metrics/statistics_metric.h"
@@ -22,36 +22,6 @@
 
 namespace lczero {
 namespace training {
-
-// Metrics for FilePathProvider performance monitoring.
-struct FilePathProviderMetrics {
-  AdditiveMetric<size_t> total_files_discovered;
-  LoadMetric load;
-  StatisticsMetric<size_t, true> queue_size;
-
-  // Resets all metrics to their initial state.
-  void Reset() {
-    total_files_discovered.Reset();
-    load.Reset();
-    queue_size.Reset();
-  }
-
-  // Merges another FilePathProviderMetrics into this one.
-  void MergeFrom(const FilePathProviderMetrics& other) {
-    total_files_discovered.MergeFrom(other.total_files_discovered);
-    load.MergeFrom(other.load);
-    queue_size.MergeFrom(other.queue_size);
-  }
-
-  // Prints all metrics as a group.
-  void Print(lczero::MetricPrinter& printer) const {
-    printer.StartGroup("FilePathProviderMetrics");
-    queue_size.Print(printer, "queue_size");
-    total_files_discovered.Print(printer, "total_files_discovered");
-    load.Print(printer, "load_seconds");
-    printer.EndGroup();
-  }
-};
 
 // This class watches for new files in a directory (recursively) and notifies
 // registered observers when new files are either closed after writing or
@@ -88,9 +58,15 @@ class FilePathProvider {
     aggregator->RecordMetrics(metrics_);
   }
 
+  // Returns current metrics and clears them.
+  FilePathProviderMetricsProto FlushMetrics();
+
  private:
   // Starts monitoring the directory.
   void AddDirectory(const Path& directory);
+
+  // Helper to update metrics for discovered files
+  void UpdateMetricsForDiscoveredFiles(size_t file_count);
 
   void MonitorThread();
   void AddWatchRecursive(const Path& path);
@@ -112,7 +88,7 @@ class FilePathProvider {
   absl::Notification stop_condition_;
 
   mutable absl::Mutex metrics_mutex_;
-  FilePathProviderMetrics metrics_ ABSL_GUARDED_BY(metrics_mutex_);
+  FilePathProviderMetricsProto metrics_ ABSL_GUARDED_BY(metrics_mutex_);
   LoadMetricUpdater load_metric_updater_ ABSL_GUARDED_BY(metrics_mutex_);
 };
 

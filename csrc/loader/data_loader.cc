@@ -4,6 +4,7 @@
 
 #include <chrono>
 
+#include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
 
 namespace lczero {
@@ -27,17 +28,26 @@ DataLoader::DataLoader(const std::string& config_string)
                                config_.shuffling_frame_sampler()),
       tensor_generator_(shuffling_frame_sampler_.output(),
                         config_.tensor_generator()),
-      metrics_thread_([this](std::stop_token stop_token) {
-        while (!stop_token.stop_requested()) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-          file_path_provider_.RecordMetricsTo(&metrics_aggregator_);
-          metrics_aggregator_.Advance(std::chrono::steady_clock::now());
-        }
-      }) {}
+      metrics_aggregator_(
+          [](DataLoaderMetricsProto& m) { m.Clear(); },
+          [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
+            UpdateFrom(dest, src);
+          }),
+      metrics_thread_(
+          [this](std::stop_token stop_token) { MetricsThread(stop_token); }) {}
 
 TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
 Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
+
+void DataLoader::MetricsThread(std::stop_token stop_token) {
+  while (!stop_token.stop_requested()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    DataLoaderMetricsProto metrics;
+    *metrics.mutable_file_path_provider() = file_path_provider_.FlushMetrics();
+    metrics_aggregator_.Advance(std::chrono::steady_clock::now());
+  }
+}
 
 }  // namespace training
 }  // namespace lczero

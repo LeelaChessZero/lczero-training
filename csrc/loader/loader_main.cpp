@@ -55,21 +55,22 @@ void Run() {
     auto current_time = absl::Now();
     auto total_elapsed = current_time - start_time;
     double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
+    (void)rate;  // Suppress unused variable warning
 
-    // Log metrics every second
-    LOG_EVERY_N_SEC(INFO, 1) << [&]() {
-      auto [metrics, duration] =
-          loader.GetMetricsAggregator().GetAggregateEndingNow(
-              std::chrono::seconds(1));
-      std::string metrics_str;
-      lczero::StringMetricPrinter printer(&metrics_str);
-      metrics.Print(printer);
+    // // Log metrics every second
+    // LOG_EVERY_N_SEC(INFO, 1) << [&]() {
+    //   auto [metrics, duration] =
+    //       loader.GetMetricsAggregator().GetAggregateEndingNow(
+    //           std::chrono::seconds(1));
+    //   std::string metrics_str;
+    //   lczero::StringMetricPrinter printer(&metrics_str);
+    //   metrics.Print(printer);
 
-      return absl::StrCat("Processed ", batch_count, " batches in ",
-                          absl::ToDoubleSeconds(total_elapsed),
-                          "s. Rate: ", absl::StrFormat("%.2f", rate),
-                          " batches/sec. ", "Metrics: ", metrics_str);
-    }();
+    //   return absl::StrCat("Processed ", batch_count, " batches in ",
+    //                       absl::ToDoubleSeconds(total_elapsed),
+    //                       "s. Rate: ", absl::StrFormat("%.2f", rate),
+    //                       " batches/sec. ", "Metrics: ", metrics_str);
+    // }();
   }
 }
 
