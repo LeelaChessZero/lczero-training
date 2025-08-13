@@ -59,7 +59,9 @@ PYBIND11_MODULE(_lczero_training, m) {
             TensorTuple tensors = self.GetNext();
             return tensor_tuple_to_numpy_tuple(std::move(tensors));
           },
-          "Get next batch of tensors as tuple of numpy arrays");
+          "Get next batch of tensors as tuple of numpy arrays")
+      .def("get_stat", &DataLoader::GetStat,
+           "Get serialized metrics for last completed 1-second bucket");
 
   // Expose TensorBase for potential advanced usage.
   py::class_<TensorBase>(m, "TensorBase")

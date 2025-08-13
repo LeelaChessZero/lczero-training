@@ -40,6 +40,12 @@ TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
 Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
 
+std::string DataLoader::GetStat() const {
+  auto [metrics, duration] =
+      metrics_aggregator_.GetBucketMetrics(TimePeriod::k1Second);
+  return metrics.OutputAsString();
+}
+
 void DataLoader::MetricsThread(std::stop_token stop_token) {
   while (!stop_token.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

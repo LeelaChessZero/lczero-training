@@ -25,6 +25,7 @@ class DataLoader {
   DataLoader(const std::string& config_string);
 
   TensorTuple GetNext();
+  std::string GetStat() const;
 
  private:
   static DataLoaderConfig ParseConfig(const std::string& config_string);
