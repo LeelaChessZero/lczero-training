@@ -2,9 +2,7 @@
 name = "lczero-training"
 version = "0.1.0"
 description = "Training scripts and data loading for Leela Chess Zero"
-authors = [
-    {name = "Leela Chess Zero Team"}
-]
+authors = [{ name = "Leela Chess Zero Team" }]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,11 +24,7 @@ dev = [
 ]
 
 [build-system]
-requires = [
-    "setuptools>=64",
-    "pybind11>=2.10.0",
-    "wheel",
-]
+requires = ["setuptools>=64", "pybind11>=2.10.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 
@@ -41,18 +35,13 @@ where = ["src"]
 "*" = ["*.so", "*.dll", "*.dylib"]
 
 [dependency-groups]
-dev = [
-]
+dev = []
 
 [tool.mypy]
 mypy_path = "src"
 
 [tool.pytest.ini_options]
-testpaths = [
-    "."
-]
+testpaths = ["src"]
 python_files = ["test_*.py", "*_test.py"]
-pythonpath = [
-    "src",
-]
+pythonpath = ["src"]
 addopts = "-v"
