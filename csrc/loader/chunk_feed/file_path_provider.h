@@ -2,6 +2,7 @@
 
 #include <absl/base/thread_annotations.h>
 #include <absl/container/flat_hash_map.h>
+#include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
 #include <absl/synchronization/notification.h>
 #include <sys/inotify.h>
@@ -48,15 +49,6 @@ class FilePathProvider {
 
   // Closes the output queue, signaling completion
   void Close();
-
-  // Records current metrics to the provided exponential aggregator.
-  // Flushes pending load metrics before recording.
-  template <typename T>
-  void RecordMetricsTo(T* aggregator) {
-    absl::MutexLock lock(&metrics_mutex_);
-    load_metric_updater_.Flush();
-    aggregator->RecordMetrics(metrics_);
-  }
 
   // Returns current metrics and clears them.
   FilePathProviderMetricsProto FlushMetrics();
