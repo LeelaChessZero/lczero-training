@@ -45,7 +45,7 @@ build:
 test-cpp:
     meson test -C builddir/
 
-test-python: build-proto
+test-python: 
     uv run pytest    
 
 test: test-cpp test-python    
@@ -53,4 +53,4 @@ test: test-cpp test-python
 check: check-cpp check-proto check-python
 
 # Run all checks (formatting, build, and tests)
-pre-commit: check build test
+pre-commit: check build-proto build test

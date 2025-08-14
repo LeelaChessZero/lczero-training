@@ -131,6 +131,8 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
   // Step 4: Clean the files vector to save memory
   files.clear();
 
+  if (stop_condition_.HasBeenNotified()) return;
+
   // Step 5: Recursively call for subdirectories
   for (const auto& subdir : subdirectories) {
     ScanDirectoryWithWatch(subdir);

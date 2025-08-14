@@ -23,6 +23,7 @@ class DataLoader {
                                                   TimePeriod::k250Milliseconds>;
 
   DataLoader(const std::string& config_string);
+  ~DataLoader();
 
   TensorTuple GetNext();
   std::string GetStat() const;

@@ -46,6 +46,8 @@ void Run() {
   std::string config_string = config.OutputAsString();
   DataLoader loader(config_string);
 
+  return;
+
   std::atomic<size_t> batch_count = 0;
   auto start_time = absl::Now();
 

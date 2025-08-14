@@ -36,6 +36,8 @@ DataLoader::DataLoader(const std::string& config_string)
       metrics_thread_(
           [this](std::stop_token stop_token) { MetricsThread(stop_token); }) {}
 
+DataLoader::~DataLoader() { file_path_provider_.Close(); }
+
 TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
 Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
