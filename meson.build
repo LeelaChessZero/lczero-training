@@ -115,6 +115,9 @@ python_proto_files = [
     preserve_path_from : meson.current_source_dir())
 ]
 
+# Create a dependency for Python protobuf files
+python_proto_dep = declare_dependency(sources: python_proto_files)
+
 files += proto_files
 
 loader_lib = static_library(
@@ -244,7 +247,7 @@ python3.extension_module(
   '_lczero_training',
   'csrc/loader/pybind_module.cc',
   include_directories : includes,
-  dependencies : [pybind11_dep, proto_dep] + loader_deps,
+  dependencies : [pybind11_dep, proto_dep, python_proto_dep] + loader_deps,
   link_with : loader_lib,
   install : true,
   subdir : 'lczero_training',

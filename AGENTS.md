@@ -35,7 +35,7 @@ in the `builddir/`.
 * We use `uv` for Python package and venv management, and to running the
   application.
 * Run TUI app: `uv run python -m lczero_training` (skeleton mode) or
-  `uv run python -m lczero_training config.yaml` (with config)
+  `uv run python -m lczero_training config.textproto` (with config)
 * To compile data loader:
 
 ```sh

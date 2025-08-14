@@ -36,8 +36,13 @@ build:
     meson compile -C builddir/
 
 # Run tests
-test:
+test-cpp:
+    uv run pytest
+
+test-python:    
     meson test -C builddir/
+
+test: test-cpp test-python    
 
 check: check-cpp check-proto check-python
 
