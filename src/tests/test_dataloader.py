@@ -32,7 +32,7 @@ def test_dataloader_initialization():
     config.file_path_provider.directory = str(script_dir)
 
     config_bytes = config.SerializeToString()
-    loader = DataLoader(config_bytes.decode("latin1"))
+    loader = DataLoader(config_bytes)
     assert loader is not None
 
 
@@ -44,7 +44,7 @@ def test_dataloader_methods_exist():
     config = config_pb2.DataLoaderConfig()
     config.file_path_provider.directory = str(script_dir)
     config_bytes = config.SerializeToString()
-    loader = DataLoader(config_bytes.decode("latin1"))
+    loader = DataLoader(config_bytes)
 
     assert hasattr(loader, "get_next")
     assert hasattr(loader, "get_stat")

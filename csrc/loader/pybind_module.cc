@@ -51,8 +51,11 @@ PYBIND11_MODULE(_lczero_training, m) {
 
   // Expose the main DataLoader class.
   py::class_<DataLoader>(m, "DataLoader")
-      .def(py::init<const std::string&>(),
-           "Create DataLoader with serialized protobuf configuration string")
+      .def(py::init([](py::bytes config_bytes) {
+             std::string config_string = config_bytes;
+             return new DataLoader(config_string);
+           }),
+           "Create DataLoader with serialized protobuf configuration bytes")
       .def(
           "get_next",
           [](DataLoader& self) {
@@ -60,8 +63,13 @@ PYBIND11_MODULE(_lczero_training, m) {
             return tensor_tuple_to_numpy_tuple(std::move(tensors));
           },
           "Get next batch of tensors as tuple of numpy arrays")
-      .def("get_stat", &DataLoader::GetStat,
-           "Get serialized metrics for last completed 1-second bucket");
+      .def(
+          "get_stat",
+          [](const DataLoader& self) {
+            std::string stat_string = self.GetStat();
+            return py::bytes(stat_string);
+          },
+          "Get serialized metrics for last completed 1-second bucket as bytes");
 
   // Expose TensorBase for potential advanced usage.
   py::class_<TensorBase>(m, "TensorBase")
