@@ -1,26 +1,9 @@
 """Test script for the DataLoader implementation."""
 
-import sys
 from lczero_training._lczero_training import DataLoader
 import proto.data_loader_config_pb2 as config_pb2
 from pathlib import Path
 import pytest
-
-# Add the src and build directories to Python path
-src_dir = Path(__file__).parent / "src"
-build_dir = Path(__file__).parent / "builddir"
-proto_dir = (
-    Path(__file__).parent
-    / "builddir"
-    / "_lczero_training.cpython-311-x86_64-linux-gnu.so.p"
-)
-
-if src_dir.exists():
-    sys.path.insert(0, str(src_dir))
-if build_dir.exists():
-    sys.path.insert(0, str(build_dir))
-if proto_dir.exists():
-    sys.path.insert(0, str(proto_dir))
 
 
 @pytest.mark.skip(reason="DataLoader hangs waiting for training data files")
