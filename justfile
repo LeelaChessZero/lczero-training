@@ -18,6 +18,12 @@ check-proto:
 format-proto:
     find proto/ -name "*.proto" | xargs clang-format -i
 
+# Build Python protobuf files
+build-proto:
+    mkdir -p src/proto
+    touch src/proto/__init__.py
+    protoc --proto_path=proto --python_out=src/proto proto/*.proto
+
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
     source .venv/bin/activate && ruff check src/
@@ -37,10 +43,10 @@ build:
 
 # Run tests
 test-cpp:
-    uv run pytest
-
-test-python:    
     meson test -C builddir/
+
+test-python: build-proto
+    uv run pytest    
 
 test: test-cpp test-python    
 

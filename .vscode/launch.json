@@ -9,15 +9,23 @@
             "request": "launch",
             "name": "loader",
             "program": "${workspaceFolder}/builddir/loader",
-            "args": [
-                // "--gtest_filter=LoadMetricTest.DelayedRecordMetricsFlushesActiveLoad",
-                // "--gather-threads=1",
-                // "--eval-threads=1",
-                // "--backprop-threads=1",
-                // "-b",
-                // "trivial"
-            ],
             "cwd": "${workspaceFolder}/builddir"
+        },
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "pytest test_dataloader.py",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "program": "-m",
+            "args": [
+                "pytest",
+                "test_dataloader.py"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/builddir/_lczero_training.cpython-311-x86_64-linux-gnu.so.p"
+            }
         }
     ]
 }

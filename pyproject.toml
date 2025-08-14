@@ -10,16 +10,19 @@ requires-python = ">=3.11"
 dependencies = [
     "pybind11>=2.10.0",
     "numpy>=1.24.0",
-    "PyYAML>=6.0",
     "textual>=0.47.0",
     "protobuf>=3.20.0",
+    "mypy>=1.17.1",
+    "pytest>=8.4.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "mypy>=1.0.0",
-    "types-PyYAML>=6.0.0",
+    "typing-extensions>=4.0.0",
+    "mypy-extensions>=0.4.0",
+    "pathspec>=0.11.0",
 ]
 
 [build-system]
@@ -30,6 +33,7 @@ requires = [
 ]
 build-backend = "setuptools.build_meta"
 
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -38,5 +42,17 @@ where = ["src"]
 
 [dependency-groups]
 dev = [
-    "types-pyyaml>=6.0.12.20250809",
 ]
+
+[tool.mypy]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "."
+]
+python_files = ["test_*.py", "*_test.py"]
+pythonpath = [
+    "src",
+]
+addopts = "-v"

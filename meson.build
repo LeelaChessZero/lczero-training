@@ -99,24 +99,6 @@ proto_files = [
 proto_dep = declare_dependency(sources: proto_files)
 test_deps = [gtest_dep, gtest_main_dep, proto_dep]
 
-# Python protobuf generator
-python_proto_gen = generator(find_program('protoc'), 
-  output: ['@BASENAME@_pb2.py'],
-  arguments : [
-    '--proto_path=@CURRENT_SOURCE_DIR@',
-    '--python_out=@BUILD_DIR@',
-    '@INPUT@'])
-
-# Generate Python protobuf files  
-python_proto_files = [
-  python_proto_gen.process('proto/data_loader_config.proto',
-    preserve_path_from : meson.current_source_dir()),
-  python_proto_gen.process('proto/data_loader_metrics.proto',
-    preserve_path_from : meson.current_source_dir())
-]
-
-# Create a dependency for Python protobuf files
-python_proto_dep = declare_dependency(sources: python_proto_files)
 
 files += proto_files
 
@@ -247,10 +229,9 @@ python3.extension_module(
   '_lczero_training',
   'csrc/loader/pybind_module.cc',
   include_directories : includes,
-  dependencies : [pybind11_dep, proto_dep, python_proto_dep] + loader_deps,
+  dependencies : [pybind11_dep, proto_dep] + loader_deps,
   link_with : loader_lib,
   install : true,
   subdir : 'lczero_training',
 )
 
-# Python protobuf files are installed automatically by the custom target
