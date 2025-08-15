@@ -110,13 +110,3 @@ class TrainingTuiApp(App):
     def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
         self.exit()
-
-
-def run_tui_app() -> None:
-    """Run the TUI application.
-
-    Args:
-        config: Training configuration.
-    """
-    app = TrainingTuiApp()
-    app.run()
