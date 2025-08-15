@@ -3,10 +3,8 @@
 from lczero_training._lczero_training import DataLoader
 import proto.data_loader_config_pb2 as config_pb2
 from pathlib import Path
-import pytest
 
 
-@pytest.mark.skip(reason="DataLoader hangs waiting for training data files")
 def test_dataloader_initialization():
     """Test DataLoader can be created with valid directory config."""
     script_dir = Path(__file__).parent
@@ -19,7 +17,6 @@ def test_dataloader_initialization():
     assert loader is not None
 
 
-@pytest.mark.skip(reason="DataLoader hangs waiting for training data files")
 def test_dataloader_methods_exist():
     """Test DataLoader methods exist and are callable."""
     script_dir = Path(__file__).parent

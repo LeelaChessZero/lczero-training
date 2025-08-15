@@ -5,10 +5,39 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(gdb) Attach",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "/home/crem/dev/lczero-training/.venv/bin/python3",
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "loader",
             "program": "${workspaceFolder}/builddir/loader",
+            "cwd": "${workspaceFolder}/builddir"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "loader.py",
+            "program": "${workspaceFolder}/.venv/bin/python",
+            "args": [
+                "../src/tests/test_dataloader.py"
+            ],
             "cwd": "${workspaceFolder}/builddir"
         },
         {
