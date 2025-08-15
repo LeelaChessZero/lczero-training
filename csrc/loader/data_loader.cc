@@ -10,14 +10,14 @@
 namespace lczero {
 namespace training {
 
-DataLoaderConfig DataLoader::ParseConfig(const std::string& config_string) {
+DataLoaderConfig DataLoader::ParseConfig(const std::string& serialized_config) {
   DataLoaderConfig config;
-  config.ParseFromString(config_string);
+  config.ParseFromString(serialized_config);
   return config;
 }
 
-DataLoader::DataLoader(const std::string& config_string)
-    : config_(ParseConfig(config_string)),
+DataLoader::DataLoader(const std::string& serialized_data_loader_config)
+    : config_(ParseConfig(serialized_data_loader_config)),
       file_path_provider_(config_.file_path_provider()),
       chunk_source_loader_(file_path_provider_.output(),
                            config_.chunk_source_loader()),

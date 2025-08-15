@@ -22,14 +22,15 @@ class DataLoader {
   using MetricsAggregator = ExponentialAggregator<DataLoaderMetricsProto,
                                                   TimePeriod::k250Milliseconds>;
 
-  DataLoader(const std::string& config_string);
+  DataLoader(const std::string& serialized_data_loader_config);
   ~DataLoader();
 
   TensorTuple GetNext();
   std::string GetStat() const;
 
  private:
-  static DataLoaderConfig ParseConfig(const std::string& config_string);
+  static DataLoaderConfig ParseConfig(
+      const std::string& serialized_data_loader_config);
   Queue<TensorTuple>* output();
   void MetricsThread(std::stop_token stop_token);
 

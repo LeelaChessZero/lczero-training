@@ -22,18 +22,18 @@ format-proto:
 build-proto:
     mkdir -p src/proto
     touch src/proto/__init__.py
-    protoc --proto_path=proto --python_out=src/proto proto/*.proto
+    uv run protoc --proto_path=proto --python_out=src/proto --mypy_out=src/proto proto/*.proto
 
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
-    source .venv/bin/activate && ruff check src/
-    source .venv/bin/activate && ruff format --check src/
-    source .venv/bin/activate && mypy -p lczero_training
+    uv run ruff check src/ --exclude src/proto
+    uv run ruff format --check src/ --exclude src/proto
+    uv run mypy -p lczero_training
 
 # Format all Python files in src/ using ruff
 format-python:
-    source .venv/bin/activate && ruff format src/
-    source .venv/bin/activate && ruff check --fix src/
+    uv run ruff format src/ --exclude src/proto
+    uv run ruff check --fix src/ --exclude src/proto
 
 format: format-cpp format-proto format-python
 

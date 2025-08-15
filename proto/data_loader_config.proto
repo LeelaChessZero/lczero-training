@@ -85,3 +85,7 @@ message DataLoaderConfig {
   // Tensor generator configuration
   optional TensorGeneratorConfig tensor_generator = 6;
 }
+
+message TrainingConfig {
+  optional DataLoaderConfig data_loader = 1;
+}
