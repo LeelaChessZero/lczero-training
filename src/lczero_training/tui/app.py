@@ -1,7 +1,10 @@
 # ABOUTME: Main TUI application class implementing the training dashboard.
 # ABOUTME: Uses Textual framework to create a full-screen interface with four panes.
 
+import subprocess
+import sys
 import time
+from typing import IO
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -75,19 +78,27 @@ class TrainingTuiApp(App):
 
     CSS_PATH = "app.tcss"
 
+    _log_stream: IO[str]
+    _daemon_process: subprocess.Popen[str]
+
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, log_stream=None):
-        """Initialize the TUI app.
-
-        Args:
-            log_stream: File-like object for log output (e.g., subprocess stderr).
-        """
+    def __init__(self):
+        """Initialize the TUI app."""
         super().__init__()
-        self._log_stream = log_stream
+        self._daemon_process = subprocess.Popen(
+            [sys.executable, "-m", "lczero_training.daemon"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if self._daemon_process.stderr is None:
+            raise RuntimeError("Failed to capture daemon stderr")
+        self._log_stream = self._daemon_process.stderr
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""
