@@ -8,6 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
 from textual.css.query import NoMatches
 
+from .log_pane import StreamingLogPane
+
 
 class HeaderBar(Static):
     """Top header bar showing uptime and overall status."""
@@ -61,16 +63,6 @@ class TrainingStatusPane(Static):
         )
 
 
-class LogPane(Static):
-    """Bottom pane for displaying log output."""
-
-    def compose(self) -> ComposeResult:
-        yield Static(
-            "Log Output\n\nApplication logs will appear here...",
-            classes="log-content",
-        )
-
-
 class TrainingTuiApp(App):
     """Main TUI application for the training dashboard.
 
@@ -88,13 +80,14 @@ class TrainingTuiApp(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self):
+    def __init__(self, log_stream=None):
         """Initialize the TUI app.
 
         Args:
-            config: Training configuration.
+            log_stream: File-like object for log output (e.g., subprocess stderr).
         """
         super().__init__()
+        self._log_stream = log_stream
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""
@@ -105,7 +98,7 @@ class TrainingTuiApp(App):
                 yield DataPipelinePane()
                 yield TrainingStatusPane()
 
-            yield LogPane()
+            yield StreamingLogPane(stream=self._log_stream)
 
     def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
