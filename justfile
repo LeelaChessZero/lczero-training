@@ -20,20 +20,20 @@ format-proto:
 
 # Build Python protobuf files
 build-proto:
-    mkdir -p src/proto
-    touch src/proto/__init__.py
-    uv run protoc --proto_path=proto --python_out=src/proto --mypy_out=src/proto proto/*.proto
+    mkdir -p src/lczero_training/proto
+    touch src/lczero_training/proto/__init__.py
+    uv run protoc --proto_path=proto --python_out=src/lczero_training/proto --mypy_out=src/lczero_training/proto proto/*.proto
 
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
-    uv run ruff check src/ --exclude src/proto
-    uv run ruff format --check src/ --exclude src/proto
+    uv run ruff check src/ --exclude src/lczero_training/proto
+    uv run ruff format --check src/ --exclude src/lczero_training/proto
     uv run mypy -p lczero_training
 
 # Format all Python files in src/ using ruff
 format-python:
-    uv run ruff format src/ --exclude src/proto
-    uv run ruff check --fix src/ --exclude src/proto
+    uv run ruff format src/ --exclude src/lczero_training/proto
+    uv run ruff check --fix src/ --exclude src/lczero_training/proto
 
 format: format-cpp format-proto format-python
 

@@ -3,8 +3,8 @@
 
 def test_protobuf_import():
     """Test that protobuf files can be imported."""
-    from proto import data_loader_config_pb2
-    from proto import data_loader_metrics_pb2
+    from lczero_training.proto import data_loader_config_pb2
+    from lczero_training.proto import data_loader_metrics_pb2
 
     # Test creating config objects
     config = data_loader_config_pb2.DataLoaderConfig()
@@ -16,7 +16,7 @@ def test_protobuf_import():
 
 def test_protobuf_functionality():
     """Test basic protobuf functionality."""
-    from proto import data_loader_config_pb2
+    from lczero_training.proto import data_loader_config_pb2
 
     # Create a config and set some values
     config = data_loader_config_pb2.DataLoaderConfig()

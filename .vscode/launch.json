@@ -36,7 +36,7 @@
             "name": "loader.py",
             "program": "${workspaceFolder}/.venv/bin/python",
             "args": [
-                "../src/tests/test_dataloader.py"
+                "../src/lczero_training/tests/test_dataloader.py"
             ],
             "cwd": "${workspaceFolder}/builddir"
         },
