@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "loader/data_loader_metrics.h"
 #include "proto/training_config.pb.h"
 
 namespace lczero {
@@ -61,6 +62,7 @@ void FilePathProvider::Close() {
 FilePathProviderMetricsProto FilePathProvider::FlushMetrics() {
   FilePathProviderMetricsProto result;
   *result.mutable_load() = load_metric_updater_.FlushMetrics();
+  *result.mutable_queue() = MetricsFromQueue(output_queue_);
   return result;
 }
 

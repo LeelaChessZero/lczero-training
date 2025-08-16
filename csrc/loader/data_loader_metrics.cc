@@ -16,12 +16,15 @@ void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
   dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }
 
+void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
+  UpdateFrom(*dest.mutable_queue_fullness(), src.queue_fullness());
+  dest.set_message_count(dest.message_count() + src.message_count());
+}
+
 void UpdateFrom(FilePathProviderMetricsProto& dest,
                 const FilePathProviderMetricsProto& src) {
-  dest.set_total_files_discovered(dest.total_files_discovered() +
-                                  src.total_files_discovered());
   UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue_size(), src.queue_size());
+  UpdateFrom(*dest.mutable_queue(), src.queue());
 }
 
 void UpdateFrom(DataLoaderMetricsProto& dest,

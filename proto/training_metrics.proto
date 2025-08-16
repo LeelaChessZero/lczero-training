@@ -27,12 +27,17 @@ message StatisticsProtoDouble {
   optional double latest = 5 [default = 0.0];
 }
 
+// Metrics for queue performance monitoring.
+message QueueMetricProto {
+  optional StatisticsProtoInt64 queue_fullness = 1;
+  optional uint64 message_count = 2 [default = 0];
+}
+
 // Metrics for FilePathProvider performance monitoring.
 // Replaces the old FilePathProviderMetrics struct.
 message FilePathProviderMetricsProto {
-  optional int64 total_files_discovered = 1 [default = 0];
-  optional LoadMetricProto load = 2;
-  optional StatisticsProtoInt64 queue_size = 3;
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
 }
 
 // Top-level metrics for the DataLoader.
