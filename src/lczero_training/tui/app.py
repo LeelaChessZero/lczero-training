@@ -4,8 +4,9 @@
 import subprocess
 import sys
 import time
-from typing import IO
 
+import anyio
+from anyio.streams.text import TextReceiveStream
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
@@ -51,7 +52,10 @@ class DataPipelinePane(Static):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "Data Pipeline\n\nPipeline stages will be displayed here:\n• FilePathProvider\n• ShufflingChunkPool\n• ChunkValidator\n• Stream Splitter",
+            "Data Pipeline\n\n"
+            "Pipeline stages will be displayed here:\n"
+            "• FilePathProvider\n• ShufflingChunkPool\n"
+            "• ChunkValidator\n• Stream Splitter",
             classes="pipeline-content",
         )
 
@@ -61,7 +65,9 @@ class TrainingStatusPane(Static):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "JAX Training Status\n\nTraining metrics will be displayed here when active:\n• Epoch Progress\n• Performance Metrics\n• Loss Values",
+            "JAX Training Status\n\n"
+            "Training metrics will be displayed here when active:\n"
+            "• Epoch Progress\n• Performance Metrics\n• Loss Values",
             classes="training-content",
         )
 
@@ -78,27 +84,32 @@ class TrainingTuiApp(App):
 
     CSS_PATH = "app.tcss"
 
-    _log_stream: IO[str]
-    _daemon_process: subprocess.Popen[str]
+    _log_stream: TextReceiveStream
+    _daemon_process: anyio.abc.Process
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self):
-        """Initialize the TUI app."""
+    def __init__(self, daemon_process: anyio.abc.Process):
+        """Initialize the TUI app with an already-created daemon process."""
         super().__init__()
-        self._daemon_process = subprocess.Popen(
+        self._daemon_process = daemon_process
+        if daemon_process.stderr is None:
+            raise RuntimeError("Failed to capture daemon stderr")
+        self._log_stream = TextReceiveStream(daemon_process.stderr)
+
+    @classmethod
+    async def create(cls) -> "TrainingTuiApp":
+        """Create a new TrainingTuiApp with async subprocess creation."""
+        daemon_process = await anyio.open_process(
             [sys.executable, "-m", "lczero_training.daemon"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
         )
-        if self._daemon_process.stderr is None:
-            raise RuntimeError("Failed to capture daemon stderr")
-        self._log_stream = self._daemon_process.stderr
+        return cls(daemon_process)
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""

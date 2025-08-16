@@ -1,41 +1,24 @@
-import threading
-from typing import IO
-
+from anyio.streams.text import TextReceiveStream
 from textual.widgets import RichLog
 
 
 class StreamingLogPane(RichLog):
-    """Log pane that streams output from a file-like object in a background thread."""
+    """Log pane that streams output from an async text stream."""
 
-    def __init__(self, stream: IO[str], **kwargs) -> None:
+    def __init__(self, stream: TextReceiveStream, **kwargs) -> None:
         super().__init__(highlight=True, markup=True, max_lines=1000, **kwargs)
         self._stream = stream
-        self._reader_thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
 
     def on_mount(self) -> None:
-        """Start the background thread when the widget is mounted."""
-        self._stop_event.clear()
-        self._reader_thread = threading.Thread(
-            target=self._read_stream, daemon=True
-        )
-        self._reader_thread.start()
+        """Start the async reading task when the widget is mounted."""
+        self.run_worker(self._read_stream())
 
-    def on_unmount(self) -> None:
-        """Stop the background thread when the widget is unmounted."""
-        if self._reader_thread:
-            self._stop_event.set()
-            self._reader_thread.join(timeout=1.0)
-
-    def _read_stream(self) -> None:
-        """Background thread function that reads from the stream."""
+    async def _read_stream(self) -> None:
+        """Async function that reads lines from the text stream."""
         try:
-            while not self._stop_event.is_set():
-                line = self._stream.readline()
-                if not line:
-                    break
-                line = line.rstrip("\n\r")
+            async for line in self._stream:
+                line = line.strip()
                 if line:
-                    self.app.call_from_thread(self.write, line)
+                    self.write(line)
         except Exception:
             pass
