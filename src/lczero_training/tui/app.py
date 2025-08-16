@@ -9,7 +9,7 @@ import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static
+from textual.widgets import Static, Footer
 from textual.css.query import NoMatches
 
 from .log_pane import StreamingLogPane
@@ -133,6 +133,8 @@ class TrainingTuiApp(App):
                 yield TrainingStatusPane()
 
             yield StreamingLogPane(stream=self._log_stream)
+
+        yield Footer()
 
     def on_mount(self) -> None:
         """Start the communicator when the app mounts."""
