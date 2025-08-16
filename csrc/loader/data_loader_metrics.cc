@@ -13,6 +13,7 @@ namespace training {
 
 void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
   dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
+  dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }
 
 void UpdateFrom(FilePathProviderMetricsProto& dest,

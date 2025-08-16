@@ -15,39 +15,48 @@ class LoadMetricUpdater {
   using Clock = std::chrono::steady_clock;
   using Duration = std::chrono::duration<double>;
 
-  explicit LoadMetricUpdater(training::LoadMetricProto* metric)
-      : metric_(metric) {}
+  explicit LoadMetricUpdater(training::LoadMetricProto* metric,
+                             Clock::time_point initial_time = Clock::now())
+      : metric_(metric),
+        last_flush_time_(initial_time),
+        is_load_active_(false) {}
 
   // Starts tracking load from the given time point.
   void LoadStart(Clock::time_point now = Clock::now()) {
     Flush(now);
-    uncounted_load_start_ = now;
+    is_load_active_ = true;
   }
 
   // Stops tracking load at the given time point.
   void LoadStop(Clock::time_point now = Clock::now()) {
     Flush(now);
-    uncounted_load_start_ = std::nullopt;
+    is_load_active_ = false;
   }
 
   // Flushes any uncounted load time into the metric.
   void Flush(Clock::time_point now = Clock::now()) {
-    if (!uncounted_load_start_.has_value()) return;
+    Duration elapsed = now - last_flush_time_;
+    double elapsed_seconds = elapsed.count();
 
-    Duration elapsed = now - *uncounted_load_start_;
-    metric_->set_load_seconds(metric_->load_seconds() + elapsed.count());
-    uncounted_load_start_ = now;
+    metric_->set_total_seconds(metric_->total_seconds() + elapsed_seconds);
+    if (is_load_active_) {
+      metric_->set_load_seconds(metric_->load_seconds() + elapsed_seconds);
+    }
+
+    last_flush_time_ = now;
   }
 
  private:
   training::LoadMetricProto* metric_;
-  std::optional<Clock::time_point> uncounted_load_start_;
+  Clock::time_point last_flush_time_;
+  bool is_load_active_;
 };
 
 // UpdateFrom function for LoadMetricProto - simple additive behavior
 inline void UpdateFrom(training::LoadMetricProto& dest,
                        const training::LoadMetricProto& src) {
   dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
+  dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }
 
 }  // namespace lczero

@@ -6,6 +6,7 @@ package lczero.training;
 // Separate proto to support LoadMetricUpdaterProto functionality.
 message LoadMetricProto {
   optional double load_seconds = 1 [default = 0.0];
+  optional double total_seconds = 2 [default = 0.0];
 }
 
 // Statistics metric for integer values.
