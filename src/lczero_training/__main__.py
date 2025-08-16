@@ -2,20 +2,22 @@
 # ABOUTME: Enables running as python -m lczero_training.
 # ABOUTME: Launches the TUI application by default.
 
-import sys
+import argparse
 import anyio
 from .tui.app import TrainingTuiApp
 
 
 async def main():
     """Main entry point for the lczero_training package."""
-    if len(sys.argv) > 1:
-        # If config is provided, could handle it here in the future
-        print(f"Config file support not yet implemented: {sys.argv[1]}")
-        return
+    parser = argparse.ArgumentParser(description="LCZero Training Dashboard")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to the training configuration file",
+    )
+    args = parser.parse_args()
 
-    # Launch TUI in skeleton mode
-    app = await TrainingTuiApp.create()
+    app = await TrainingTuiApp.create(args.config)
     await app.run_async()
 
 

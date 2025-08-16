@@ -14,6 +14,7 @@ from textual.css.query import NoMatches
 
 from .log_pane import StreamingLogPane
 from ..protocol.communicator import AsyncCommunicator
+from ..protocol.messages import StartTrainingPayload
 
 
 class HeaderBar(Static):
@@ -88,6 +89,7 @@ class TrainingTuiApp(App):
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
     _communicator: AsyncCommunicator
+    _config_file: str
 
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -109,7 +111,7 @@ class TrainingTuiApp(App):
         )
 
     @classmethod
-    async def create(cls) -> "TrainingTuiApp":
+    async def create(cls, config_file: str) -> "TrainingTuiApp":
         """Create a new TrainingTuiApp with async subprocess creation."""
         daemon_process = await anyio.open_process(
             [sys.executable, "-m", "lczero_training.daemon"],
@@ -117,7 +119,9 @@ class TrainingTuiApp(App):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        return cls(daemon_process)
+        app = cls(daemon_process)
+        app._config_file = config_file
+        return app
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""
@@ -133,6 +137,12 @@ class TrainingTuiApp(App):
     def on_mount(self) -> None:
         """Start the communicator when the app mounts."""
         self.run_worker(self._communicator.run(), exclusive=True)
+        self.run_worker(self._send_start_training(), exclusive=False)
+
+    async def _send_start_training(self) -> None:
+        """Send StartTrainingPayload with the config file."""
+        payload = StartTrainingPayload(config_filepath=self._config_file)
+        await self._communicator.send(payload)
 
     def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
