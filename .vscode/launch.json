@@ -33,6 +33,16 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "load_metric_test",
+            "program": "${workspaceFolder}/builddir/load_metric_test",
+            "args": [
+                "--gtest_filter=LoadMetricTest.LoadMetricPauserBasic",
+            ],
+            "cwd": "${workspaceFolder}/builddir"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "loader.py",
             "program": "${workspaceFolder}/.venv/bin/python",
             "args": [
@@ -54,6 +64,32 @@
             "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/builddir/_lczero_training.cpython-311-x86_64-linux-gnu.so.p"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "training_daemon (lldb)",
+            "program": "${workspaceFolder}/.venv/bin/python",
+            "args": [
+                "-m",
+                "lczero_training.daemon"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "training_daemon (python)",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "module": "lczero_training.daemon",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
             }
         }
     ]

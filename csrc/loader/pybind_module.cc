@@ -59,7 +59,11 @@ PYBIND11_MODULE(_lczero_training, m) {
       .def(
           "get_next",
           [](DataLoader& self) {
-            TensorTuple tensors = self.GetNext();
+            TensorTuple tensors;
+            {
+              py::gil_scoped_release release;  // Release GIL
+              tensors = self.GetNext();        // Blocking call
+            }  // GIL automatically reacquired here
             return tensor_tuple_to_numpy_tuple(std::move(tensors));
           },
           "Get next batch of tensors as tuple of numpy arrays")

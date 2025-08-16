@@ -34,15 +34,7 @@ in the `builddir/`.
     `absl::StrCat`, etc.)
 * We use `uv` for Python package and venv management, and to running the
   application.
-* Run TUI app: `uv run python -m lczero_training` (skeleton mode) or
-  `uv run python -m lczero_training config.textproto` (with config)
-* To compile data loader:
-
-```sh
-CXX=clang++ CC=clang meson build/release/ --buildtype release
-meson compile -C build/release/
-cp build/release/lczero_training.so src/lczero_training/
-```
+* Run TUI app: `uv run python -m lczero_training --config=<path_to_config>`
 
 * Do not attempt to run TUI — it messes up the Agent interface and session has
   to be killed. Ask me to check it for you manually instead.
