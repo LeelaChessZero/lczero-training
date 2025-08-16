@@ -1,3 +1,4 @@
+from typing import Any
 from anyio.streams.text import TextReceiveStream
 from textual.widgets import RichLog
 
@@ -5,7 +6,7 @@ from textual.widgets import RichLog
 class StreamingLogPane(RichLog):
     """Log pane that streams output from an async text stream."""
 
-    def __init__(self, stream: TextReceiveStream, **kwargs) -> None:
+    def __init__(self, stream: TextReceiveStream, **kwargs: Any) -> None:
         super().__init__(highlight=True, markup=True, max_lines=1000, **kwargs)
         self._stream = stream
 

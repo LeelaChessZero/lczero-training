@@ -2,16 +2,17 @@
 # ABOUTME: Provides @register decorator and maintains bidirectional mapping dicts.
 
 import inspect
+from typing import Callable
 
 # These maps will be populated by the @register decorator
 TYPE_TO_CLASS_MAP = {}
 CLASS_TO_TYPE_MAP = {}
 
 
-def register(event_type: str):
+def register(event_type: str) -> Callable[[type], type]:
     """A decorator to register a payload dataclass with its event type string."""
 
-    def decorator(cls):
+    def decorator(cls: type) -> type:
         if not inspect.isclass(cls):
             raise TypeError(
                 "The @register decorator can only be used on classes."

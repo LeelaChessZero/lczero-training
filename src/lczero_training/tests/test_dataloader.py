@@ -5,7 +5,7 @@ import lczero_training.proto.training_config_pb2 as config_pb2
 from pathlib import Path
 
 
-def test_dataloader_initialization():
+def test_dataloader_initialization() -> None:
     """Test DataLoader can be created with valid directory config."""
     script_dir = Path(__file__).parent
 
@@ -17,7 +17,7 @@ def test_dataloader_initialization():
     assert loader is not None
 
 
-def test_dataloader_methods_exist():
+def test_dataloader_methods_exist() -> None:
     """Test DataLoader methods exist and are callable."""
     script_dir = Path(__file__).parent
 

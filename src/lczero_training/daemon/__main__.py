@@ -5,7 +5,7 @@
 from .daemon import TrainingDaemon
 
 
-def main():
+def main() -> None:
     daemon = TrainingDaemon()
     daemon.run()
 

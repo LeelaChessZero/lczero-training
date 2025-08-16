@@ -1,7 +1,7 @@
 """Test protobuf compilation and functionality."""
 
 
-def test_protobuf_import():
+def test_protobuf_import() -> None:
     """Test that protobuf files can be imported."""
     from lczero_training.proto import training_config_pb2
     from lczero_training.proto import training_metrics_pb2
@@ -14,7 +14,7 @@ def test_protobuf_import():
     assert metrics is not None
 
 
-def test_protobuf_functionality():
+def test_protobuf_functionality() -> None:
     """Test basic protobuf functionality."""
     from lczero_training.proto import training_config_pb2
 

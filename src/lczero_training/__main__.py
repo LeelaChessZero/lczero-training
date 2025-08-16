@@ -7,7 +7,7 @@ import anyio
 from .tui.app import TrainingTuiApp
 
 
-async def main():
+async def main() -> None:
     """Main entry point for the lczero_training package."""
     parser = argparse.ArgumentParser(description="LCZero Training Dashboard")
     parser.add_argument(

@@ -1,6 +1,7 @@
 """Test script for the protocol registry system."""
 
 import pytest
+from typing import Any
 from dataclasses import dataclass
 
 from lczero_training.protocol.registry import (
@@ -11,7 +12,7 @@ from lczero_training.protocol.registry import (
 
 
 @pytest.fixture(autouse=True)
-def clear_registry():
+def clear_registry() -> Any:
     """Clear registry maps before each test."""
     TYPE_TO_CLASS_MAP.clear()
     CLASS_TO_TYPE_MAP.clear()
@@ -20,7 +21,7 @@ def clear_registry():
     CLASS_TO_TYPE_MAP.clear()
 
 
-def test_basic_registration():
+def test_basic_registration() -> None:
     """Test basic event type registration."""
 
     @register("test_event")
@@ -34,7 +35,7 @@ def test_basic_registration():
     assert CLASS_TO_TYPE_MAP[BasicPayload] == "test_event"
 
 
-def test_duplicate_event_type():
+def test_duplicate_event_type() -> None:
     """Test that duplicate event types are rejected."""
 
     @register("duplicate_event")
@@ -52,7 +53,7 @@ def test_duplicate_event_type():
             other_data: int
 
 
-def test_duplicate_class():
+def test_duplicate_class() -> None:
     """Test that duplicate classes are rejected."""
 
     @dataclass
@@ -69,16 +70,16 @@ def test_duplicate_class():
         register("second_event")(PayloadClass)
 
 
-def test_non_class_registration():
+def test_non_class_registration() -> None:
     """Test that non-classes are rejected."""
     with pytest.raises(TypeError, match=r".*can only be used on classes.*"):
         # Try to register a string instead of a class
-        @register("invalid_event")
-        def not_a_class():
+        @register("invalid_event")  # type: ignore[arg-type]
+        def not_a_class() -> None:
             pass
 
 
-def test_multiple_registrations():
+def test_multiple_registrations() -> None:
     """Test multiple valid registrations work correctly."""
 
     @register("event_one")
@@ -110,7 +111,7 @@ def test_multiple_registrations():
     assert len(CLASS_TO_TYPE_MAP) == 3
 
 
-def test_registry_persistence():
+def test_registry_persistence() -> None:
     """Test that registry persists across imports."""
 
     @register("persistent_event")

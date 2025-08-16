@@ -18,7 +18,7 @@ from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
 class TrainingDaemon:
     _data_loader: DataLoader | None = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._setup_logging()
         self._communicator = Communicator(self, sys.stdin, sys.stdout)
         self._communicator_thread = threading.Thread(
@@ -30,7 +30,7 @@ class TrainingDaemon:
         )
         self._async_thread.start()
 
-    def _setup_logging(self):
+    def _setup_logging(self) -> None:
         logging.basicConfig(
             level=logging.INFO,
             format=(
@@ -42,11 +42,11 @@ class TrainingDaemon:
         )
         logging.info("TrainingDaemon starting up")
 
-    async def _metrics_main(self):
+    async def _metrics_main(self) -> None:
         async with anyio.create_task_group() as tg:
             tg.start_soon(self._metrics_task)
 
-    async def _metrics_task(self):
+    async def _metrics_task(self) -> None:
         while True:
             await anyio.sleep(1.1)
 
@@ -68,13 +68,13 @@ class TrainingDaemon:
             )
             self._communicator.send(payload)
 
-    def run(self):
+    def run(self) -> None:
         while self._data_loader is None:
             time.sleep(0.1)
         while True:
             self._data_loader.get_next()
 
-    def on_start_training(self, payload: StartTrainingPayload):
+    def on_start_training(self, payload: StartTrainingPayload) -> None:
         assert self._data_loader is None, "DataLoader already exists"
 
         config_path = Path(payload.config_filepath)

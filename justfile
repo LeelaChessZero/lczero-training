@@ -28,7 +28,7 @@ build-proto:
 check-python:
     uv run ruff check src/ --exclude src/lczero_training/proto
     uv run ruff format --check src/ --exclude src/lczero_training/proto
-    uv run mypy -p lczero_training
+    uv run mypy -p lczero_training --disallow-untyped-defs --disallow-incomplete-defs
 
 # Format all Python files in src/ using ruff
 format-python:

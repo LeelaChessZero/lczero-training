@@ -3,7 +3,7 @@
 
 import json
 from dataclasses import is_dataclass
-from typing import get_origin, get_args, Union
+from typing import get_origin, get_args, Union, Any, TextIO
 import types
 
 import anyio
@@ -14,7 +14,7 @@ from google.protobuf.message import Message
 from .registry import TYPE_TO_CLASS_MAP, CLASS_TO_TYPE_MAP
 
 
-def _to_serializable(obj):
+def _to_serializable(obj: Any) -> Any:
     """Convert dataclass/protobuf objects to JSON-serializable dicts."""
     if isinstance(obj, Message):
         return MessageToDict(
@@ -34,7 +34,7 @@ def _to_serializable(obj):
         return obj
 
 
-def _unwrap_optional(t):
+def _unwrap_optional(t: Any) -> Any:
     """Extract T from T | None or Union[T, None]."""
     if isinstance(t, types.UnionType) or get_origin(t) is Union:
         args = [a for a in get_args(t) if a is not type(None)]
@@ -42,7 +42,7 @@ def _unwrap_optional(t):
     return t
 
 
-def _is_protobuf(cls):
+def _is_protobuf(cls: type) -> bool:
     """Check if cls is a protobuf Message class."""
     try:
         return isinstance(cls, type) and issubclass(cls, Message)
@@ -50,7 +50,7 @@ def _is_protobuf(cls):
         return False
 
 
-def _from_serializable(cls, data):
+def _from_serializable(cls: type, data: Any) -> Any:
     """Reconstruct dataclass/protobuf from dict."""
     if _is_protobuf(cls):
         instance = cls()
@@ -81,7 +81,9 @@ def _from_serializable(cls, data):
 
 
 class Communicator:
-    def __init__(self, handler, input_stream, output_stream):
+    def __init__(
+        self, handler: Any, input_stream: TextIO, output_stream: TextIO
+    ) -> None:
         """
         Initializes the Communicator.
 
@@ -94,7 +96,7 @@ class Communicator:
         self.input = input_stream
         self.output = output_stream
 
-    def send(self, payload_instance):
+    def send(self, payload_instance: Any) -> None:
         """
         Serializes and sends a payload object as a notification.
         The event type is automatically looked up from the registry.
@@ -114,7 +116,7 @@ class Communicator:
         self.output.write("\n")
         self.output.flush()
 
-    def run(self):
+    def run(self) -> None:
         """
         Starts the blocking listener loop.
         Reads from the input stream line-by-line, deserializes notifications,
@@ -143,10 +145,10 @@ class Communicator:
 class AsyncCommunicator:
     def __init__(
         self,
-        handler,
+        handler: Any,
         input_stream: TextReceiveStream,
         output_stream: TextSendStream,
-    ):
+    ) -> None:
         """
         Initializes the AsyncCommunicator.
 
@@ -159,7 +161,7 @@ class AsyncCommunicator:
         self.input_stream = input_stream
         self.output_stream = output_stream
 
-    async def send(self, payload_instance):
+    async def send(self, payload_instance: Any) -> None:
         """
         Serializes and sends a payload object as a notification.
         The event type is automatically looked up from the registry.
@@ -178,7 +180,7 @@ class AsyncCommunicator:
         message_line = json.dumps(message) + "\n"
         await self.output_stream.send(message_line)
 
-    async def run(self):
+    async def run(self) -> None:
         """
         Starts the async listener loop.
         Reads from the input stream line-by-line, deserializes notifications,
