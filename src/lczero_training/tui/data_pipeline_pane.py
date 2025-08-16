@@ -3,6 +3,7 @@
 
 from textual.app import ComposeResult
 from textual.widgets import Static
+
 from ..proto import training_metrics_pb2
 
 

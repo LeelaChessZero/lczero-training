@@ -27,11 +27,13 @@ build-proto:
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
     uv run ruff check src/ --exclude src/lczero_training/proto
+    uv run ruff check --select I src/ --exclude src/lczero_training/proto
     uv run ruff format --check src/ --exclude src/lczero_training/proto
     uv run mypy -p lczero_training --disallow-untyped-defs --disallow-incomplete-defs
 
 # Format all Python files in src/ using ruff
 format-python:
+    uv run ruff check --fix --select I src/ --exclude src/lczero_training/proto
     uv run ruff format src/ --exclude src/lczero_training/proto
     uv run ruff check --fix src/ --exclude src/lczero_training/proto
 

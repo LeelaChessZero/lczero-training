@@ -1,8 +1,9 @@
 """Test script for the DataLoader implementation."""
 
-from lczero_training._lczero_training import DataLoader
-import lczero_training.proto.training_config_pb2 as config_pb2
 from pathlib import Path
+
+import lczero_training.proto.training_config_pb2 as config_pb2
+from lczero_training._lczero_training import DataLoader
 
 
 def test_dataloader_initialization() -> None:

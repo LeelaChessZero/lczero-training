@@ -1,7 +1,8 @@
 # ABOUTME: Type stubs for C++ DataLoader PyBind11 bindings.
 # ABOUTME: Provides type annotations for _lczero_training compiled module.
 
-from typing import Tuple, List
+from typing import List, Tuple
+
 import numpy as np
 
 class TensorBase:

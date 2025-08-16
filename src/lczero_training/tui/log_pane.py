@@ -1,4 +1,5 @@
 from typing import Any
+
 from anyio.streams.text import TextReceiveStream
 from textual.widgets import RichLog
 

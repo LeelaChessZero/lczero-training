@@ -1,13 +1,14 @@
 """Test script for the protocol registry system."""
 
-import pytest
-from typing import Any
 from dataclasses import dataclass
+from typing import Any
+
+import pytest
 
 from lczero_training.protocol.registry import (
-    register,
-    TYPE_TO_CLASS_MAP,
     CLASS_TO_TYPE_MAP,
+    TYPE_TO_CLASS_MAP,
+    register,
 )
 
 
@@ -121,10 +122,10 @@ def test_registry_persistence() -> None:
 
     # Re-import the module
     from lczero_training.protocol.registry import (
-        TYPE_TO_CLASS_MAP as imported_type_map,
+        CLASS_TO_TYPE_MAP as imported_class_map,
     )
     from lczero_training.protocol.registry import (
-        CLASS_TO_TYPE_MAP as imported_class_map,
+        TYPE_TO_CLASS_MAP as imported_type_map,
     )
 
     # Check the registration persists

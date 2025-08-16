@@ -9,13 +9,13 @@ import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static, Footer
 from textual.css.query import NoMatches
+from textual.widgets import Footer, Static
 
-from .log_pane import StreamingLogPane
-from .data_pipeline_pane import DataPipelinePane
 from ..protocol.communicator import AsyncCommunicator
 from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
+from .data_pipeline_pane import DataPipelinePane
+from .log_pane import StreamingLogPane
 
 
 class HeaderBar(Static):

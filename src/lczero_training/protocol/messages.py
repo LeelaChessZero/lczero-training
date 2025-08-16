@@ -2,6 +2,7 @@
 # ABOUTME: Defines minimal event types for training daemon communication.
 
 from dataclasses import dataclass
+
 from ..proto import training_metrics_pb2
 from .registry import register
 

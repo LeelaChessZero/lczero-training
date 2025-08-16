@@ -3,8 +3,7 @@
 
 def test_protobuf_import() -> None:
     """Test that protobuf files can be imported."""
-    from lczero_training.proto import training_config_pb2
-    from lczero_training.proto import training_metrics_pb2
+    from lczero_training.proto import training_config_pb2, training_metrics_pb2
 
     # Test creating config objects
     config = training_config_pb2.DataLoaderConfig()

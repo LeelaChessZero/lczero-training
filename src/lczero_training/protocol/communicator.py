@@ -2,16 +2,16 @@
 # ABOUTME: Handles serialization/deserialization and message dispatch via stdin/stdout.
 
 import json
-from dataclasses import is_dataclass
-from typing import get_origin, get_args, Union, Any, TextIO
 import types
+from dataclasses import is_dataclass
+from typing import Any, TextIO, Union, get_args, get_origin
 
 import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.message import Message
 
-from .registry import TYPE_TO_CLASS_MAP, CLASS_TO_TYPE_MAP
+from .registry import CLASS_TO_TYPE_MAP, TYPE_TO_CLASS_MAP
 
 
 def _to_serializable(obj: Any) -> Any:

@@ -3,7 +3,9 @@
 # ABOUTME: Launches the TUI application by default.
 
 import argparse
+
 import anyio
+
 from .tui.app import TrainingTuiApp
 
 
