@@ -87,6 +87,10 @@ class Queue {
   // Wait until queue has at most the specified number of elements.
   void WaitForSizeAtMost(size_t size);
 
+  // Returns the total number of elements that have been put into the queue.
+  // If reset is true, resets the counter to 0 after returning the value.
+  size_t GetTotalPutCount(bool reset = false);
+
  private:
   friend class Producer;
 
@@ -97,6 +101,7 @@ class Queue {
   size_t size_ ABSL_GUARDED_BY(mutex_) = 0;
   size_t producer_count_ ABSL_GUARDED_BY(mutex_) = 0;
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
+  size_t total_put_count_ ABSL_GUARDED_BY(mutex_) = 0;
 
   mutable absl::Mutex mutex_;
 
@@ -208,6 +213,7 @@ void Queue<T>::PutInternal(const T& item) {
   buffer_[tail_] = item;
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
+  ++total_put_count_;
 }
 
 template <typename T>
@@ -218,6 +224,7 @@ void Queue<T>::PutInternal(T&& item) {
   buffer_[tail_] = std::move(item);
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
+  ++total_put_count_;
 }
 
 template <typename T>
@@ -241,6 +248,7 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
       tail_ = (tail_ + 1) % capacity_;
       ++size_;
     }
+    total_put_count_ += batch_size;
 
     offset += batch_size;
     remaining -= batch_size;
@@ -268,6 +276,7 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
       tail_ = (tail_ + 1) % capacity_;
       ++size_;
     }
+    total_put_count_ += batch_size;
 
     offset += batch_size;
     remaining -= batch_size;
@@ -429,6 +438,16 @@ template <typename T>
 bool Queue<T>::HasSizeAtMost(size_t size)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
   return size_ <= size;
+}
+
+template <typename T>
+size_t Queue<T>::GetTotalPutCount(bool reset) {
+  absl::MutexLock lock(&mutex_);
+  size_t count = total_put_count_;
+  if (reset) {
+    total_put_count_ = 0;
+  }
+  return count;
 }
 
 }  // namespace lczero

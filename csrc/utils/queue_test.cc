@@ -1020,4 +1020,159 @@ TEST_F(QueueTest, GradualOperationsWithQueueClosure) {
   // but we can't predict exactly how many due to timing
 }
 
+// Tests for total put count functionality
+
+TEST_F(QueueTest, GetTotalPutCountBasic) {
+  Queue<int> queue(5);
+  EXPECT_EQ(queue.GetTotalPutCount(), 0);
+
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(1);
+    EXPECT_EQ(queue.GetTotalPutCount(), 1);
+
+    producer.Put(2);
+    producer.Put(3);
+    EXPECT_EQ(queue.GetTotalPutCount(), 3);
+  }
+
+  // Count should persist after producer destruction
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+
+  // Count should persist after getting items
+  queue.Get();
+  queue.Get();
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+}
+
+TEST_F(QueueTest, GetTotalPutCountBatch) {
+  Queue<int> queue(10);
+  auto producer = queue.CreateProducer();
+
+  std::vector<int> batch1 = {1, 2, 3};
+  std::vector<int> batch2 = {4, 5};
+
+  producer.Put(absl::Span<const int>(batch1));
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+
+  producer.Put(absl::Span<const int>(batch2));
+  EXPECT_EQ(queue.GetTotalPutCount(), 5);
+
+  // Single put after batch
+  producer.Put(6);
+  EXPECT_EQ(queue.GetTotalPutCount(), 6);
+}
+
+TEST_F(QueueTest, GetTotalPutCountReset) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+
+  // Reset and verify return value
+  EXPECT_EQ(queue.GetTotalPutCount(true), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 0);
+
+  // Add more items
+  producer.Put(4);
+  EXPECT_EQ(queue.GetTotalPutCount(), 1);
+
+  // Non-reset call should not affect counter
+  EXPECT_EQ(queue.GetTotalPutCount(false), 1);
+  EXPECT_EQ(queue.GetTotalPutCount(), 1);
+}
+
+TEST_F(QueueTest, GetTotalPutCountThreadSafe) {
+  Queue<int> queue(50);  // Large capacity to avoid blocking
+  constexpr int items_per_thread = 10;
+  constexpr int num_threads = 2;
+
+  std::vector<std::thread> threads;
+  std::vector<Queue<int>::Producer> producers;
+
+  // Create producers for each thread
+  for (int t = 0; t < num_threads; ++t) {
+    producers.push_back(queue.CreateProducer());
+  }
+
+  for (int t = 0; t < num_threads; ++t) {
+    threads.emplace_back([&producers, items_per_thread, t]() {
+      for (int i = 0; i < items_per_thread; ++i) {
+        producers[t].Put(t * items_per_thread + i);
+      }
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_EQ(queue.GetTotalPutCount(), items_per_thread * num_threads);
+}
+
+TEST_F(QueueTest, GetTotalPutCountBatchThreadSafe) {
+  Queue<int> queue(100);  // Large capacity to avoid blocking
+
+  std::vector<std::thread> threads;
+  std::vector<Queue<int>::Producer> producers;
+
+  // Create producers for each thread
+  for (int t = 0; t < 2; ++t) {
+    producers.push_back(queue.CreateProducer());
+  }
+
+  for (int t = 0; t < 2; ++t) {
+    threads.emplace_back([&producers, t]() {
+      std::vector<int> batch;
+      int batch_size = (t + 1) * 5;  // 5, 10 items
+      for (int i = 0; i < batch_size; ++i) {
+        batch.push_back(t * 100 + i);
+      }
+      producers[t].Put(absl::Span<const int>(batch));
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_EQ(queue.GetTotalPutCount(), 15);  // 5 + 10
+}
+
+TEST_F(QueueTest, GetTotalPutCountWithMoveSemantics) {
+  Queue<std::unique_ptr<int>> queue(5);
+  auto producer = queue.CreateProducer();
+
+  // Single move put
+  auto ptr1 = std::make_unique<int>(42);
+  producer.Put(std::move(ptr1));
+  EXPECT_EQ(queue.GetTotalPutCount(), 1);
+
+  // Batch move put
+  std::vector<std::unique_ptr<int>> batch;
+  for (int i = 0; i < 3; ++i) {
+    batch.push_back(std::make_unique<int>(i));
+  }
+  producer.Put(absl::Span<std::unique_ptr<int>>(batch));
+  EXPECT_EQ(queue.GetTotalPutCount(), 4);
+}
+
+TEST_F(QueueTest, GetTotalPutCountEmptyBatch) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  std::vector<int> empty_batch;
+  producer.Put(absl::Span<const int>(empty_batch));
+  EXPECT_EQ(queue.GetTotalPutCount(), 0);
+
+  producer.Put(1);
+  EXPECT_EQ(queue.GetTotalPutCount(), 1);
+
+  producer.Put(absl::Span<const int>(empty_batch));
+  EXPECT_EQ(queue.GetTotalPutCount(), 1);
+}
+
 }  // namespace lczero
