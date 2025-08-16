@@ -6,13 +6,14 @@ import sys
 import time
 
 import anyio
-from anyio.streams.text import TextReceiveStream
+from anyio.streams.text import TextReceiveStream, TextSendStream
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
 from textual.css.query import NoMatches
 
 from .log_pane import StreamingLogPane
+from ..protocol.communicator import AsyncCommunicator
 
 
 class HeaderBar(Static):
@@ -86,6 +87,7 @@ class TrainingTuiApp(App):
 
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
+    _communicator: AsyncCommunicator
 
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -96,9 +98,15 @@ class TrainingTuiApp(App):
         """Initialize the TUI app with an already-created daemon process."""
         super().__init__()
         self._daemon_process = daemon_process
-        if daemon_process.stderr is None:
-            raise RuntimeError("Failed to capture daemon stderr")
+        assert daemon_process.stderr is not None
+        assert daemon_process.stdin is not None
+        assert daemon_process.stdout is not None
         self._log_stream = TextReceiveStream(daemon_process.stderr)
+        self._communicator = AsyncCommunicator(
+            handler=self,
+            input_stream=TextReceiveStream(daemon_process.stdout),
+            output_stream=TextSendStream(daemon_process.stdin),
+        )
 
     @classmethod
     async def create(cls) -> "TrainingTuiApp":
@@ -122,6 +130,11 @@ class TrainingTuiApp(App):
 
             yield StreamingLogPane(stream=self._log_stream)
 
+    def on_mount(self) -> None:
+        """Start the communicator when the app mounts."""
+        self.run_worker(self._communicator.run(), exclusive=True)
+
     def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
+        self._daemon_process.terminate()
         self.exit()
