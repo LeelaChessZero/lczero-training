@@ -14,7 +14,7 @@ from textual.css.query import NoMatches
 
 from .log_pane import StreamingLogPane
 from ..protocol.communicator import AsyncCommunicator
-from ..protocol.messages import StartTrainingPayload
+from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
 
 
 class HeaderBar(Static):
@@ -150,3 +150,7 @@ class TrainingTuiApp(App):
         """Handle quit action."""
         self._daemon_process.terminate()
         self.exit()
+
+    async def on_training_status(self, payload: TrainingStatusPayload) -> None:
+        """Handle training status updates."""
+        pass

@@ -167,4 +167,4 @@ class AsyncCommunicator:
                 handler_method_name = f"on_{event_type}"
                 handler_method = getattr(self.handler, handler_method_name)
 
-                task_group.start_task(handler_method, payload_instance)
+                task_group.start_soon(handler_method, payload_instance)
