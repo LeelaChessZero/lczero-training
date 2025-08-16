@@ -59,26 +59,22 @@ PYBIND11_MODULE(_lczero_training, m) {
       .def(
           "get_next",
           [](DataLoader& self) {
-            TensorTuple tensors;
-            {
-              py::gil_scoped_release release;  // Release GIL
-              tensors = self.GetNext();        // Blocking call
-            }  // GIL automatically reacquired here
-            return tensor_tuple_to_numpy_tuple(std::move(tensors));
+            py::gil_scoped_release release;
+            return tensor_tuple_to_numpy_tuple(self.GetNext());
           },
           "Get next batch of tensors as tuple of numpy arrays")
       .def(
           "get_1_second_stats",
           [](const DataLoader& self) {
-            std::string stat_string = self.Get1SecondStats();
-            return py::bytes(stat_string);
+            py::gil_scoped_release release;
+            return py::bytes(self.Get1SecondStats());
           },
           "Get serialized metrics for last completed 1-second bucket as bytes")
       .def(
           "get_total_stats",
           [](const DataLoader& self) {
-            std::string stat_string = self.GetTotalStats();
-            return py::bytes(stat_string);
+            py::gil_scoped_release release;
+            return py::bytes(self.GetTotalStats());
           },
           "Get serialized metrics for all time as bytes");
 
