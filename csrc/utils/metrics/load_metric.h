@@ -19,20 +19,26 @@ class LoadMetricUpdater {
   using Duration = std::chrono::duration<double>;
 
   explicit LoadMetricUpdater(Clock::time_point initial_time = Clock::now())
-      : last_flush_time_(initial_time), is_load_active_(false) {}
+      : last_flush_time_(initial_time), is_load_active_(true) {}
 
   // Starts tracking load from the given time point.
-  void LoadStart(Clock::time_point now = Clock::now()) {
+  // Returns true if load was previously stopped (successful start).
+  bool LoadStart(Clock::time_point now = Clock::now()) {
     absl::MutexLock lock(&mutex_);
     FlushInternal(now);
+    bool was_stopped = !is_load_active_;
     is_load_active_ = true;
+    return was_stopped;
   }
 
   // Stops tracking load at the given time point.
-  void LoadStop(Clock::time_point now = Clock::now()) {
+  // Returns true if load was previously active (successful stop).
+  bool LoadStop(Clock::time_point now = Clock::now()) {
     absl::MutexLock lock(&mutex_);
     FlushInternal(now);
+    bool was_active = is_load_active_;
     is_load_active_ = false;
+    return was_active;
   }
 
   // Flushes any uncounted load time into the metric.
@@ -77,5 +83,32 @@ inline void UpdateFrom(training::LoadMetricProto& dest,
   dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
   dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }
+
+// RAII class to temporarily pause load tracking.
+class LoadMetricPauser {
+ public:
+  explicit LoadMetricPauser(LoadMetricUpdater& updater) : updater_(updater) {
+    successfully_paused_ = updater_.LoadStop();
+  }
+
+  ~LoadMetricPauser() {
+    if (successfully_paused_ && should_resume_) {
+      updater_.LoadStart();
+    }
+  }
+
+  // Prevents the pauser from resuming load tracking in destructor.
+  void DoNotResume() { should_resume_ = false; }
+
+  LoadMetricPauser(const LoadMetricPauser&) = delete;
+  LoadMetricPauser& operator=(const LoadMetricPauser&) = delete;
+  LoadMetricPauser(LoadMetricPauser&&) = delete;
+  LoadMetricPauser& operator=(LoadMetricPauser&&) = delete;
+
+ private:
+  LoadMetricUpdater& updater_;
+  bool successfully_paused_;
+  bool should_resume_ = true;
+};
 
 }  // namespace lczero

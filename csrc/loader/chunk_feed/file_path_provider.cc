@@ -205,7 +205,6 @@ void FilePathProvider::RemoveWatchRecursive(const Path& base) {
 }
 
 void FilePathProvider::MonitorThread() {
-  load_metric_updater_.LoadStart();
   // Perform directory scanning in background thread
   AddDirectory(directory_);
 
@@ -220,12 +219,14 @@ void FilePathProvider::MonitorThread() {
       << "Failed to add inotify fd to epoll";
 
   while (true) {
-    load_metric_updater_.LoadStop();
-    if (stop_condition_.WaitForNotificationWithTimeout(
-            absl::Milliseconds(50))) {
-      break;  // Exit if stop condition is notified
+    {
+      LoadMetricPauser pauser(load_metric_updater_);
+      if (stop_condition_.WaitForNotificationWithTimeout(
+              absl::Milliseconds(50))) {
+        pauser.DoNotResume();
+        break;  // Exit if stop condition is notified
+      }
     }
-    load_metric_updater_.LoadStart();
 
     struct epoll_event event;
     int nfds = epoll_wait(epoll_fd, &event, 1, 0);  // Non-blocking check

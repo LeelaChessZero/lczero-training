@@ -167,31 +167,34 @@ TEST_F(LoadMetricTest, LoadUtilizationTracking) {
   LoadMetricUpdater updater(start_time_);
   auto now = start_time_;
 
-  // Start with some idle time before any load
+  // Start with some load time (load is active by default now)
   now += std::chrono::milliseconds(100);
-  updater.LoadStart(now);
+  updater.LoadStop(now);  // Stop load to create idle time
   LoadMetricProto metric = updater.FlushMetrics(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.0, 1e-6);
-  EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);  // 100ms idle
+  EXPECT_NEAR(metric.load_seconds(), 0.1, 1e-6);   // 100ms load
+  EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);  // 100ms total
 
-  // Add some load time
-  now += std::chrono::milliseconds(200);
-  updater.LoadStop(now);
-  metric = updater.FlushMetrics(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);  // 200ms load
-  EXPECT_NEAR(metric.total_seconds(), 0.2,
-              1e-6);  // 200ms total (after flush reset)
-
-  // Add more idle time
+  // Add some idle time (load is stopped)
   now += std::chrono::milliseconds(100);
-  updater.Flush(now);
+  updater.LoadStart(now);  // Start load again
   metric = updater.FlushMetrics(now);
   EXPECT_NEAR(metric.load_seconds(), 0.0, 1e-6);   // No load time
   EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);  // 100ms idle
 
+  // Add more load time
+  now += std::chrono::milliseconds(200);
+  updater.LoadStop(now);
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);   // 200ms load
+  EXPECT_NEAR(metric.total_seconds(), 0.2, 1e-6);  // 200ms total
+
   // Test complete utilization tracking with one updater
   LoadMetricUpdater total_updater(start_time_);
   auto total_now = start_time_;
+
+  // 100ms load (active by default)
+  total_now += std::chrono::milliseconds(100);
+  total_updater.LoadStop(total_now);
 
   // 100ms idle
   total_now += std::chrono::milliseconds(100);
@@ -199,17 +202,13 @@ TEST_F(LoadMetricTest, LoadUtilizationTracking) {
 
   // 200ms load
   total_now += std::chrono::milliseconds(200);
-  total_updater.LoadStop(total_now);
-
-  // 100ms idle
-  total_now += std::chrono::milliseconds(100);
   LoadMetricProto total_metric = total_updater.FlushMetrics(total_now);
 
   // Calculate utilization
   double utilization =
       total_metric.load_seconds() / total_metric.total_seconds();
-  EXPECT_NEAR(utilization, 0.5,
-              1e-6);  // 50% utilization (200ms load / 400ms total)
+  EXPECT_NEAR(utilization, 0.75,
+              1e-6);  // 75% utilization (300ms load / 400ms total)
 }
 
 class LoadMetricProtoIntegrationTest : public ::testing::Test {
@@ -296,6 +295,25 @@ TEST_F(LoadMetricProtoIntegrationTest, AdvanceTest) {
   auto [live_metrics, age] = aggregator_->GetAggregateEndingNow(
       TestAggregator::Duration::zero(), tick_time);
   EXPECT_EQ(live_metrics.load_seconds(), 0.0);
+}
+
+TEST_F(LoadMetricTest, LoadStartStopReturnValues) {
+  LoadMetricUpdater updater(start_time_);
+
+  // Load starts active, so LoadStart should return false (already active)
+  EXPECT_FALSE(updater.LoadStart());
+
+  // LoadStop should return true (was active)
+  EXPECT_TRUE(updater.LoadStop());
+
+  // LoadStop again should return false (already stopped)
+  EXPECT_FALSE(updater.LoadStop());
+
+  // LoadStart should return true (was stopped)
+  EXPECT_TRUE(updater.LoadStart());
+
+  // LoadStart again should return false (already active)
+  EXPECT_FALSE(updater.LoadStart());
 }
 
 }  // namespace training
