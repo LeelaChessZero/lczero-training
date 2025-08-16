@@ -13,6 +13,7 @@ from textual.widgets import Static, Footer
 from textual.css.query import NoMatches
 
 from .log_pane import StreamingLogPane
+from .data_pipeline_pane import DataPipelinePane
 from ..protocol.communicator import AsyncCommunicator
 from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
 
@@ -49,19 +50,6 @@ class HeaderBar(Static):
             pass
 
 
-class DataPipelinePane(Static):
-    """Main pane showing data pipeline flow and statistics."""
-
-    def compose(self) -> ComposeResult:
-        yield Static(
-            "Data Pipeline\n\n"
-            "Pipeline stages will be displayed here:\n"
-            "• FilePathProvider\n• ShufflingChunkPool\n"
-            "• ChunkValidator\n• Stream Splitter",
-            classes="pipeline-content",
-        )
-
-
 class TrainingStatusPane(Static):
     """Right pane showing JAX training status and metrics."""
 
@@ -90,6 +78,7 @@ class TrainingTuiApp(App):
     _daemon_process: anyio.abc.Process
     _communicator: AsyncCommunicator
     _config_file: str
+    _data_pipeline_pane: DataPipelinePane
 
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -129,7 +118,8 @@ class TrainingTuiApp(App):
 
         with Vertical(id="content"):
             with Horizontal(id="main-content"):
-                yield DataPipelinePane()
+                self._data_pipeline_pane = DataPipelinePane()
+                yield self._data_pipeline_pane
                 yield TrainingStatusPane()
 
             yield StreamingLogPane(stream=self._log_stream)
@@ -153,4 +143,6 @@ class TrainingTuiApp(App):
 
     async def on_training_status(self, payload: TrainingStatusPayload) -> None:
         """Handle training status updates."""
-        pass
+        self._data_pipeline_pane.update_metrics(
+            payload.metrics_1_second, payload.metrics_total
+        )

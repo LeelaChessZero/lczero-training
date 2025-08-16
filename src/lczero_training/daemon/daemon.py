@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 import anyio
 from google.protobuf import text_format
-from google.protobuf.json_format import MessageToDict
 from lczero_training._lczero_training import DataLoader
 import lczero_training.proto.training_config_pb2 as config_pb2
 from lczero_training.proto import training_metrics_pb2
@@ -58,17 +57,11 @@ class TrainingDaemon:
                 stats_1_second_bytes = self._data_loader.get_1_second_stats()
                 stats_total_bytes = self._data_loader.get_total_stats()
 
-                stats_1_second_proto = (
-                    training_metrics_pb2.DataLoaderMetricsProto()
-                )
-                stats_1_second_proto.ParseFromString(stats_1_second_bytes)
-                metrics_1_second = MessageToDict(stats_1_second_proto)
+                metrics_1_second = training_metrics_pb2.DataLoaderMetricsProto()
+                metrics_1_second.ParseFromString(stats_1_second_bytes)
 
-                stats_total_proto = (
-                    training_metrics_pb2.DataLoaderMetricsProto()
-                )
-                stats_total_proto.ParseFromString(stats_total_bytes)
-                metrics_total = MessageToDict(stats_total_proto)
+                metrics_total = training_metrics_pb2.DataLoaderMetricsProto()
+                metrics_total.ParseFromString(stats_total_bytes)
 
             payload = TrainingStatusPayload(
                 metrics_1_second=metrics_1_second, metrics_total=metrics_total

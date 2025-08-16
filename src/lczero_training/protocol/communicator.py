@@ -2,47 +2,82 @@
 # ABOUTME: Handles serialization/deserialization and message dispatch via stdin/stdout.
 
 import json
-from dataclasses import is_dataclass, asdict
-from typing import get_origin, get_args
+from dataclasses import is_dataclass
+from typing import get_origin, get_args, Union
+import types
 
 import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
+from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.message import Message
 
 from .registry import TYPE_TO_CLASS_MAP, CLASS_TO_TYPE_MAP
 
 
-def _from_dict(cls, data):
-    """
-    Recursively constructs a dataclass instance from a dictionary.
-    Handles nested dataclasses and lists of dataclasses.
-    """
+def _to_serializable(obj):
+    """Convert dataclass/protobuf objects to JSON-serializable dicts."""
+    if isinstance(obj, Message):
+        return MessageToDict(
+            obj, preserving_proto_field_name=True, use_integers_for_enums=True
+        )
+    elif is_dataclass(obj):
+        return {
+            f.name: _to_serializable(getattr(obj, f.name))
+            for f in obj.__dataclass_fields__.values()
+            if getattr(obj, f.name) is not None
+        }
+    elif isinstance(obj, (list, tuple)):
+        return [_to_serializable(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {k: _to_serializable(v) for k, v in obj.items()}
+    else:
+        return obj
+
+
+def _unwrap_optional(t):
+    """Extract T from T | None or Union[T, None]."""
+    if isinstance(t, types.UnionType) or get_origin(t) is Union:
+        args = [a for a in get_args(t) if a is not type(None)]
+        return args[0] if len(args) == 1 else t
+    return t
+
+
+def _is_protobuf(cls):
+    """Check if cls is a protobuf Message class."""
+    try:
+        return isinstance(cls, type) and issubclass(cls, Message)
+    except TypeError:
+        return False
+
+
+def _from_serializable(cls, data):
+    """Reconstruct dataclass/protobuf from dict."""
+    if _is_protobuf(cls):
+        instance = cls()
+        ParseDict(data, instance)
+        return instance
+
     if not is_dataclass(cls):
         return data
 
-    constructor_args = {}
+    args = {}
     for field in cls.__dataclass_fields__.values():
-        field_value = data.get(field.name)
-        if field_value is None:
+        if field.name not in data:
             continue
 
-        # Handle lists of dataclasses
-        origin_type = get_origin(field.type)
-        if origin_type is list or origin_type is list:
-            list_item_type = get_args(field.type)[0]
-            if is_dataclass(list_item_type):
-                constructor_args[field.name] = [
-                    _from_dict(list_item_type, item) for item in field_value
-                ]
-            else:
-                constructor_args[field.name] = field_value
-        # Handle nested dataclasses
-        elif is_dataclass(field.type):
-            constructor_args[field.name] = _from_dict(field.type, field_value)
-        # Handle primitives, dicts, etc.
-        else:
-            constructor_args[field.name] = field_value
+        value = data[field.name]
+        field_type = _unwrap_optional(field.type)
 
-    return cls(**constructor_args)
+        if get_origin(field_type) is list:
+            item_type = get_args(field_type)[0]
+            if is_dataclass(item_type) or _is_protobuf(item_type):
+                value = [_from_serializable(item_type, item) for item in value]
+        elif is_dataclass(field_type) or _is_protobuf(field_type):
+            value = _from_serializable(field_type, value)
+
+        args[field.name] = value
+
+    return cls(**args)
 
 
 class Communicator:
@@ -72,7 +107,7 @@ class Communicator:
                 f"Object of type {payload_cls.__name__} is not a registered payload."
             )
 
-        payload_dict = asdict(payload_instance)
+        payload_dict = _to_serializable(payload_instance)
         message = {"type": event_type, "payload": payload_dict}
 
         json.dump(message, self.output)
@@ -97,7 +132,7 @@ class Communicator:
             payload_dict = data["payload"]
 
             payload_cls = TYPE_TO_CLASS_MAP[event_type]
-            payload_instance = _from_dict(payload_cls, payload_dict)
+            payload_instance = _from_serializable(payload_cls, payload_dict)
 
             handler_method_name = f"on_{event_type}"
             handler_method = getattr(self.handler, handler_method_name)
@@ -137,7 +172,7 @@ class AsyncCommunicator:
                 f"Object of type {payload_cls.__name__} is not a registered payload."
             )
 
-        payload_dict = asdict(payload_instance)
+        payload_dict = _to_serializable(payload_instance)
         message = {"type": event_type, "payload": payload_dict}
 
         message_line = json.dumps(message) + "\n"
@@ -162,7 +197,7 @@ class AsyncCommunicator:
                 payload_dict = data["payload"]
 
                 payload_cls = TYPE_TO_CLASS_MAP[event_type]
-                payload_instance = _from_dict(payload_cls, payload_dict)
+                payload_instance = _from_serializable(payload_cls, payload_dict)
 
                 handler_method_name = f"on_{event_type}"
                 handler_method = getattr(self.handler, handler_method_name)

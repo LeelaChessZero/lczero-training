@@ -22,6 +22,9 @@ in the `builddir/`.
   * When debugging, don't forget to build them before running `meson test` or
     `builddir/test`
 * Run tests: `meson test -C builddir/`
+* Python tests use `pytest` framework
+  * Do not add custom main function, exception catching to report errors, any
+    "test passed" messages etc. Use `pytest` fixtures and assertions.
 * Build: `meson compile -C builddir/` from build directory
 * Format code: `just format`
 * There is a commit hook that runs `just pre-commit`, which runs tests and

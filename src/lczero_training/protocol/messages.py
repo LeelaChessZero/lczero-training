@@ -2,6 +2,7 @@
 # ABOUTME: Defines minimal event types for training daemon communication.
 
 from dataclasses import dataclass
+from ..proto import training_metrics_pb2
 from .registry import register
 
 # --- Notifications from UI (Parent) to Trainer (Child) ---
@@ -19,5 +20,5 @@ class StartTrainingPayload:
 @register("training_status")
 @dataclass
 class TrainingStatusPayload:
-    metrics_1_second: dict | None = None
-    metrics_total: dict | None = None
+    metrics_1_second: training_metrics_pb2.DataLoaderMetricsProto | None = None
+    metrics_total: training_metrics_pb2.DataLoaderMetricsProto | None = None
