@@ -25,11 +25,12 @@ TEST_F(LoadMetricTest, BasicLoadMetricProto) {
   EXPECT_EQ(metric.load_seconds(), 0.0);
   EXPECT_EQ(metric.total_seconds(), 0.0);
 
-  // Test UpdateFrom (used to be UpdateFrom)
-  LoadMetricProto other;
-  LoadMetricUpdater other_updater(&other, start_time_);
+  // Test UpdateFrom with LoadMetricUpdater
+  LoadMetricUpdater other_updater(start_time_);
   other_updater.LoadStart(start_time_);
   other_updater.LoadStop(start_time_ + std::chrono::milliseconds(500));
+  LoadMetricProto other =
+      other_updater.FlushMetrics(start_time_ + std::chrono::milliseconds(500));
   UpdateFrom(metric, other);
   EXPECT_NEAR(metric.load_seconds(), 0.5, 1e-6);
   EXPECT_NEAR(metric.total_seconds(), 0.5, 1e-6);
@@ -41,71 +42,76 @@ TEST_F(LoadMetricTest, BasicLoadMetricProto) {
 }
 
 TEST_F(LoadMetricTest, LoadMetricUpdaterBasic) {
-  LoadMetricProto metric;
-  LoadMetricUpdater updater(&metric, start_time_);
+  LoadMetricUpdater updater(start_time_);
   auto now = start_time_;
 
   // Start load and verify initial state
   updater.LoadStart(now);
+  LoadMetricProto metric = updater.FlushMetrics(now);
   EXPECT_EQ(metric.load_seconds(), 0.0);
   EXPECT_EQ(metric.total_seconds(), 0.0);
 
   // Advance time and stop load
   now += std::chrono::milliseconds(100);
   updater.LoadStop(now);
+  metric = updater.FlushMetrics(now);
   EXPECT_NEAR(metric.load_seconds(), 0.1, 1e-6);
   EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);
 
   // Wait idle time, then start again
   now += std::chrono::milliseconds(50);
   updater.LoadStart(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.1, 1e-6);    // No change in load
-  EXPECT_NEAR(metric.total_seconds(), 0.15, 1e-6);  // 0.1 + 0.05 idle
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.0, 1e-6);    // Reset after flush
+  EXPECT_NEAR(metric.total_seconds(), 0.05, 1e-6);  // Only idle time
 
   now += std::chrono::milliseconds(200);
   updater.LoadStop(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.3, 1e-6);    // 0.1 + 0.2
-  EXPECT_NEAR(metric.total_seconds(), 0.35, 1e-6);  // 0.15 + 0.2
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);   // 0.2 load
+  EXPECT_NEAR(metric.total_seconds(), 0.2, 1e-6);  // 0.2 total
 }
 
 TEST_F(LoadMetricTest, LoadMetricUpdaterFlush) {
-  LoadMetricProto metric;
-  LoadMetricUpdater updater(&metric, start_time_);
+  LoadMetricUpdater updater(start_time_);
   auto now = start_time_;
 
   // Start load
   updater.LoadStart(now);
   now += std::chrono::milliseconds(100);
 
-  // Flush should update the metric
+  // Flush should update the internal metric
   updater.Flush(now);
+  LoadMetricProto metric = updater.FlushMetrics(now);
   EXPECT_NEAR(metric.load_seconds(), 0.1, 1e-6);
   EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);
 
   // Continue loading
   now += std::chrono::milliseconds(50);
   updater.LoadStop(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.15, 1e-6);   // 0.1 + 0.05
-  EXPECT_NEAR(metric.total_seconds(), 0.15, 1e-6);  // 0.1 + 0.05
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.05, 1e-6);   // Only new load time
+  EXPECT_NEAR(metric.total_seconds(), 0.05, 1e-6);  // Only new total time
 }
 
 TEST_F(LoadMetricTest, LoadMetricProtoMerging) {
-  LoadMetricProto metric1, metric2;
-  LoadMetricUpdater updater1(&metric1, start_time_),
-      updater2(&metric2, start_time_);
+  LoadMetricUpdater updater1(start_time_);
+  LoadMetricUpdater updater2(start_time_);
   auto now = start_time_;
 
-  // Create load in metric1
+  // Create load in updater1
   updater1.LoadStart(now);
   updater1.LoadStop(now + std::chrono::milliseconds(100));
+  LoadMetricProto metric1 =
+      updater1.FlushMetrics(now + std::chrono::milliseconds(100));
   EXPECT_NEAR(metric1.load_seconds(), 0.1, 1e-6);
   EXPECT_NEAR(metric1.total_seconds(), 0.1, 1e-6);
 
-  // Create load in metric2 (initialize updater at the start time to avoid idle)
-  LoadMetricUpdater updater2_correct(&metric2,
-                                     now + std::chrono::milliseconds(50));
-  updater2_correct.LoadStart(now + std::chrono::milliseconds(50));
-  updater2_correct.LoadStop(now + std::chrono::milliseconds(150));
+  // Create load in updater2
+  updater2.LoadStart(now);
+  updater2.LoadStop(now + std::chrono::milliseconds(100));
+  LoadMetricProto metric2 =
+      updater2.FlushMetrics(now + std::chrono::milliseconds(100));
   EXPECT_NEAR(metric2.load_seconds(), 0.1, 1e-6);
   EXPECT_NEAR(metric2.total_seconds(), 0.1, 1e-6);
 
@@ -119,10 +125,11 @@ TEST_F(LoadMetricTest, LoadMetricProtoMerging) {
 
 TEST_F(LoadMetricTest, LoadMetricProtoMoveSemantics) {
   // Test that LoadMetricProto move semantics work correctly
-  LoadMetricProto source;
-  LoadMetricUpdater source_updater(&source, start_time_);
+  LoadMetricUpdater source_updater(start_time_);
   source_updater.LoadStart(start_time_);
   source_updater.LoadStop(start_time_ + std::chrono::milliseconds(100));
+  LoadMetricProto source =
+      source_updater.FlushMetrics(start_time_ + std::chrono::milliseconds(100));
   EXPECT_NEAR(source.load_seconds(), 0.1, 1e-6);
   EXPECT_NEAR(source.total_seconds(), 0.1, 1e-6);
 
@@ -133,10 +140,11 @@ TEST_F(LoadMetricTest, LoadMetricProtoMoveSemantics) {
 
   // Test move assignment
   LoadMetricProto move_assigned;
-  LoadMetricProto another_source;
-  LoadMetricUpdater another_updater(&another_source, start_time_);
+  LoadMetricUpdater another_updater(start_time_);
   another_updater.LoadStart(start_time_);
   another_updater.LoadStop(start_time_ + std::chrono::milliseconds(50));
+  LoadMetricProto another_source =
+      another_updater.FlushMetrics(start_time_ + std::chrono::milliseconds(50));
   EXPECT_NEAR(another_source.load_seconds(), 0.05, 1e-6);
   EXPECT_NEAR(another_source.total_seconds(), 0.05, 1e-6);
 
@@ -156,30 +164,50 @@ TEST_F(LoadMetricTest, LoadMetricProtoMoveSemantics) {
 }
 
 TEST_F(LoadMetricTest, LoadUtilizationTracking) {
-  LoadMetricProto metric;
-  LoadMetricUpdater updater(&metric, start_time_);
+  LoadMetricUpdater updater(start_time_);
   auto now = start_time_;
 
   // Start with some idle time before any load
   now += std::chrono::milliseconds(100);
   updater.LoadStart(now);
+  LoadMetricProto metric = updater.FlushMetrics(now);
   EXPECT_NEAR(metric.load_seconds(), 0.0, 1e-6);
   EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);  // 100ms idle
 
   // Add some load time
   now += std::chrono::milliseconds(200);
   updater.LoadStop(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);   // 200ms load
-  EXPECT_NEAR(metric.total_seconds(), 0.3, 1e-6);  // 100ms idle + 200ms load
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);  // 200ms load
+  EXPECT_NEAR(metric.total_seconds(), 0.2,
+              1e-6);  // 200ms total (after flush reset)
 
   // Add more idle time
   now += std::chrono::milliseconds(100);
   updater.Flush(now);
-  EXPECT_NEAR(metric.load_seconds(), 0.2, 1e-6);   // No change in load
-  EXPECT_NEAR(metric.total_seconds(), 0.4, 1e-6);  // 100ms additional idle
+  metric = updater.FlushMetrics(now);
+  EXPECT_NEAR(metric.load_seconds(), 0.0, 1e-6);   // No load time
+  EXPECT_NEAR(metric.total_seconds(), 0.1, 1e-6);  // 100ms idle
+
+  // Test complete utilization tracking with one updater
+  LoadMetricUpdater total_updater(start_time_);
+  auto total_now = start_time_;
+
+  // 100ms idle
+  total_now += std::chrono::milliseconds(100);
+  total_updater.LoadStart(total_now);
+
+  // 200ms load
+  total_now += std::chrono::milliseconds(200);
+  total_updater.LoadStop(total_now);
+
+  // 100ms idle
+  total_now += std::chrono::milliseconds(100);
+  LoadMetricProto total_metric = total_updater.FlushMetrics(total_now);
 
   // Calculate utilization
-  double utilization = metric.load_seconds() / metric.total_seconds();
+  double utilization =
+      total_metric.load_seconds() / total_metric.total_seconds();
   EXPECT_NEAR(utilization, 0.5,
               1e-6);  // 50% utilization (200ms load / 400ms total)
 }
@@ -207,13 +235,12 @@ TEST_F(LoadMetricProtoIntegrationTest, RecordMetricsWithUpdater) {
   auto current_time = start_time_;
 
   // Create metric with updater, simulate some load
-  LoadMetricProto metric;
-  LoadMetricUpdater updater(&metric, current_time);
+  LoadMetricUpdater updater(current_time);
   updater.LoadStart(current_time);
   current_time += std::chrono::milliseconds(150);
 
-  // Flush before recording
-  updater.Flush(current_time);
+  // Flush and get metric
+  LoadMetricProto metric = updater.FlushMetrics(current_time);
 
   // Record the metric (this should use UpdateFrom + Reset)
   aggregator_->RecordMetrics(std::move(metric));
@@ -228,19 +255,17 @@ TEST_F(LoadMetricProtoIntegrationTest, MultipleRecordMetrics) {
   auto current_time = start_time_;
 
   // First metric
-  LoadMetricProto metric1;
-  LoadMetricUpdater updater1(&metric1, current_time);
+  LoadMetricUpdater updater1(current_time);
   updater1.LoadStart(current_time);
   current_time += std::chrono::milliseconds(100);
-  updater1.Flush(current_time);
+  LoadMetricProto metric1 = updater1.FlushMetrics(current_time);
   aggregator_->RecordMetrics(std::move(metric1));
 
   // Second metric
-  LoadMetricProto metric2;
-  LoadMetricUpdater updater2(&metric2, current_time);
+  LoadMetricUpdater updater2(current_time);
   updater2.LoadStart(current_time);
   current_time += std::chrono::milliseconds(75);
-  updater2.Flush(current_time);
+  LoadMetricProto metric2 = updater2.FlushMetrics(current_time);
   aggregator_->RecordMetrics(std::move(metric2));
 
   // Get live metrics
@@ -253,10 +278,11 @@ TEST_F(LoadMetricProtoIntegrationTest, AdvanceTest) {
   auto current_time = start_time_;
 
   // Add some metrics
-  LoadMetricProto metric;
-  LoadMetricUpdater updater(&metric, current_time);
+  LoadMetricUpdater updater(current_time);
   updater.LoadStart(current_time);
   updater.LoadStop(current_time + std::chrono::milliseconds(100));
+  LoadMetricProto metric =
+      updater.FlushMetrics(current_time + std::chrono::milliseconds(100));
   aggregator_->RecordMetrics(std::move(metric));
 
   // Advance to move live metrics to buckets

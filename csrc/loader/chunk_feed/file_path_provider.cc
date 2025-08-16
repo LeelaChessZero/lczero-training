@@ -23,7 +23,7 @@ FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
     : output_queue_(config.queue_capacity()),
       directory_(config.directory()),
       producer_(output_queue_.CreateProducer()),
-      load_metric_updater_(metrics_.mutable_load()) {
+      load_metric_updater_() {
   LOG(INFO) << "Starting FilePathProvider for directory: "
             << config.directory();
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
@@ -59,18 +59,9 @@ void FilePathProvider::Close() {
 }
 
 FilePathProviderMetricsProto FilePathProvider::FlushMetrics() {
-  absl::MutexLock lock(&metrics_mutex_);
-  load_metric_updater_.Flush();
-  FilePathProviderMetricsProto result = std::move(metrics_);
-  metrics_.Clear();
+  FilePathProviderMetricsProto result;
+  *result.mutable_load() = load_metric_updater_.FlushMetrics();
   return result;
-}
-
-void FilePathProvider::UpdateMetricsForDiscoveredFiles(size_t file_count) {
-  absl::MutexLock lock(&metrics_mutex_);
-  AddSample(*metrics_.mutable_queue_size(), output_queue_.Size());
-  metrics_.set_total_files_discovered(metrics_.total_files_discovered() +
-                                      file_count);
 }
 
 void FilePathProvider::AddDirectory(const Path& directory) {
@@ -78,7 +69,6 @@ void FilePathProvider::AddDirectory(const Path& directory) {
 
   // Signal that initial scan is complete
   LOG(INFO) << "FilePathProvider initial scan complete";
-  UpdateMetricsForDiscoveredFiles(0);
   producer_.Put({{.filepath = Path{},
                   .message_type = MessageType::kInitialScanComplete}});
 }
@@ -114,7 +104,6 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
-    UpdateMetricsForDiscoveredFiles(batch.size());
     producer_.Put(batch);
     batch.clear();
   };
@@ -181,7 +170,6 @@ void FilePathProvider::ProcessWatchEventsForNewItems(
 
   // Send notifications for any new files discovered through watch events
   if (!new_files.empty()) {
-    UpdateMetricsForDiscoveredFiles(new_files.size());
     producer_.Put(new_files);
   }
 }
@@ -217,10 +205,7 @@ void FilePathProvider::RemoveWatchRecursive(const Path& base) {
 }
 
 void FilePathProvider::MonitorThread() {
-  {
-    absl::MutexLock lock(&metrics_mutex_);
-    load_metric_updater_.LoadStart();
-  }
+  load_metric_updater_.LoadStart();
   // Perform directory scanning in background thread
   AddDirectory(directory_);
 
@@ -235,18 +220,12 @@ void FilePathProvider::MonitorThread() {
       << "Failed to add inotify fd to epoll";
 
   while (true) {
-    {
-      absl::MutexLock lock(&metrics_mutex_);
-      load_metric_updater_.LoadStop();
-    }
+    load_metric_updater_.LoadStop();
     if (stop_condition_.WaitForNotificationWithTimeout(
             absl::Milliseconds(50))) {
       break;  // Exit if stop condition is notified
     }
-    {
-      absl::MutexLock lock(&metrics_mutex_);
-      load_metric_updater_.LoadStart();
-    }
+    load_metric_updater_.LoadStart();
 
     struct epoll_event event;
     int nfds = epoll_wait(epoll_fd, &event, 1, 0);  // Non-blocking check
@@ -268,7 +247,6 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
-    UpdateMetricsForDiscoveredFiles(files.size());
     producer.Put(files);
     files.clear();
   };

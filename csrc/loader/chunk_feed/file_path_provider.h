@@ -57,9 +57,6 @@ class FilePathProvider {
   // Starts monitoring the directory.
   void AddDirectory(const Path& directory);
 
-  // Helper to update metrics for discovered files
-  void UpdateMetricsForDiscoveredFiles(size_t file_count);
-
   void MonitorThread();
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);
@@ -79,9 +76,7 @@ class FilePathProvider {
   std::thread monitor_thread_;
   absl::Notification stop_condition_;
 
-  mutable absl::Mutex metrics_mutex_;
-  FilePathProviderMetricsProto metrics_ ABSL_GUARDED_BY(metrics_mutex_);
-  LoadMetricUpdater load_metric_updater_ ABSL_GUARDED_BY(metrics_mutex_);
+  LoadMetricUpdater load_metric_updater_;
 };
 
 }  // namespace training
