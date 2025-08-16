@@ -43,6 +43,22 @@ enum class TimePeriod {
   k2Hours,
   k5Hours,
   k9Hours,
+  k18Hours,
+  k36Hours,
+  k3Days,
+  k6Days,
+  k12Days,
+  k24Days,
+  k49Days,
+  k97Days,
+  k194Days,
+  k388Days,
+  k777Days,
+  k2Years,
+  k4Years,
+  k9Years,
+  k17Years, /* = 29 */
+  kAllTime = 127
 };
 
 // ExponentialAggregator metrics over exponentially increasing time periods.
