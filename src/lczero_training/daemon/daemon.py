@@ -3,10 +3,15 @@
 
 import logging
 import sys
+import threading
+import time
 from pathlib import Path
+import anyio
 from google.protobuf import text_format
+from google.protobuf.json_format import MessageToDict
 from lczero_training._lczero_training import DataLoader
 import lczero_training.proto.training_config_pb2 as config_pb2
+from lczero_training.proto import training_metrics_pb2
 from ..protocol.communicator import Communicator
 from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
 
@@ -17,6 +22,14 @@ class TrainingDaemon:
     def __init__(self):
         self._setup_logging()
         self._communicator = Communicator(self, sys.stdin, sys.stdout)
+        self._communicator_thread = threading.Thread(
+            target=lambda: self._communicator.run(), daemon=True
+        )
+        self._communicator_thread.start()
+        self._async_thread = threading.Thread(
+            target=lambda: anyio.run(self._metrics_main), daemon=True
+        )
+        self._async_thread.start()
 
     def _setup_logging(self):
         logging.basicConfig(
@@ -30,9 +43,43 @@ class TrainingDaemon:
         )
         logging.info("TrainingDaemon starting up")
 
+    async def _metrics_main(self):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(self._metrics_task)
+
+    async def _metrics_task(self):
+        while True:
+            await anyio.sleep(1.1)
+
+            metrics_1_second = None
+            metrics_total = None
+
+            if self._data_loader is not None:
+                stats_1_second_bytes = self._data_loader.get_1_second_stats()
+                stats_total_bytes = self._data_loader.get_total_stats()
+
+                stats_1_second_proto = (
+                    training_metrics_pb2.DataLoaderMetricsProto()
+                )
+                stats_1_second_proto.ParseFromString(stats_1_second_bytes)
+                metrics_1_second = MessageToDict(stats_1_second_proto)
+
+                stats_total_proto = (
+                    training_metrics_pb2.DataLoaderMetricsProto()
+                )
+                stats_total_proto.ParseFromString(stats_total_bytes)
+                metrics_total = MessageToDict(stats_total_proto)
+
+            payload = TrainingStatusPayload(
+                metrics_1_second=metrics_1_second, metrics_total=metrics_total
+            )
+            self._communicator.send(payload)
+
     def run(self):
-        logging.info("TrainingDaemon ready for IPC communication")
-        self._communicator.run()
+        while self._data_loader is None:
+            time.sleep(0.1)
+        while True:
+            self._data_loader.get_next()
 
     def on_start_training(self, payload: StartTrainingPayload):
         assert self._data_loader is None, "DataLoader already exists"
@@ -47,6 +94,3 @@ class TrainingDaemon:
             training_config.data_loader.SerializeToString()
         )
         self._data_loader = DataLoader(data_loader_config_bytes)
-
-    def on_training_status(self, payload: TrainingStatusPayload):
-        pass

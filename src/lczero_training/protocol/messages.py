@@ -19,4 +19,5 @@ class StartTrainingPayload:
 @register("training_status")
 @dataclass
 class TrainingStatusPayload:
-    pass  # Empty for now
+    metrics_1_second: dict | None = None
+    metrics_total: dict | None = None
