@@ -27,6 +27,8 @@ def test_dataloader_methods_exist():
     loader = DataLoader(config_bytes)
 
     assert hasattr(loader, "get_next")
-    assert hasattr(loader, "get_stat")
+    assert hasattr(loader, "get_1_second_stats")
+    assert hasattr(loader, "get_total_stats")
     assert callable(loader.get_next)
-    assert callable(loader.get_stat)
+    assert callable(loader.get_1_second_stats)
+    assert callable(loader.get_total_stats)

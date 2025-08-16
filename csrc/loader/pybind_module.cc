@@ -64,12 +64,19 @@ PYBIND11_MODULE(_lczero_training, m) {
           },
           "Get next batch of tensors as tuple of numpy arrays")
       .def(
-          "get_stat",
+          "get_1_second_stats",
           [](const DataLoader& self) {
-            std::string stat_string = self.GetStat();
+            std::string stat_string = self.Get1SecondStats();
             return py::bytes(stat_string);
           },
-          "Get serialized metrics for last completed 1-second bucket as bytes");
+          "Get serialized metrics for last completed 1-second bucket as bytes")
+      .def(
+          "get_total_stats",
+          [](const DataLoader& self) {
+            std::string stat_string = self.GetTotalStats();
+            return py::bytes(stat_string);
+          },
+          "Get serialized metrics for all time as bytes");
 
   // Expose TensorBase for potential advanced usage.
   py::class_<TensorBase>(m, "TensorBase")

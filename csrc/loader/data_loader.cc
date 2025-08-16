@@ -42,9 +42,15 @@ TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
 Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
 
-std::string DataLoader::GetStat() const {
+std::string DataLoader::Get1SecondStats() const {
   auto [metrics, duration] =
       metrics_aggregator_.GetBucketMetrics(TimePeriod::k1Second);
+  return metrics.OutputAsString();
+}
+
+std::string DataLoader::GetTotalStats() const {
+  auto [metrics, duration] = metrics_aggregator_.GetAggregateEndingNow(
+      std::chrono::nanoseconds::max());
   return metrics.OutputAsString();
 }
 
