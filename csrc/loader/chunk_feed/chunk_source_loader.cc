@@ -5,7 +5,7 @@
 #include "absl/log/log.h"
 #include "loader/chunk_feed/rawfile_chunk_source.h"
 #include "loader/chunk_feed/tar_chunk_source.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 
 namespace lczero {
 namespace training {

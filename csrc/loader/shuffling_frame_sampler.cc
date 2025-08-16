@@ -3,7 +3,7 @@
 #include "absl/algorithm/container.h"
 #include "absl/log/log.h"
 #include "absl/random/uniform_int_distribution.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 
 namespace lczero {
 namespace training {

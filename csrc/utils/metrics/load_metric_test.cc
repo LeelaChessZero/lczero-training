@@ -5,7 +5,7 @@
 #include <chrono>
 #include <memory>
 
-#include "proto/data_loader_metrics.pb.h"
+#include "proto/training_metrics.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
 
 namespace lczero {

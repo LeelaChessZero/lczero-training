@@ -10,7 +10,7 @@
 #include "loader/chunk_feed/shuffling_chunk_pool.h"
 #include "loader/shuffling_frame_sampler.h"
 #include "loader/tensor_generator.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
 #include "utils/tensor.h"
 

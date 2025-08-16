@@ -3,7 +3,7 @@
 #include <cstring>
 
 #include "absl/log/log.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 
 namespace lczero {
 namespace training {

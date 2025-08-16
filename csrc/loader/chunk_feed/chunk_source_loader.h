@@ -5,7 +5,7 @@
 
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/file_path_provider.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 

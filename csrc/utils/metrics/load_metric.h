@@ -3,7 +3,7 @@
 #include <chrono>
 #include <optional>
 
-#include "proto/data_loader_metrics.pb.h"
+#include "proto/training_metrics.pb.h"
 
 namespace lczero {
 

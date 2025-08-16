@@ -89,9 +89,9 @@ files = [
 
 # Process protobuf files for C++
 proto_files = [
-  proto_gen.process('proto/data_loader_config.proto',
+  proto_gen.process('proto/training_config.proto',
     preserve_path_from : meson.current_source_dir()),
-  proto_gen.process('proto/data_loader_metrics.proto',
+  proto_gen.process('proto/training_metrics.proto',
     preserve_path_from : meson.current_source_dir())
 ]
 

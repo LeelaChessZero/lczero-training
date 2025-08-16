@@ -12,8 +12,8 @@
 #include <iostream>
 
 #include "data_loader.h"
-#include "proto/data_loader_config.pb.h"
-#include "proto/data_loader_metrics.pb.h"
+#include "proto/training_config.pb.h"
+#include "proto/training_metrics.pb.h"
 #include "utils/metrics/printer.h"
 
 ABSL_FLAG(std::string, directory, "/home/crem/tmp/2025-07/lczero-training/",

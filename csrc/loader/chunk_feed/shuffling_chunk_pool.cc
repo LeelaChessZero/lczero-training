@@ -12,7 +12,7 @@
 
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/chunk_source_loader.h"
-#include "proto/data_loader_config.pb.h"
+#include "proto/training_config.pb.h"
 #include "utils/thread_pool.h"
 
 namespace lczero {
