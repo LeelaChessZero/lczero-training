@@ -53,27 +53,32 @@ class TrainingDaemon:
         while True:
             await anyio.sleep(1.1)
 
-            metrics_1_second = None
-            metrics_total = None
+            dataloader_1_second = None
+            dataloader_total = None
+            dataloader_update_secs = None
 
             if self._data_loader is not None:
                 stats_1_second_bytes, _ = self._data_loader.get_bucket_metrics(
                     0, False
                 )  # k1Second = 0
-                stats_total_bytes, _ = (
+                stats_total_bytes, dataloader_update_secs = (
                     self._data_loader.get_aggregate_ending_now(
                         float("inf"), False
                     )
                 )
 
-                metrics_1_second = training_metrics_pb2.DataLoaderMetricsProto()
-                metrics_1_second.ParseFromString(stats_1_second_bytes)
+                dataloader_1_second = (
+                    training_metrics_pb2.DataLoaderMetricsProto()
+                )
+                dataloader_1_second.ParseFromString(stats_1_second_bytes)
 
-                metrics_total = training_metrics_pb2.DataLoaderMetricsProto()
-                metrics_total.ParseFromString(stats_total_bytes)
+                dataloader_total = training_metrics_pb2.DataLoaderMetricsProto()
+                dataloader_total.ParseFromString(stats_total_bytes)
 
             payload = TrainingStatusPayload(
-                metrics_1_second=metrics_1_second, metrics_total=metrics_total
+                dataloader_update_secs=dataloader_update_secs,
+                dataloader_1_second=dataloader_1_second,
+                dataloader_total=dataloader_total,
             )
             self._communicator.send(payload)
 

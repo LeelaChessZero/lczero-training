@@ -21,5 +21,8 @@ class StartTrainingPayload:
 @register("training_status")
 @dataclass
 class TrainingStatusPayload:
-    metrics_1_second: training_metrics_pb2.DataLoaderMetricsProto | None = None
-    metrics_total: training_metrics_pb2.DataLoaderMetricsProto | None = None
+    dataloader_update_secs: float | None = None
+    dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None = (
+        None
+    )
+    dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None = None

@@ -42,9 +42,11 @@ class DataPipelinePane(Container):
 
     def update_metrics(
         self,
-        metrics_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
-        metrics_total: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the pipeline metrics display."""
         # Forward metrics to the FilePathProvider stage
-        self.file_path_provider.update_metrics(metrics_1_second, metrics_total)
+        self.file_path_provider.update_metrics(
+            dataloader_1_second, dataloader_total
+        )

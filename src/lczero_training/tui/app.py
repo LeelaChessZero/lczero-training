@@ -145,5 +145,5 @@ class TrainingTuiApp(App):
     async def on_training_status(self, payload: TrainingStatusPayload) -> None:
         """Handle training status updates."""
         self._data_pipeline_pane.update_metrics(
-            payload.metrics_1_second, payload.metrics_total
+            payload.dataloader_1_second, payload.dataloader_total
         )

@@ -46,16 +46,16 @@ class FilePathProviderStage(StageWidget):
 
     def update_metrics(
         self,
-        metrics_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
-        metrics_total: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the stage metrics display."""
-        if not metrics_1_second or not metrics_total:
+        if not dataloader_1_second or not dataloader_total:
             return
 
         try:
-            fps_1sec = metrics_1_second.file_path_provider
-            fps_total = metrics_total.file_path_provider
+            fps_1sec = dataloader_1_second.file_path_provider
+            fps_total = dataloader_total.file_path_provider
 
             total_files = fps_total.queue.message_count
             files_per_sec = fps_1sec.queue.message_count
