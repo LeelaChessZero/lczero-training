@@ -21,8 +21,9 @@ void UpdateFrom(DataLoaderMetricsProto& dest,
 template <typename T>
 QueueMetricProto MetricsFromQueue(Queue<T>& queue) {
   QueueMetricProto result;
-  AddSample(*result.mutable_queue_fullness(), queue.Size());
   result.set_message_count(queue.GetTotalPutCount(true));
+  AddSample(*result.mutable_queue_fullness(), queue.Size());
+  result.set_queue_capacity(queue.Capacity());
   return result;
 }
 

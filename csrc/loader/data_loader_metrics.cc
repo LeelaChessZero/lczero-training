@@ -17,8 +17,9 @@ void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
 }
 
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
-  UpdateFrom(*dest.mutable_queue_fullness(), src.queue_fullness());
   dest.set_message_count(dest.message_count() + src.message_count());
+  UpdateFrom(*dest.mutable_queue_fullness(), src.queue_fullness());
+  if (src.has_queue_capacity()) dest.set_queue_capacity(src.queue_capacity());
 }
 
 void UpdateFrom(FilePathProviderMetricsProto& dest,
