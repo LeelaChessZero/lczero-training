@@ -48,10 +48,10 @@ class LoadMetricUpdater {
   }
 
   // Flushes metrics and returns a copy, resetting the internal metric.
-  training::LoadMetricProto FlushMetrics(Clock::time_point now = Clock::now()) {
+  LoadMetricProto FlushMetrics(Clock::time_point now = Clock::now()) {
     absl::MutexLock lock(&mutex_);
     FlushInternal(now);
-    training::LoadMetricProto result = metric_;
+    LoadMetricProto result = metric_;
     metric_.Clear();
     return result;
   }
@@ -72,14 +72,13 @@ class LoadMetricUpdater {
   }
 
   mutable absl::Mutex mutex_;
-  training::LoadMetricProto metric_ ABSL_GUARDED_BY(mutex_);
+  LoadMetricProto metric_ ABSL_GUARDED_BY(mutex_);
   Clock::time_point last_flush_time_ ABSL_GUARDED_BY(mutex_);
   bool is_load_active_ ABSL_GUARDED_BY(mutex_);
 };
 
 // UpdateFrom function for LoadMetricProto - simple additive behavior
-inline void UpdateFrom(training::LoadMetricProto& dest,
-                       const training::LoadMetricProto& src) {
+inline void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
   dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
   dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }

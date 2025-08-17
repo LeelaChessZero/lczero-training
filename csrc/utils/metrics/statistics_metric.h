@@ -7,7 +7,7 @@
 namespace lczero {
 
 // Helper function to add a sample to StatisticsProtoInt64
-inline void AddSample(training::StatisticsProtoInt64& stats, int64_t value) {
+inline void AddSample(StatisticsProtoInt64& stats, int64_t value) {
   stats.set_min(std::min(stats.min(), value));
   stats.set_max(std::max(stats.max(), value));
   stats.set_sum(stats.sum() + value);
@@ -16,7 +16,7 @@ inline void AddSample(training::StatisticsProtoInt64& stats, int64_t value) {
 }
 
 // Helper function to add a sample to StatisticsProtoDouble
-inline void AddSample(training::StatisticsProtoDouble& stats, double value) {
+inline void AddSample(StatisticsProtoDouble& stats, double value) {
   stats.set_min(std::min(stats.min(), value));
   stats.set_max(std::max(stats.max(), value));
   stats.set_sum(stats.sum() + value);
@@ -25,8 +25,8 @@ inline void AddSample(training::StatisticsProtoDouble& stats, double value) {
 }
 
 // UpdateFrom function for StatisticsProtoInt64 - merges statistics
-inline void UpdateFrom(training::StatisticsProtoInt64& dest,
-                       const training::StatisticsProtoInt64& src) {
+inline void UpdateFrom(StatisticsProtoInt64& dest,
+                       const StatisticsProtoInt64& src) {
   if (src.count() == 0) return;  // Nothing to merge from empty source
 
   dest.set_min(std::min(dest.min(), src.min()));
@@ -37,8 +37,8 @@ inline void UpdateFrom(training::StatisticsProtoInt64& dest,
 }
 
 // UpdateFrom function for StatisticsProtoDouble - merges statistics
-inline void UpdateFrom(training::StatisticsProtoDouble& dest,
-                       const training::StatisticsProtoDouble& src) {
+inline void UpdateFrom(StatisticsProtoDouble& dest,
+                       const StatisticsProtoDouble& src) {
   if (src.count() == 0) return;  // Nothing to merge from empty source
 
   dest.set_min(std::min(dest.min(), src.min()));

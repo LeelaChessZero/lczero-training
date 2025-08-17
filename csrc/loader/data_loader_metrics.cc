@@ -11,11 +11,6 @@
 namespace lczero {
 namespace training {
 
-void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
-  dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
-  dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
-}
-
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
   dest.set_message_count(dest.message_count() + src.message_count());
   UpdateFrom(*dest.mutable_queue_fullness(), src.queue_fullness());

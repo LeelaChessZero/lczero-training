@@ -12,6 +12,7 @@
 
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/chunk_source_loader.h"
+#include "loader/data_loader_metrics.h"
 #include "proto/training_config.pb.h"
 #include "utils/thread_pool.h"
 
@@ -27,6 +28,18 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
       input_queue_(input_queue),
       output_queue_(config.output_queue_size()),
       initialization_thread_([this, config]() {
+        // Initialize thread contexts.
+        indexing_thread_contexts_.reserve(indexing_pool_.num_threads());
+        for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
+          indexing_thread_contexts_.push_back(
+              std::make_unique<IndexingThreadContext>());
+        }
+        chunk_loading_thread_contexts_.reserve(
+            chunk_loading_pool_.num_threads());
+        for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
+          chunk_loading_thread_contexts_.push_back(
+              std::make_unique<ChunkLoadingThreadContext>());
+        }
         try {
           LOG(INFO) << "Starting ShufflingChunkPool with pool size "
                     << config.chunk_pool_size();
@@ -37,14 +50,18 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
           // Start input processing worker that continuously processes new
           // files.
           for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
-            indexing_pool_.Enqueue([this]() { IndexingWorker(); });
+            indexing_pool_.Enqueue([this, i]() {
+              IndexingWorker(indexing_thread_contexts_[i].get());
+            });
           }
 
           // Start output workers after everything is fully initialized.
           LOG(INFO)
               << "ShufflingChunkPool initialization complete, starting workers";
           for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
-            chunk_loading_pool_.Enqueue([this]() { OutputWorker(); });
+            chunk_loading_pool_.Enqueue([this, i]() {
+              OutputWorker(chunk_loading_thread_contexts_[i].get());
+            });
           }
         } catch (const std::exception& e) {
           LOG(ERROR) << "ShufflingChunkPool initialization failed: "
@@ -147,10 +164,13 @@ void ShufflingChunkPool::ProcessInputFiles(
   }
 }
 
-void ShufflingChunkPool::IndexingWorker() {
+void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
   try {
     while (true) {
-      auto chunk_source_with_phase = input_queue_->Get();
+      auto chunk_source_with_phase = [&]() {
+        LoadMetricPauser pauser(context->load_metric_updater);
+        return input_queue_->Get();
+      }();
 
       if (chunk_source_with_phase.message_type ==
           FilePathProvider::MessageType::kFile) {
@@ -167,12 +187,16 @@ void ShufflingChunkPool::IndexingWorker() {
   }
 }
 
-void ShufflingChunkPool::OutputWorker() {
+void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   // Create a local producer for this worker
   auto producer = output_queue_.CreateProducer();
 
   try {
-    while (true) producer.Put(GetNextChunkData());
+    while (true) {
+      auto chunk_data = GetNextChunkData();
+      LoadMetricPauser pauser(context->load_metric_updater);
+      producer.Put(std::move(chunk_data));
+    }
   } catch (const QueueClosedException&) {
     // Output queue was closed, stop this worker
   }
@@ -248,6 +272,43 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
                                : window_start;
   stream_shuffler_.SetUpperBound(new_upper_bound);
   stream_shuffler_.SetLowerBound(new_lower_bound);
+}
+
+ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
+  ShufflingChunkPoolMetricsProto result;
+
+  // Aggregate indexing load metrics from all indexing threads.
+  for (const auto& context : indexing_thread_contexts_) {
+    UpdateFrom(*result.mutable_indexing_load(),
+               context->load_metric_updater.FlushMetrics());
+  }
+
+  // Aggregate chunk loading load metrics from all chunk loading threads.
+  for (const auto& context : chunk_loading_thread_contexts_) {
+    UpdateFrom(*result.mutable_chunk_loading_load(),
+               context->load_metric_updater.FlushMetrics());
+  }
+
+  // Get queue metrics.
+  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+
+  // Get chunk sources statistics and pool state.
+  {
+    absl::MutexLock lock(&chunk_sources_mutex_);
+    AddSample(*result.mutable_chunk_sources_count(),
+              static_cast<int64_t>(chunk_sources_.size()));
+
+    // Calculate current chunks and set pool capacity.
+    size_t current_chunks = 0;
+    if (!chunk_sources_.empty()) {
+      current_chunks = chunk_sources_.back().start_chunk_index +
+                       chunk_sources_.back().source->GetChunkCount();
+    }
+    result.set_current_chunks(current_chunks);
+    result.set_pool_capacity(chunk_pool_size_);
+  }
+
+  return result;
 }
 
 void ShufflingChunkPool::Close() { output_queue_.Close(); }

@@ -5,13 +5,13 @@
 #pragma once
 
 #include "proto/training_metrics.pb.h"
+#include "utils/metrics/load_metric.h"
 #include "utils/metrics/statistics_metric.h"
 #include "utils/queue.h"
 
 namespace lczero {
 namespace training {
 
-void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src);
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src);
 void UpdateFrom(FilePathProviderMetricsProto& dest,
                 const FilePathProviderMetricsProto& src);

@@ -75,6 +75,8 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
     *metrics.mutable_file_path_provider() = file_path_provider_.FlushMetrics();
     *metrics.mutable_chunk_source_loader() =
         chunk_source_loader_.FlushMetrics();
+    *metrics.mutable_shuffling_chunk_pool() =
+        shuffling_chunk_pool_.FlushMetrics();
     metrics_aggregator_.RecordMetrics(std::move(metrics));
     metrics_aggregator_.Advance(std::chrono::steady_clock::now());
   }

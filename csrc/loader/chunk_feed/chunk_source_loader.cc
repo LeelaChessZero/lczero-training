@@ -74,8 +74,8 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
 ChunkSourceLoaderMetricsProto ChunkSourceLoader::FlushMetrics() {
   ChunkSourceLoaderMetricsProto result;
   for (const auto& context : thread_contexts_) {
-    lczero::training::UpdateFrom(*result.mutable_load(),
-                                 context->load_metric_updater.FlushMetrics());
+    UpdateFrom(*result.mutable_load(),
+               context->load_metric_updater.FlushMetrics());
   }
   // Get queue metrics.
   *result.mutable_queue() = MetricsFromQueue(output_queue_);

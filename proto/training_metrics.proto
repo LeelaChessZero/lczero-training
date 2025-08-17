@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package lczero.training;
+package lczero;
 
 // Load metric that accumulates seconds of load time.
 // Separate proto to support LoadMetricUpdaterProto functionality.
