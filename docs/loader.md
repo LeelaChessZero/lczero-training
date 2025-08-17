@@ -37,6 +37,30 @@ The Data Loader consists of the following stages connected through a
 * [TensorGenerator](../csrc/loader/tensor_generator.h) — Takes frames and
   provides tensor buffers for the training process.
 
+## Metrics
+
+All stages expose the following metrics in
+[DataLoaderMetricsProto](../proto/training_config.proto):
+
+* load — for measure how much time the threads are working vs idle.
+* queue - for monitoring queue statistics.
+
+There are the following exceptions:
+
+* ShufflingChunkPool
+  * Has two thread pools (indexing and chunk loading), so needs two `load`
+    metrics.
+  * Needs metric (statisticsmetric) for current number of chunk sources.
+  * Needs metric (simple value) for current number of chunks in the pool.
+  * Needs metric (simple value) for pool capacity.
+
+* ChunkUnpacker
+  * Needs to track the number of bad chunks (statisticsmetric)
+
+* ShufflingFrameSampler
+  * Needs capacity of reservoir (simple value)
+  * Needs current size of reservoir (simple value)
+
 ## TensorGenerator
 
 Batch size is configurable in the stage options.
