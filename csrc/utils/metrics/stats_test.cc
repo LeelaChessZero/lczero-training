@@ -560,7 +560,6 @@ TEST_F(ExponentialAggregatorTest, ExactDurationTest) {
   // Simple test: add buckets for exactly 5 seconds, request kAllTime,
   // ensure we get back exactly 5.0 seconds duration (not more)
 
-  const auto kRes = aggregator_->GetResolution();
   auto current_time = start_time_;
 
   // Add buckets for exactly 5 seconds

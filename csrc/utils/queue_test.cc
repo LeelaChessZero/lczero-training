@@ -1099,7 +1099,7 @@ TEST_F(QueueTest, GetTotalPutCountThreadSafe) {
   }
 
   for (int t = 0; t < num_threads; ++t) {
-    threads.emplace_back([&producers, items_per_thread, t]() {
+    threads.emplace_back([&producers, t]() {
       for (int i = 0; i < items_per_thread; ++i) {
         producers[t].Put(t * items_per_thread + i);
       }

@@ -36,7 +36,10 @@ where = ["src"]
 "*" = ["*.so", "*.dll", "*.dylib"]
 
 [dependency-groups]
-dev = []
+dev = [
+    "mypy-protobuf>=3.6.0",
+    "types-protobuf>=6.30.2.20250809",
+]
 
 [tool.mypy]
 mypy_path = "src"
