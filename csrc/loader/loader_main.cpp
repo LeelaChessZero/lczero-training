@@ -61,7 +61,8 @@ void Run() {
       auto total_elapsed = current_time - start_time;
       double rate = batch_count / absl::ToDoubleSeconds(total_elapsed);
 
-      std::string stats_string = loader.Get1SecondStats();
+      auto [stats_string, duration] =
+          loader.GetBucketMetrics(0, false);  // k1Second = 0
       DataLoaderMetricsProto metrics;
       metrics.ParseFromString(stats_string);
       std::string metrics_json = metrics.OutputAsJson();

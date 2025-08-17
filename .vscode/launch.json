@@ -33,10 +33,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "load_metric_test",
-            "program": "${workspaceFolder}/builddir/load_metric_test",
+            "name": "stats_test",
+            "program": "${workspaceFolder}/builddir/stats_test",
             "args": [
-                "--gtest_filter=LoadMetricTest.LoadMetricPauserBasic",
+                "--gtest_filter=ExponentialAggregatorTest.ExactDurationTest",
             ],
             "cwd": "${workspaceFolder}/builddir"
         },

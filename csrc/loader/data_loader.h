@@ -26,8 +26,10 @@ class DataLoader {
   ~DataLoader();
 
   TensorTuple GetNext();
-  std::string Get1SecondStats() const;
-  std::string GetTotalStats() const;
+  std::pair<std::string, float> GetBucketMetrics(int time_period,
+                                                 bool include_pending) const;
+  std::pair<std::string, float> GetAggregateEndingNow(
+      float duration_seconds, bool include_pending) const;
 
  private:
   static DataLoaderConfig ParseConfig(

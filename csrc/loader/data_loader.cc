@@ -42,16 +42,30 @@ TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
 Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
 
-std::string DataLoader::Get1SecondStats() const {
-  auto [metrics, duration] =
-      metrics_aggregator_.GetBucketMetrics(TimePeriod::k1Second);
-  return metrics.OutputAsString();
+std::pair<std::string, float> DataLoader::GetBucketMetrics(
+    int time_period, bool include_pending) const {
+  auto [metrics, duration] = metrics_aggregator_.GetBucketMetrics(
+      static_cast<TimePeriod>(time_period),
+      include_pending ? std::make_optional(std::chrono::steady_clock::now())
+                      : std::nullopt);
+  float duration_seconds = std::chrono::duration<float>(duration).count();
+  return {metrics.OutputAsString(), duration_seconds};
 }
 
-std::string DataLoader::GetTotalStats() const {
+std::pair<std::string, float> DataLoader::GetAggregateEndingNow(
+    float duration_seconds, bool include_pending) const {
+  std::chrono::nanoseconds duration_ns =
+      std::isinf(duration_seconds)
+          ? std::chrono::nanoseconds::max()
+          : std::chrono::nanoseconds(
+                static_cast<int64_t>(duration_seconds * 1e9));
   auto [metrics, duration] = metrics_aggregator_.GetAggregateEndingNow(
-      std::chrono::nanoseconds::max());
-  return metrics.OutputAsString();
+      duration_ns, include_pending
+                       ? std::make_optional(std::chrono::steady_clock::now())
+                       : std::nullopt);
+  float result_duration_seconds =
+      std::chrono::duration<float>(duration).count();
+  return {metrics.OutputAsString(), result_duration_seconds};
 }
 
 void DataLoader::MetricsThread(std::stop_token stop_token) {

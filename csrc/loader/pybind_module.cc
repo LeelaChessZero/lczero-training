@@ -59,24 +59,35 @@ PYBIND11_MODULE(_lczero_training, m) {
       .def(
           "get_next",
           [](DataLoader& self) {
-            py::gil_scoped_release release;
-            return tensor_tuple_to_numpy_tuple(self.GetNext());
+            return tensor_tuple_to_numpy_tuple([&] {
+              py::gil_scoped_release release;
+              return self.GetNext();
+            }());
           },
           "Get next batch of tensors as tuple of numpy arrays")
       .def(
-          "get_1_second_stats",
-          [](const DataLoader& self) {
-            py::gil_scoped_release release;
-            return py::bytes(self.Get1SecondStats());
+          "get_bucket_metrics",
+          [](const DataLoader& self, int time_period, bool include_pending) {
+            auto [metrics, duration] = [&] {
+              py::gil_scoped_release release;
+              return self.GetBucketMetrics(time_period, include_pending);
+            }();
+            return py::make_tuple(py::bytes(metrics), duration);
           },
-          "Get serialized metrics for last completed 1-second bucket as bytes")
+          "Get serialized metrics for bucket and duration as (bytes, float)")
       .def(
-          "get_total_stats",
-          [](const DataLoader& self) {
-            py::gil_scoped_release release;
-            return py::bytes(self.GetTotalStats());
+          "get_aggregate_ending_now",
+          [](const DataLoader& self, float duration_seconds,
+             bool include_pending) {
+            auto [metrics, duration] = [&] {
+              py::gil_scoped_release release;
+              return self.GetAggregateEndingNow(duration_seconds,
+                                                include_pending);
+            }();
+            return py::make_tuple(py::bytes(metrics), duration);
           },
-          "Get serialized metrics for all time as bytes");
+          "Get serialized metrics for aggregate duration and actual duration "
+          "as (bytes, float)");
 
   // Expose TensorBase for potential advanced usage.
   py::class_<TensorBase>(m, "TensorBase")

@@ -57,8 +57,14 @@ class TrainingDaemon:
             metrics_total = None
 
             if self._data_loader is not None:
-                stats_1_second_bytes = self._data_loader.get_1_second_stats()
-                stats_total_bytes = self._data_loader.get_total_stats()
+                stats_1_second_bytes, _ = self._data_loader.get_bucket_metrics(
+                    0, False
+                )  # k1Second = 0
+                stats_total_bytes, _ = (
+                    self._data_loader.get_aggregate_ending_now(
+                        float("inf"), False
+                    )
+                )
 
                 metrics_1_second = training_metrics_pb2.DataLoaderMetricsProto()
                 metrics_1_second.ParseFromString(stats_1_second_bytes)
