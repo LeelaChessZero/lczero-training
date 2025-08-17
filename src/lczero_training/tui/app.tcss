@@ -9,13 +9,6 @@ HeaderBar {
     color: $text;
 }
 
-#content {
-    height: 1fr;
-    margin: 0;
-    padding: 0;
-}
-
-
 DataPipelinePane {
     background: $surface;
     color: $text;
@@ -25,7 +18,7 @@ DataPipelinePane {
     grid-size: 6;
     grid-columns: 2fr 1fr 2fr 1fr 2fr 1fr;
     grid-gutter: 1 0;
-    height: auto;
+    height: 15;
 }
 
 TrainingStatusPane {
@@ -58,8 +51,45 @@ QueueWidget {
     background: $panel;
     color: $text-muted;
     border: solid $accent;
-    padding: 1;
-    height: auto;
+    padding: 0 1;
+    
+}
+
+/* Queue widget internal styling */
+.rate-value {
+    text-align: left;
+    padding: 0;
+}
+
+.rate-value.rate--zero {
+    color: $error;
+}
+
+#rate-sparkline {
+    height: 1;
+    color: $primary;
+}
+
+#total-display {
+    text-align: left;
+    padding: 0;
+}
+
+#progress-container {
+    height: 1;
+    layout: horizontal;
+}
+
+#queue-progress {
+    height: 1;
+    width: 3fr;
+}
+
+#capacity-display {
+    text-align: right;
+    height: 1;
+    width: 1fr;
+    padding: 0;
 }
 
 .stage-content, .queue-content {

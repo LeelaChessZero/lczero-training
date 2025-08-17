@@ -8,7 +8,6 @@ import time
 import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Footer, Static
 
@@ -116,14 +115,13 @@ class TrainingTuiApp(App):
         """Compose the main UI layout."""
         yield HeaderBar()
 
-        with Vertical(id="content"):
-            self._data_pipeline_pane = DataPipelinePane()
-            self._data_pipeline_pane.border_title = "Training data pipeline"
-            yield self._data_pipeline_pane
-            training_status_pane = TrainingStatusPane()
-            training_status_pane.border_title = "Training Status"
-            yield training_status_pane
-            yield StreamingLogPane(stream=self._log_stream)
+        self._data_pipeline_pane = DataPipelinePane()
+        self._data_pipeline_pane.border_title = "Training data pipeline"
+        yield self._data_pipeline_pane
+        training_status_pane = TrainingStatusPane()
+        training_status_pane.border_title = "Training Status"
+        yield training_status_pane
+        yield StreamingLogPane(stream=self._log_stream)
 
         yield Footer()
 
