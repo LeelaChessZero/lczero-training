@@ -1,44 +1,43 @@
 Screen {
-    background: #0066cc;
+    background: $primary;
 }
 
 HeaderBar {
     dock: top;
     height: 1;
-    background: #004499;
-    color: white;
+    background: $primary-darken-1;
+    color: $text;
 }
 
 #content {
     height: 1fr;
+    margin: 0;
+    padding: 0;
 }
 
-#main-content {
-    height: 40%;
-}
 
 DataPipelinePane {
-    width: 2fr;
-    background: #003366;
-    color: white;
-    border: solid #0088ff;
+    background: $surface;
+    color: $text;
+    border: solid $primary;
     margin: 1;
     overflow-y: scroll;
 }
 
 TrainingStatusPane {
-    width: 1fr;
-    background: #003366;
-    color: white;
-    border: solid #0088ff;
+    background: $surface;
+    color: $text;
+    border: solid $primary;
     margin: 1;
     overflow-y: scroll;
 }
 
-LogPane {
+RichLog {
     height: 1fr;
-    background: #002244;
-    color: white;
+    background: $panel;
+    color: $text;
+    margin: 0;
+    width: 100%;
     overflow-y: scroll;
 }
 

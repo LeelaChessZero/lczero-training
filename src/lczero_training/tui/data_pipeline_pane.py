@@ -12,7 +12,7 @@ class DataPipelinePane(Static):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "Data Pipeline\n\nWaiting for metrics...",
+            "Waiting for metrics...",
             id="pipeline-metrics",
             classes="pipeline-content",
         )
@@ -46,7 +46,6 @@ class DataPipelinePane(Static):
 
             # Format the display
             content = (
-                "Data Pipeline\n\n"
                 f"FilePathProvider:\n"
                 f"  Total Files Discovered: {total_files}\n"
                 f"  Files/sec: {files_per_sec}\n"
@@ -60,6 +59,4 @@ class DataPipelinePane(Static):
         except Exception:
             # If there's any issue with the data structure, show error
             pipeline_metrics = self.query_one("#pipeline-metrics", Static)
-            pipeline_metrics.update(
-                "Data Pipeline\n\nError parsing metrics data"
-            )
+            pipeline_metrics.update("Error parsing metrics data")
