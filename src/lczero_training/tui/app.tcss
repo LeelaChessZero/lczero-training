@@ -16,9 +16,9 @@ DataPipelinePane {
     margin: 1;
     layout: grid;
     grid-size: 6;
-    grid-columns: 2fr 1fr 2fr 1fr 2fr 1fr;
+    grid-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
     grid-gutter: 1 0;
-    height: 15;
+    height: 18;
 }
 
 TrainingStatusPane {
@@ -39,20 +39,43 @@ RichLog {
 }
 
 StageWidget {
-    background: $surface-darken-1;
+    background: $panel;
     color: $text;
-    border: solid $success;
+    border: double $success;
     border-title-color: $success;
+    height: 6;
     padding: 1;
-    height: auto;
 }
 
 QueueWidget {
-    background: $panel;
+    background: $surface-darken-1;
     color: $text-muted;
-    border: solid $accent;
+    border: hkey $success-darken-2;
     padding: 0 1;
-    
+    height: 6;
+}
+
+LoadWidget {
+    height: 1;
+    layout: horizontal;
+}
+
+#load-label {
+    width: auto;
+    padding: 0;
+    margin-right: 1;
+    text-align: left;
+}
+
+#load-progress {
+    width: 1fr;
+    height: 1;
+}
+
+#load-ratio {
+    width: auto;
+    padding: 0;
+    text-align: right;
 }
 
 /* Queue widget internal styling */
@@ -82,13 +105,13 @@ QueueWidget {
 
 #queue-progress {
     height: 1;
-    width: 3fr;
+    width: 1fr;
 }
 
 #capacity-display {
     text-align: right;
     height: 1;
-    width: 1fr;
+    width: auto;
     padding: 0;
 }
 
