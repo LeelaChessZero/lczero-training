@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pybind11>=2.10.0",
     "numpy>=1.24.0",
-    "textual>=0.47.0",
+    "textual[dev]>=0.47.0",
     "protobuf>=3.20.0",
     "mypy>=1.17.1",
     "pytest>=8.4.1",
@@ -38,6 +38,7 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "mypy-protobuf>=3.6.0",
+    "textual-dev>=1.7.0",
     "types-protobuf>=6.30.2.20250809",
 ]
 
