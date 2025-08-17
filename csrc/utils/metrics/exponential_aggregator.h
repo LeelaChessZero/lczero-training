@@ -279,8 +279,10 @@ auto ExponentialAggregator<Metric, Resolution>::GetAggregateEndingNow(
         // Start merging from the highest bit (older bucket) to the lowest.
         size_t idx = std::bit_width(masked_ticks) - 1;
         masked_ticks &= ~(1ULL << idx);
-        if (idx < buckets_.size()) update_from_fn_(result, buckets_[idx]);
-        result_duration += kPeriodDuration * (1ULL << idx);
+        if (idx < buckets_.size()) {
+          update_from_fn_(result, buckets_[idx]);
+          result_duration += kPeriodDuration * (1ULL << idx);
+        }
       }
     }
   }

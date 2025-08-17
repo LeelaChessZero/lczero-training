@@ -511,6 +511,82 @@ TEST_F(ExponentialAggregatorTest, AggregationTest) {
                   136, kRes * (5 + 8));
 }
 
+TEST_F(ExponentialAggregatorTest, ActualVsRequestedTimeCoverage) {
+  // Test that GetAggregateEndingNow returns actual time covered by statistics
+  // rather than requested duration when insufficient historical data exists.
+  // This test recreates the scenario from the existing AggregationTest but
+  // specifically tests the requested vs actual duration behavior.
+
+  const auto kRes = aggregator_->GetResolution();
+
+  // Set up aggregator with several data points like in AggregationTest
+  TestMetric metric;
+  for (int i = 0; i < 10; ++i) {
+    metric.GetMutable<CounterMetric>()->set_count(i + 200);
+    aggregator_->RecordMetrics(std::move(metric));
+    start_time_ += kRes;
+    aggregator_->Advance(start_time_);
+  }
+
+  // Based on AggregationTest line 507: request 4.5 * kRes, get back 5 * kRes
+  // This demonstrates that actual coverage (5 * kRes) can be MORE than
+  // requested (4.5 * kRes) because the aggregator only has specific bucket
+  // sizes available
+  const auto requested_duration = kRes * 45 / 10;  // 4.5 * kRes
+  auto [result_metrics, actual_duration] =
+      aggregator_->GetAggregateEndingNow(requested_duration, std::nullopt);
+
+  // The key test: when requesting 4.5 * kRes, we should get actual time covered
+  // which may be different than the requested amount due to bucket granularity
+  EXPECT_GT(actual_duration, requested_duration);  // Actual > requested
+  EXPECT_GT(actual_duration, std::chrono::nanoseconds::zero());
+
+  // Verify we got some metrics (non-zero count)
+  EXPECT_GT(result_metrics.Get<CounterMetric>().count(), 0);
+
+  // Test that shows the key behavior: when we request more time than available,
+  // we get back only the time that's actually covered by data
+  auto [result_zero, duration_zero] = aggregator_->GetAggregateEndingNow(
+      kRes * 100, std::nullopt);  // Request way more
+
+  // The returned duration should be much less than requested (showing actual vs
+  // requested)
+  const auto huge_request = kRes * 100;
+  EXPECT_LT(duration_zero, huge_request);
+  EXPECT_GT(duration_zero, std::chrono::nanoseconds::zero());
+}
+
+TEST_F(ExponentialAggregatorTest, ExactDurationTest) {
+  // Simple test: add buckets for exactly 5 seconds, request kAllTime,
+  // ensure we get back exactly 5.0 seconds duration (not more)
+
+  const auto kRes = aggregator_->GetResolution();
+  auto current_time = start_time_;
+
+  // Add buckets for exactly 5 seconds
+  for (int i = 0; i < 5; ++i) {
+    TestMetric metric;
+    metric.GetMutable<CounterMetric>()->set_count(100 + i);
+    aggregator_->RecordMetrics(std::move(metric));
+    current_time += std::chrono::seconds(1);
+    aggregator_->Advance(current_time);
+  }
+
+  // Request statistics for all time
+  auto [result_metrics, actual_duration] = aggregator_->GetAggregateEndingNow(
+      std::chrono::duration_cast<TestAggregator::Duration>(
+          std::chrono::hours(24 * 365)),  // Request way more than 5 seconds
+      std::nullopt);
+
+  // Should return exactly 5.0 seconds duration (actual time covered)
+  const auto expected_duration = std::chrono::seconds(5);
+  EXPECT_EQ(actual_duration, expected_duration);
+
+  // Should have all our data
+  const int expected_total = 100 + 101 + 102 + 103 + 104;
+  EXPECT_EQ(result_metrics.Get<CounterMetric>().count(), expected_total);
+}
+
 }  // namespace lczero
 
 int main(int argc, char** argv) {
