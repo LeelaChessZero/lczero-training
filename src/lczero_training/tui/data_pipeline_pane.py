@@ -1,21 +1,44 @@
-# ABOUTME: Data pipeline pane widget for displaying DataLoader metrics and statistics.
-# ABOUTME: Shows file discovery stats, queue fullness, and load metrics from training daemon.
+# ABOUTME: Data pipeline pane widget for displaying DataLoader metrics.
+# ABOUTME: Shows a grid of pipeline stages and queues with their metrics.
 
 from textual.app import ComposeResult
-from textual.widgets import Static
+from textual.containers import Container
 
 from ..proto import training_metrics_pb2
+from .stage_widgets import (
+    ChunkSourceLoaderStage,
+    ChunkUnpackerStage,
+    FilePathProviderStage,
+    QueueWidget,
+    ShufflingChunkPoolStage,
+    ShufflingFrameSamplerStage,
+    TensorGeneratorStage,
+)
 
 
-class DataPipelinePane(Static):
-    """Main pane showing data pipeline flow and statistics."""
+class DataPipelinePane(Container):
+    """Main pane showing data pipeline flow and statistics as a grid."""
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            "Waiting for metrics...",
-            id="pipeline-metrics",
-            classes="pipeline-content",
-        )
+        # Create the pipeline stages and queues in order
+        self.file_path_provider = FilePathProviderStage()
+        yield self.file_path_provider
+        yield QueueWidget()
+
+        yield ChunkSourceLoaderStage()
+        yield QueueWidget()
+
+        yield ShufflingChunkPoolStage()
+        yield QueueWidget()
+
+        yield ChunkUnpackerStage()
+        yield QueueWidget()
+
+        yield ShufflingFrameSamplerStage()
+        yield QueueWidget()
+
+        yield TensorGeneratorStage()
+        yield QueueWidget()
 
     def update_metrics(
         self,
@@ -23,40 +46,5 @@ class DataPipelinePane(Static):
         metrics_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the pipeline metrics display."""
-        if not metrics_1_second or not metrics_total:
-            return
-
-        try:
-            # Extract file path provider metrics with type safety
-            fps_1sec = metrics_1_second.file_path_provider
-            fps_total = metrics_total.file_path_provider
-
-            # Total files discovered
-            total_files = fps_total.queue.message_count
-
-            # Files discovered per second
-            files_per_sec = fps_1sec.queue.message_count
-
-            # Current queue fullness
-            queue_fullness = fps_1sec.queue.queue_fullness.latest
-
-            # Load metrics
-            load_seconds = fps_1sec.load.load_seconds
-            total_seconds = fps_1sec.load.total_seconds
-
-            # Format the display
-            content = (
-                f"FilePathProvider:\n"
-                f"  Total Files Discovered: {total_files}\n"
-                f"  Files/sec: {files_per_sec}\n"
-                f"  Queue Fullness: {queue_fullness}\n"
-                f"  Load: {load_seconds:.2f} / {total_seconds:.2f}\n"
-            )
-
-            pipeline_metrics = self.query_one("#pipeline-metrics", Static)
-            pipeline_metrics.update(content)
-
-        except Exception:
-            # If there's any issue with the data structure, show error
-            pipeline_metrics = self.query_one("#pipeline-metrics", Static)
-            pipeline_metrics.update("Error parsing metrics data")
+        # Forward metrics to the FilePathProvider stage
+        self.file_path_provider.update_metrics(metrics_1_second, metrics_total)

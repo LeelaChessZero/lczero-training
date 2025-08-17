@@ -21,7 +21,11 @@ DataPipelinePane {
     color: $text;
     border: solid $primary;
     margin: 1;
-    overflow-y: scroll;
+    layout: grid;
+    grid-size: 6;
+    grid-columns: 2fr 1fr 2fr 1fr 2fr 1fr;
+    grid-gutter: 1 0;
+    height: auto;
 }
 
 TrainingStatusPane {
@@ -29,7 +33,7 @@ TrainingStatusPane {
     color: $text;
     border: solid $primary;
     margin: 1;
-    overflow-y: scroll;
+    height: auto;
 }
 
 RichLog {
@@ -41,7 +45,28 @@ RichLog {
     overflow-y: scroll;
 }
 
-.pipeline-content, .training-content {
+StageWidget {
+    background: $surface-darken-1;
+    color: $text;
+    border: solid $success;
+    border-title-color: $success;
+    padding: 1;
+    height: auto;
+}
+
+QueueWidget {
+    background: $panel;
+    color: $text-muted;
+    border: solid $accent;
+    padding: 1;
+    height: auto;
+}
+
+.stage-content, .queue-content {
+    text-align: left;
+}
+
+.training-content {
     padding: 1;
 }
 
