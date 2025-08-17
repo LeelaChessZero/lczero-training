@@ -6,6 +6,8 @@
 #include "loader/chunk_feed/chunk_source.h"
 #include "loader/chunk_feed/file_path_provider.h"
 #include "proto/training_config.pb.h"
+#include "proto/training_metrics.pb.h"
+#include "utils/metrics/load_metric.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"
 
@@ -34,12 +36,19 @@ class ChunkSourceLoader {
 
   Queue<OutputType>* output();
 
+  ChunkSourceLoaderMetricsProto FlushMetrics();
+
  private:
-  void Worker();
+  struct ThreadContext {
+    LoadMetricUpdater load_metric_updater;
+  };
+
+  void Worker(ThreadContext* context);
 
   Queue<InputType>* input_queue_;
   Queue<OutputType> output_queue_;
   ThreadPool thread_pool_;
+  std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
 };
 
 }  // namespace training
