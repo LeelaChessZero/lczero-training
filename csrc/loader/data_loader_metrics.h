@@ -15,6 +15,16 @@ void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src);
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src);
 void UpdateFrom(FilePathProviderMetricsProto& dest,
                 const FilePathProviderMetricsProto& src);
+void UpdateFrom(ChunkSourceLoaderMetricsProto& dest,
+                const ChunkSourceLoaderMetricsProto& src);
+void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
+                const ShufflingChunkPoolMetricsProto& src);
+void UpdateFrom(ChunkUnpackerMetricsProto& dest,
+                const ChunkUnpackerMetricsProto& src);
+void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,
+                const ShufflingFrameSamplerMetricsProto& src);
+void UpdateFrom(TensorGeneratorMetricsProto& dest,
+                const TensorGeneratorMetricsProto& src);
 void UpdateFrom(DataLoaderMetricsProto& dest,
                 const DataLoaderMetricsProto& src);
 

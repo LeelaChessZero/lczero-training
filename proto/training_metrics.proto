@@ -41,8 +41,50 @@ message FilePathProviderMetricsProto {
   optional QueueMetricProto queue = 2;
 }
 
+// Metrics for ChunkSourceLoader performance monitoring.
+message ChunkSourceLoaderMetricsProto {
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
+}
+
+// Metrics for ShufflingChunkPool performance monitoring.
+message ShufflingChunkPoolMetricsProto {
+  optional LoadMetricProto indexing_load = 1;
+  optional LoadMetricProto chunk_loading_load = 2;
+  optional QueueMetricProto queue = 3;
+  optional StatisticsProtoInt64 chunk_sources_count = 4;
+  optional uint64 current_chunks = 5 [default = 0];
+  optional uint64 pool_capacity = 6 [default = 0];
+}
+
+// Metrics for ChunkUnpacker performance monitoring.
+message ChunkUnpackerMetricsProto {
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
+  optional StatisticsProtoInt64 bad_chunks_count = 3;
+}
+
+// Metrics for ShufflingFrameSampler performance monitoring.
+message ShufflingFrameSamplerMetricsProto {
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
+  optional uint64 reservoir_capacity = 3 [default = 0];
+  optional uint64 current_reservoir_size = 4 [default = 0];
+}
+
+// Metrics for TensorGenerator performance monitoring.
+message TensorGeneratorMetricsProto {
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
+}
+
 // Top-level metrics for the DataLoader.
 // Replaces the old MetricGroup<FilePathProviderMetrics>.
 message DataLoaderMetricsProto {
   optional FilePathProviderMetricsProto file_path_provider = 1;
+  optional ChunkSourceLoaderMetricsProto chunk_source_loader = 2;
+  optional ShufflingChunkPoolMetricsProto shuffling_chunk_pool = 3;
+  optional ChunkUnpackerMetricsProto chunk_unpacker = 4;
+  optional ShufflingFrameSamplerMetricsProto shuffling_frame_sampler = 5;
+  optional TensorGeneratorMetricsProto tensor_generator = 6;
 }
