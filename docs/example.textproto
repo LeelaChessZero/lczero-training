@@ -27,7 +27,7 @@ data_loader {
     # Size of chunk shuffle buffer
     # This determines how many chunks are kept in memory for shuffling
     # Larger values provide better randomization but use more memory
-    chunk_pool_size: 1000
+    chunk_pool_size: 5000000
     
     # Number of threads used during initial startup indexing
     # Higher values speed up startup but use more CPU

@@ -27,11 +27,11 @@ class StageConfig:
 
 STAGES_CONFIG = [
     StageConfig("file_path_provider", "File discovery", "Files"),
-    StageConfig("chunk_source_loader", "Chunk source loader", "Chunks"),
+    StageConfig("chunk_source_loader", "Chunk source loader", "Files"),
     StageConfig("shuffling_chunk_pool", "Shuffling chunk pool", "Chunks"),
     StageConfig("chunk_unpacker", "Chunk unpacker", "Frames"),
     StageConfig("shuffling_frame_sampler", "Shuffling frame sampler", "Frames"),
-    StageConfig("tensor_generator", "Tensor generator", "Tensors"),
+    StageConfig("tensor_generator", "Batched tensor generator", "Tensors"),
 ]
 
 

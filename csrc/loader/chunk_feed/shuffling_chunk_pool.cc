@@ -122,13 +122,16 @@ ShufflingChunkPool::InitializeChunkSources(
     indexing_pool.Enqueue([&source, &total_chunks]() {
       source->Index();
       total_chunks += source->GetChunkCount();
+      LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load();
     });
     ++sources_to_keep;
   }
   indexing_pool.WaitAll();
 
   if (total_chunks < chunk_pool_size_) {
-    throw std::runtime_error("Not enough chunks to feed.");
+    throw std::runtime_error(
+        absl::StrCat("Not enough chunks to initialize ShufflingChunkPool: ",
+                     total_chunks.load(), " < ", chunk_pool_size_));
   }
 
   // Trim the vector to only keep the sources we need.
