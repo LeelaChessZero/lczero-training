@@ -51,6 +51,13 @@ def format_si(value: int, precision: int = 1) -> str:
     return str(value)
 
 
+def format_full_number(value: int) -> str:
+    """Formats an integer with apostrophe separators for thousands, for numbers with 5+ digits."""
+    if value < 10000:
+        return str(value)
+    return f"{value:_}".replace("_", "'")
+
+
 class LoadWidget(Container):
     """Widget for displaying load metrics as a single line with progress bar."""
 
@@ -163,7 +170,7 @@ class QueueWidget(Container):
     def watch_total_transferred(self, total: int) -> None:
         """Update total display when total changes."""
         self.query_one("#total-display", Static).update(
-            f"Total: {format_si(total)}"
+            f"Total: {format_full_number(total)}"
         )
 
     def watch_current_size(self, size: int) -> None:
@@ -182,9 +189,7 @@ class QueueWidget(Container):
         progress_bar.total = max(1, self.capacity)
         progress_bar.progress = min(self.current_size, self.capacity)
 
-        capacity_text = (
-            f"{format_si(self.current_size)}/{format_si(self.capacity)}"
-        )
+        capacity_text = f"{format_full_number(self.current_size)}/{format_full_number(self.capacity)}"
         capacity_display.update(capacity_text)
 
     def _show_error_state(self, error_message: str) -> None:
