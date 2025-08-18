@@ -154,6 +154,7 @@ class QueueWidget(Container):
         yield Sparkline([], id="rate-sparkline")
         yield Static("Total: --", id="total-display")
         with Horizontal(id="progress-container"):
+            yield Static("Fill lvl:", id="fill-level-label")
             yield ProgressBar(
                 id="queue-progress", show_percentage=False, show_eta=False
             )
@@ -292,12 +293,23 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         super().__init__(stage_name, **kwargs)
         self.metrics_field_name = metrics_field_name
         self.item_name = item_name
-        self.indexing_load = LoadWidget("indexing")
-        self.chunk_loading_load = LoadWidget("chunk_load")
+        self.indexing_load = LoadWidget("idx thrds:")
+        self.chunk_loading_load = LoadWidget("chunk thrds:")
+        self.files_in_pool = Static("files: --")
+        self.chunks_container = Container(classes="chunks-progress")
 
     def compose(self) -> ComposeResult:
+        yield self.files_in_pool
         yield self.indexing_load
         yield self.chunk_loading_load
+        with self.chunks_container:
+            yield Static("chunks:", classes="chunks-label")
+            yield ProgressBar(
+                show_percentage=False,
+                show_eta=False,
+                classes="chunks-progress-bar",
+            )
+            yield Static("--/--", classes="chunks-ratio")
 
     def update_metrics(
         self,
@@ -308,6 +320,14 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         if not dataloader_1_second:
             self.indexing_load.update_load_metrics(None)
             self.chunk_loading_load.update_load_metrics(None)
+            self.files_in_pool.update("files: --")
+            chunks_progress = self.query_one(
+                ".chunks-progress-bar", ProgressBar
+            )
+            chunks_ratio = self.query_one(".chunks-ratio", Static)
+            chunks_progress.total = 1
+            chunks_progress.progress = 0
+            chunks_ratio.update("--/--")
             return
 
         try:
@@ -316,6 +336,39 @@ class ShufflingChunkPoolStageWidget(StageWidget):
             self.chunk_loading_load.update_load_metrics(
                 stage_1sec.chunk_loading_load
             )
+
+            if stage_1sec.chunk_sources_count.count > 0:
+                files_count = stage_1sec.chunk_sources_count.latest
+                self.files_in_pool.update(f"files: {format_si(files_count)}")
+            else:
+                self.files_in_pool.update("files: --")
+
+            current_chunks = stage_1sec.current_chunks
+            pool_capacity = stage_1sec.pool_capacity
+
+            chunks_progress = self.query_one(
+                ".chunks-progress-bar", ProgressBar
+            )
+            chunks_ratio = self.query_one(".chunks-ratio", Static)
+
+            if pool_capacity > 0:
+                chunks_progress.total = pool_capacity
+                chunks_progress.progress = min(current_chunks, pool_capacity)
+                chunks_ratio.update(
+                    f"{format_si(current_chunks)}/{format_si(pool_capacity)}"
+                )
+            else:
+                chunks_progress.total = 1
+                chunks_progress.progress = 0
+                chunks_ratio.update("--/--")
         except AttributeError:
             self.indexing_load.update_load_metrics(None)
             self.chunk_loading_load.update_load_metrics(None)
+            self.files_in_pool.update("files: --")
+            chunks_progress = self.query_one(
+                ".chunks-progress-bar", ProgressBar
+            )
+            chunks_ratio = self.query_one(".chunks-ratio", Static)
+            chunks_progress.total = 1
+            chunks_progress.progress = 0
+            chunks_ratio.update("--/--")
