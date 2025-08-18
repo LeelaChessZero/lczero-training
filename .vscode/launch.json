@@ -67,6 +67,7 @@
             }
         },
         {
+            // {"type": "start_training", "payload": {"config_filepath": "docs/example.textproto"}}
             "type": "lldb",
             "request": "launch",
             "name": "training_daemon (lldb)",

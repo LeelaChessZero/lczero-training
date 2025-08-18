@@ -54,6 +54,12 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
         return input_queue_->Get();
       }();
 
+      if (file.message_type ==
+          FilePathProvider::MessageType::kInitialScanComplete) {
+        producer.Put({.source = nullptr, .message_type = file.message_type});
+        continue;
+      }
+
       // Create ChunkSource from the file.
       auto source = CreateChunkSourceFromFile(file.filepath);
       if (source) {
