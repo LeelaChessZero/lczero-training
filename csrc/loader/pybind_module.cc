@@ -2,6 +2,8 @@
 // ABOUTME: Handles configuration conversion and tensor memory management for
 // numpy arrays.
 
+#include <absl/log/globals.h>
+#include <absl/log/initialize.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -45,6 +47,8 @@ py::tuple tensor_tuple_to_numpy_tuple(TensorTuple tensor_tuple) {
 }
 
 PYBIND11_MODULE(_lczero_training, m) {
+  absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
   m.doc() = "Leela Chess Zero training data loader";
 
   // Configuration is now handled via protobuf serialized strings

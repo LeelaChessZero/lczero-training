@@ -229,7 +229,7 @@ python3.extension_module(
   '_lczero_training',
   'csrc/loader/pybind_module.cc',
   include_directories : includes,
-  dependencies : [pybind11_dep, proto_dep] + loader_deps,
+  dependencies : [pybind11_dep, proto_dep, absl_deps['log_initialize']] + loader_deps,
   link_with : loader_lib,
   install : true,
   subdir : 'lczero_training',
