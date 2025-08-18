@@ -72,5 +72,34 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   }
 }
 
+TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
+  Queue<FilePathProvider::File> input_queue(10);
+  ChunkSourceLoaderConfig config;
+  config.set_worker_threads(1);
+  config.set_output_queue_size(10);
+  ChunkSourceLoader feed(&input_queue, config);
+
+  {
+    auto producer = input_queue.CreateProducer();
+    producer.Put(FilePathProvider::File{
+        .filepath = std::filesystem::path(""),
+        .message_type = FilePathProvider::MessageType::kInitialScanComplete});
+  }  // Producer destroyed here, closing input queue
+
+  // Should get kInitialScanComplete in output with null ChunkSource
+  auto output = feed.output()->Get();
+  EXPECT_EQ(output.message_type,
+            FilePathProvider::MessageType::kInitialScanComplete);
+  EXPECT_EQ(output.source, nullptr);
+
+  // Queue should be closed after the single message
+  try {
+    feed.output()->Get();
+    FAIL() << "Expected queue to be closed";
+  } catch (const QueueClosedException&) {
+    SUCCEED();
+  }
+}
+
 }  // namespace training
 }  // namespace lczero
