@@ -153,20 +153,12 @@ class QueueWidget(Container):
             yield Static("--/--", id="capacity-display")
 
     def watch_rate(self, rate: int) -> None:
-        """Update rate display and sparkline when rate changes."""
+        """Update rate display when rate changes."""
         rate_display = self.query_one("#rate-display", Static)
         rate_text = f"Rate: {format_si(rate)}/s"
 
         rate_display.set_class(rate == 0, "rate--zero")
         rate_display.update(rate_text)
-
-        # Update sparkline
-        self._rate_history.append(rate)
-        if rate > self._max_rate_seen:
-            self._max_rate_seen = rate
-
-        sparkline = self.query_one(Sparkline)
-        sparkline.data = list(self._rate_history)
 
     def watch_total_transferred(self, total: int) -> None:
         """Update total display when total changes."""
@@ -213,34 +205,38 @@ class QueueWidget(Container):
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the queue metrics display."""
-        if (
-            not dataloader_1_second
-            or not dataloader_total
-            or not self.queue_field_name
-        ):
-            return
+        current_rate = 0  # Default to 0
+        if dataloader_1_second and dataloader_total and self.queue_field_name:
+            try:
+                stage_1sec = getattr(dataloader_1_second, self.queue_field_name)
+                stage_total = getattr(dataloader_total, self.queue_field_name)
 
-        try:
-            stage_1sec = getattr(dataloader_1_second, self.queue_field_name)
-            stage_total = getattr(dataloader_total, self.queue_field_name)
+                queue_1sec = stage_1sec.queue
+                queue_total = stage_total.queue
 
-            queue_1sec = stage_1sec.queue
-            queue_total = stage_total.queue
+                current_rate = queue_1sec.message_count
+                self.total_transferred = queue_total.message_count
+                self.capacity = queue_1sec.queue_capacity
 
-            self.rate = queue_1sec.message_count
-            self.total_transferred = queue_total.message_count
-            self.capacity = queue_1sec.queue_capacity
+                if queue_1sec.queue_fullness.count > 0:
+                    self.current_size = int(
+                        queue_1sec.queue_fullness.sum
+                        / queue_1sec.queue_fullness.count
+                    )
+                else:
+                    self.current_size = 0
+            except AttributeError:
+                self._show_error_state(f"Error ({self.queue_field_name})")
+                current_rate = 0
 
-            if queue_1sec.queue_fullness.count > 0:
-                self.current_size = int(
-                    queue_1sec.queue_fullness.sum
-                    / queue_1sec.queue_fullness.count
-                )
-            else:
-                self.current_size = 0
+        self.rate = current_rate
 
-        except AttributeError:
-            self._show_error_state(f"Error ({self.queue_field_name})")
+        # Always update sparkline
+        self._rate_history.append(current_rate)
+        if current_rate > self._max_rate_seen:
+            self._max_rate_seen = current_rate
+        sparkline = self.query_one(Sparkline)
+        sparkline.data = list(self._rate_history)
 
 
 class MetricsStageWidget(StageWidget):
