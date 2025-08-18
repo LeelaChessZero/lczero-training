@@ -293,8 +293,8 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         super().__init__(stage_name, **kwargs)
         self.metrics_field_name = metrics_field_name
         self.item_name = item_name
-        self.indexing_load = LoadWidget("idx thrds:")
-        self.chunk_loading_load = LoadWidget("chunk thrds:")
+        self.indexing_load = LoadWidget("idx threads")
+        self.chunk_loading_load = LoadWidget("chunk threads")
         self.files_in_pool = Static("files: --")
         self.chunks_container = Container(classes="chunks-progress")
 
