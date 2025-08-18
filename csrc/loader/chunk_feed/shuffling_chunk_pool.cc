@@ -195,6 +195,8 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
     }
   } catch (const QueueClosedException&) {
     // Output queue was closed, stop this worker
+  } catch (const std::exception& e) {
+    LOG(FATAL) << "Output worker encountered an error: " << e.what();
   }
 }
 

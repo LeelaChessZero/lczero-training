@@ -77,7 +77,9 @@ std::string TarChunkSource::GetChunkData(size_t index) {
 
   int r = archive_seek_data(archive_, file_entry.offset, SEEK_SET);
   if (r != ARCHIVE_OK) {
-    throw std::runtime_error("Failed to seek to file offset");
+    throw std::runtime_error(absl::StrCat(
+        "Failed to seek to file offset: ", file_entry.offset,
+        " in archive: ", filename_, " - ", archive_error_string(archive_)));
   }
 
   std::string content(file_entry.size, '\0');

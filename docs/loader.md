@@ -61,6 +61,25 @@ There are the following exceptions:
   * Needs capacity of reservoir (simple value)
   * Needs current size of reservoir (simple value)
 
+### Adding a new metric
+
+To add a new metric, you need to:
+
+* Add a field in the relevant proto in
+  [training_config.proto](../proto/training_config.proto)
+* Add a field in a relevant stage to collect the metric (if needed).
+* Implement FlushMetrics() function in your stage. It should reset internal
+  state metrics to zero, and return what it accumulated (or latest value).
+* In [DataLoader::MetricsThread](../csrc/loader/data_loader.cc) call
+  FlushMetrics() of the relevant stage and assign it to proper proto field.
+* In the proper
+  [Queue or Stage widget](../src/lczero_training/tui/stage_widgets.py) create
+  proper UI elements and update update_metrics() function to update them.
+
+
+* For load metrics, you have to create LoadMetricPauser per thread, e.g. see [ShufflingChunkPool](../csrc/loader/chunk_feed/shuffling_chunk_pool.cc).
+* For queue metrics, just collect the queue statistics in FlushMetrics().
+
 ## TensorGenerator
 
 Batch size is configurable in the stage options.

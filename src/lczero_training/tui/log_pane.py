@@ -8,7 +8,9 @@ class StreamingLogPane(RichLog):
     """Log pane that streams output from an async text stream."""
 
     def __init__(self, stream: TextReceiveStream, **kwargs: Any) -> None:
-        super().__init__(highlight=True, markup=True, max_lines=1000, **kwargs)
+        super().__init__(
+            highlight=True, markup=True, max_lines=1000, wrap=True, **kwargs
+        )
         self._stream = stream
 
     def on_mount(self) -> None:
