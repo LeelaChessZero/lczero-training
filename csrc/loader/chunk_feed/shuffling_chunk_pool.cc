@@ -28,18 +28,6 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
       input_queue_(input_queue),
       output_queue_(config.output_queue_size()),
       initialization_thread_([this, config]() {
-        // Initialize thread contexts.
-        indexing_thread_contexts_.reserve(indexing_pool_.num_threads());
-        for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
-          indexing_thread_contexts_.push_back(
-              std::make_unique<IndexingThreadContext>());
-        }
-        chunk_loading_thread_contexts_.reserve(
-            chunk_loading_pool_.num_threads());
-        for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
-          chunk_loading_thread_contexts_.push_back(
-              std::make_unique<ChunkLoadingThreadContext>());
-        }
         try {
           LOG(INFO) << "Starting ShufflingChunkPool with pool size "
                     << config.chunk_pool_size();
@@ -50,23 +38,28 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
           // Start input processing worker that continuously processes new
           // files.
           for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
-            indexing_pool_.Enqueue([this, i]() {
-              IndexingWorker(indexing_thread_contexts_[i].get());
-            });
+            auto* context =
+                indexing_thread_contexts_
+                    .emplace_back(std::make_unique<IndexingThreadContext>())
+                    .get();
+            indexing_pool_.Enqueue(
+                [this, context]() { IndexingWorker(context); });
           }
 
           // Start output workers after everything is fully initialized.
           LOG(INFO)
-              << "ShufflingChunkPool initialization complete, starting workers";
+              << "ShufflingChunkPool initialization done, starting workers";
           for (size_t i = 0; i < chunk_loading_pool_.num_threads(); ++i) {
-            chunk_loading_pool_.Enqueue([this, i]() {
-              OutputWorker(chunk_loading_thread_contexts_[i].get());
-            });
+            auto* context =
+                chunk_loading_thread_contexts_
+                    .emplace_back(std::make_unique<ChunkLoadingThreadContext>())
+                    .get();
+            chunk_loading_pool_.Enqueue(
+                [this, context]() { OutputWorker(context); });
           }
         } catch (const std::exception& e) {
           LOG(ERROR) << "ShufflingChunkPool initialization failed: "
                      << e.what();
-          // Close output queue to signal failure to consumers
           output_queue_.Close();
         }
       }) {}
