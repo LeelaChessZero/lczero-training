@@ -1,6 +1,7 @@
 # ABOUTME: Main TUI application class implementing the training dashboard.
 # ABOUTME: Uses Textual framework to create a full-screen interface with four panes.
 
+import argparse
 import subprocess
 import sys
 import time
@@ -84,32 +85,41 @@ class TrainingTuiApp(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self, daemon_process: anyio.abc.Process):
-        """Initialize the TUI app with an already-created daemon process."""
+    def __init__(self) -> None:
+        """Initialize the TUI app with config file path."""
         super().__init__()
-        self._daemon_process = daemon_process
-        assert daemon_process.stderr is not None
-        assert daemon_process.stdin is not None
-        assert daemon_process.stdout is not None
-        self._log_stream = TextReceiveStream(daemon_process.stderr)
-        self._communicator = AsyncCommunicator(
-            handler=self,
-            input_stream=TextReceiveStream(daemon_process.stdout),
-            output_stream=TextSendStream(daemon_process.stdin),
+        parser = argparse.ArgumentParser(
+            description="LCZero Training Dashboard"
         )
+        parser.add_argument(
+            "--config",
+            required=True,
+            help="Path to the training configuration file",
+        )
+        args = parser.parse_args()
+        self._config_file = args.config
 
-    @classmethod
-    async def create(cls, config_file: str) -> "TrainingTuiApp":
-        """Create a new TrainingTuiApp with async subprocess creation."""
-        daemon_process = await anyio.open_process(
+    async def on_load(self) -> None:
+        """Start the daemon process and communicator when the app loads."""
+        # Create the daemon process
+        self._daemon_process = await anyio.open_process(
             [sys.executable, "-m", "lczero_training.daemon"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        app = cls(daemon_process)
-        app._config_file = config_file
-        return app
+
+        assert self._daemon_process.stderr is not None
+        assert self._daemon_process.stdin is not None
+        assert self._daemon_process.stdout is not None
+
+        # Set up streams and communicator
+        self._log_stream = TextReceiveStream(self._daemon_process.stderr)
+        self._communicator = AsyncCommunicator(
+            handler=self,
+            input_stream=TextReceiveStream(self._daemon_process.stdout),
+            output_stream=TextSendStream(self._daemon_process.stdin),
+        )
 
     def compose(self) -> ComposeResult:
         """Compose the main UI layout."""

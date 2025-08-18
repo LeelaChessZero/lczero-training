@@ -84,9 +84,12 @@ class TrainingDaemon:
 
     def run(self) -> None:
         while self._data_loader is None:
-            time.sleep(0.1)
+            logging.info("DataLoader is not ready")
+            time.sleep(1)
+        logging.info("DataLoader is ready")
         while True:
             self._data_loader.get_next()
+            logging.info("DataLoader processed a batch")
 
     def on_start_training(self, payload: StartTrainingPayload) -> None:
         assert self._data_loader is None, "DataLoader already exists"
