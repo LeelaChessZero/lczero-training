@@ -1,7 +1,5 @@
 #pragma once
 
-#include <archive.h>
-
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -21,8 +19,8 @@ class TarChunkSource : public ChunkSource {
 
  private:
   struct FileEntry {
-    size_t offset;
-    size_t size;
+    long int offset;
+    long int size;
     bool is_gzip;
   };
 
@@ -31,7 +29,7 @@ class TarChunkSource : public ChunkSource {
   size_t GetChunkCount() const override;
   std::string GetChunkData(size_t index) override;
 
-  archive* archive_ = nullptr;
+  FILE* file_ = nullptr;
   std::vector<FileEntry> files_;
   std::string filename_;
 };

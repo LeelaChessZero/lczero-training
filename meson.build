@@ -19,7 +19,6 @@ add_project_arguments('-Werror', language : 'cpp')
 
 
 # External dependencies
-libarchive_dep = dependency('libarchive')
 zlib_dep = dependency('zlib')
 
 # Python and PyBind11 dependencies for Python extension
@@ -40,7 +39,7 @@ gtest_dep = dependency('gtest').as_system()
 gtest_main_dep = dependency('gtest_main').as_system()
 
 # Common dependency sets
-external_deps = [libarchive_dep, zlib_dep]
+external_deps = [zlib_dep]
 core_absl_deps = [
   absl_deps['log'],
   absl_deps['check'],

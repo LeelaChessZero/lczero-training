@@ -2,8 +2,6 @@
 
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
-#include <archive.h>
-#include <archive_entry.h>
 
 #include <stdexcept>
 
@@ -11,50 +9,83 @@
 
 namespace lczero {
 namespace training {
+namespace {
+struct TarHeader {
+  std::array<char, 100> name;
+  std::array<uint8_t, 8> mode;
+  std::array<uint8_t, 8> uid;
+  std::array<uint8_t, 8> gid;
+  std::array<uint8_t, 12> size;
+  std::array<uint8_t, 12> mtime;
+  std::array<uint8_t, 8> chksum;
+  uint8_t typeflag;
+  std::array<uint8_t, 100> linkname;
+  std::array<uint8_t, 6> magic;
+  std::array<uint8_t, 2> version;
+  std::array<uint8_t, 32> uname;
+  std::array<uint8_t, 32> gname;
+  std::array<uint8_t, 8> devmajor;
+  std::array<uint8_t, 8> devminor;
+  std::array<uint8_t, 155> prefix;
+  std::array<uint8_t, 12> padding;
+};
+static_assert(sizeof(TarHeader) == 512, "TarHeader must be exactly 512 bytes");
+
+uint64_t ParseOctal(const std::array<uint8_t, 12>& octal) {
+  uint64_t value = 0;
+  for (uint8_t digit : octal) {
+    if (!digit) break;
+    value = (value << 3) + (digit - '0');
+  }
+  return value;
+}
+
+}  // namespace
 
 TarChunkSource::TarChunkSource(const std::filesystem::path& filename)
-    : archive_(archive_read_new()), filename_(filename) {
-  if (!archive_) throw std::runtime_error("Failed to create archive reader");
+    : file_(fopen(filename.string().c_str(), "rb")), filename_(filename) {
+  if (!file_) throw std::runtime_error("Failed to open tar file");
 }
 
 TarChunkSource::~TarChunkSource() {
-  if (archive_) archive_read_free(archive_);
+  if (file_) fclose(file_);
 }
 
 void TarChunkSource::Index() {
-  archive_read_support_filter_all(archive_);
-  archive_read_support_format_all(archive_);
-
-  int r = archive_read_open_filename(archive_, filename_.data(), 10240);
-  if (r != ARCHIVE_OK) {
-    archive_read_free(archive_);
-    throw std::runtime_error("Failed to open tar file: " +
-                             std::string(archive_error_string(archive_)));
-  }
-
-  struct archive_entry* entry;
-  while (archive_read_next_header(archive_, &entry) == ARCHIVE_OK) {
-    const char* pathname = archive_entry_pathname(entry);
-    if (!pathname) continue;
-
-    // Skip directories
-    if (archive_entry_filetype(entry) == AE_IFDIR) {
-      archive_read_data_skip(archive_);
-      continue;
+  while (true) {
+    TarHeader header;
+    if (fread(&header, sizeof(header), 1, file_) != 1) {
+      LOG(WARNING) << "Truncated tar file: " << filename_;
+      break;
     }
 
-    FileEntry file_entry;
-    file_entry.offset = archive_read_header_position(archive_);
-    file_entry.size = archive_entry_size(entry);
+    if (header.name[0] == '\0') break;  // End of file
 
-    // Check if file has .gz extension
-    std::string_view filename_view(pathname);
-    file_entry.is_gzip = filename_view.ends_with(".gz");
+    switch (header.typeflag) {
+      case '5':  // Directory
+        continue;
+      case '0':  // Regular file
+        break;
+      default:
+        LOG(WARNING) << "Unsupported tar header type: " << header.typeflag;
+        continue;
+    }
 
-    files_.push_back(file_entry);
+    std::string_view filename(const_cast<const char*>(header.name.data()));
+    const std::filesystem::path filepath = std::filesystem::path(filename);
+    const long int offset = ftell(file_);
+    const long int size = ParseOctal(header.size);
+    const long int new_offset = offset + (size + 511) / 512 * 512;
+    fseek(file_, new_offset, SEEK_SET);
+    if (new_offset != ftell(file_)) {
+      LOG(WARNING) << "Truncated tar file at " << filename
+                   << ", expected size: " << size
+                   << ", actual size: " << (new_offset - offset);
+      break;
+    }
 
-    // Skip the file data to move to next entry
-    archive_read_data_skip(archive_);
+    if (filepath.filename() == "LICENSE") continue;
+    files_.push_back({offset, size, filepath.extension() == ".gz"});
   }
 
   LOG(INFO) << "Read " << files_.size() << " entries from " << filename_;
@@ -65,32 +96,13 @@ std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
 size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 
 std::string TarChunkSource::GetChunkData(size_t index) {
-  if (index >= files_.size())
+  if (index >= files_.size()) {
     throw std::out_of_range("File index out of range");
+  }
   const auto& file_entry = files_[index];
-
-  // A filter count > 1 indicates a compressed archive (e.g., tar + gzip).
-  // Seeking is not supported on compressed archives.
-  if (archive_filter_count(archive_) > 1) {
-    throw std::runtime_error("Cannot seek in compressed archive");
-  }
-
-  int r = archive_seek_data(archive_, file_entry.offset, SEEK_SET);
-  if (r != ARCHIVE_OK) {
-    throw std::runtime_error(absl::StrCat(
-        "Failed to seek to file offset: ", file_entry.offset,
-        " in archive: ", filename_, " - ", archive_error_string(archive_)));
-  }
-
   std::string content(file_entry.size, '\0');
-  la_ssize_t bytes_read =
-      archive_read_data(archive_, content.data(), file_entry.size);
-  if (static_cast<size_t>(bytes_read) != file_entry.size) {
-    throw std::runtime_error(absl::StrCat("Failed to read file data: ",
-                                          archive_error_string(archive_)));
-  }
-
-  // If the file is gzipped, decompress it
+  fseek(file_, file_entry.offset, SEEK_SET);
+  fread(content.data(), 1, file_entry.size, file_);
   if (file_entry.is_gzip) return GunzipBuffer(content);
   return content;
 }
