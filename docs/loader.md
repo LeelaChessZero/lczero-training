@@ -76,7 +76,6 @@ To add a new metric, you need to:
   [Queue or Stage widget](../src/lczero_training/tui/stage_widgets.py) create
   proper UI elements and update update_metrics() function to update them.
 
-
 * For load metrics, you have to create LoadMetricPauser per thread, e.g. see [ShufflingChunkPool](../csrc/loader/chunk_feed/shuffling_chunk_pool.cc).
 * For queue metrics, just collect the queue statistics in FlushMetrics().
 
