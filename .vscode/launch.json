@@ -33,10 +33,10 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "stats_test",
-            "program": "${workspaceFolder}/builddir/stats_test",
+            "name": "chunk_unpacker_test",
+            "program": "${workspaceFolder}/builddir/chunk_unpacker_test",
             "args": [
-                "--gtest_filter=ExponentialAggregatorTest.ExactDurationTest",
+              //  "--gtest_filter=ExponentialAggregatorTest.ExactDurationTest",
             ],
             "cwd": "${workspaceFolder}/builddir"
         },

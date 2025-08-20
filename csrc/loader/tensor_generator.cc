@@ -9,7 +9,9 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/log/log.h"
+#include "loader/data_loader_metrics.h"
 #include "proto/training_config.pb.h"
+#include "proto/training_metrics.pb.h"
 
 namespace lczero {
 namespace training {
@@ -18,12 +20,16 @@ TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
                                  const TensorGeneratorConfig& config)
     : input_queue_(input_queue),
       output_queue_(config.output_queue_size()),
-      thread_pool_(config.worker_threads(), ThreadPoolOptions{}),
-      batch_size_(config.batch_size()) {
+      batch_size_(config.batch_size()),
+      thread_pool_(config.worker_threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Starting TensorGenerator with " << config.worker_threads()
             << " threads, batch size " << config.batch_size();
+
+  // Initialize thread contexts and start worker threads.
+  thread_contexts_.reserve(config.worker_threads());
   for (size_t i = 0; i < config.worker_threads(); ++i) {
-    thread_pool_.Enqueue([this]() { Worker(); });
+    thread_contexts_.push_back(std::make_unique<ThreadContext>());
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -31,7 +37,7 @@ Queue<TensorGenerator::OutputType>* TensorGenerator::output() {
   return &output_queue_;
 }
 
-void TensorGenerator::Worker() {
+void TensorGenerator::Worker(ThreadContext* context) {
   auto producer = output_queue_.CreateProducer();
   std::vector<FrameType> batch;
   batch.reserve(batch_size_);
@@ -41,13 +47,17 @@ void TensorGenerator::Worker() {
       // Collect frames for a batch.
       batch.clear();
       for (size_t i = 0; i < batch_size_; ++i) {
+        LoadMetricPauser pauser(context->load_metric_updater);
         batch.push_back(input_queue_->Get());
       }
 
       // Convert batch to tensors.
       TensorTuple tensors;
       ConvertFramesToTensors(batch, tensors);
-      producer.Put(std::move(tensors));
+      {
+        LoadMetricPauser pauser(context->load_metric_updater);
+        producer.Put(std::move(tensors));
+      }
     }
   } catch (const QueueClosedException&) {
     // Input queue is closed.
@@ -164,6 +174,16 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
       absl::c_fill(plane_slice, value);
     }
   }
+}
+
+TensorGeneratorMetricsProto TensorGenerator::FlushMetrics() {
+  TensorGeneratorMetricsProto result;
+  for (const auto& context : thread_contexts_) {
+    UpdateFrom(*result.mutable_load(),
+               context->load_metric_updater.FlushMetrics());
+  }
+  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+  return result;
 }
 
 }  // namespace training

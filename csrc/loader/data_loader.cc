@@ -77,6 +77,10 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
         chunk_source_loader_.FlushMetrics();
     *metrics.mutable_shuffling_chunk_pool() =
         shuffling_chunk_pool_.FlushMetrics();
+    *metrics.mutable_chunk_unpacker() = chunk_unpacker_.FlushMetrics();
+    *metrics.mutable_shuffling_frame_sampler() =
+        shuffling_frame_sampler_.FlushMetrics();
+    *metrics.mutable_tensor_generator() = tensor_generator_.FlushMetrics();
     metrics_aggregator_.RecordMetrics(std::move(metrics));
     metrics_aggregator_.Advance(std::chrono::steady_clock::now());
   }

@@ -3,7 +3,9 @@
 #include <cstring>
 
 #include "absl/log/log.h"
+#include "loader/data_loader_metrics.h"
 #include "proto/training_config.pb.h"
+#include "proto/training_metrics.pb.h"
 
 namespace lczero {
 namespace training {
@@ -15,9 +17,12 @@ ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
       thread_pool_(config.worker_threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Starting ChunkUnpacker with " << config.worker_threads()
             << " worker threads";
-  // Start the worker threads.
+
+  // Initialize thread contexts and start worker threads.
+  thread_contexts_.reserve(config.worker_threads());
   for (size_t i = 0; i < config.worker_threads(); ++i) {
-    thread_pool_.Enqueue([this]() { Worker(); });
+    thread_contexts_.push_back(std::make_unique<ThreadContext>());
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -25,13 +30,16 @@ Queue<ChunkUnpacker::OutputType>* ChunkUnpacker::output() {
   return &output_queue_;
 }
 
-void ChunkUnpacker::Worker() {
+void ChunkUnpacker::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread.
   auto producer = output_queue_.CreateProducer();
 
   try {
     while (true) {
-      auto chunk = input_queue_->Get();
+      auto chunk = [&]() {
+        LoadMetricPauser pauser(context->load_metric_updater);
+        return input_queue_->Get();
+      }();
 
       // Check if chunk size is valid for V6TrainingData frames.
       if (chunk.size() % sizeof(V6TrainingData) != 0) {
@@ -49,6 +57,7 @@ void ChunkUnpacker::Worker() {
         V6TrainingData frame;
         std::memcpy(&frame, data + i * sizeof(V6TrainingData),
                     sizeof(V6TrainingData));
+        LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(frame));
       }
     }
@@ -57,6 +66,16 @@ void ChunkUnpacker::Worker() {
     // function exits which may close the output queue if this is the last
     // producer.
   }
+}
+
+ChunkUnpackerMetricsProto ChunkUnpacker::FlushMetrics() {
+  ChunkUnpackerMetricsProto result;
+  for (const auto& context : thread_contexts_) {
+    UpdateFrom(*result.mutable_load(),
+               context->load_metric_updater.FlushMetrics());
+  }
+  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+  return result;
 }
 
 }  // namespace training
