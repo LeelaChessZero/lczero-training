@@ -78,3 +78,16 @@ The training pipeline will automatically restore from a previous model if it exi
 ## Supervised training
 
 Generating trainingdata from pgn files is currently broken and has low priority, feel free to create a PR.
+
+## Building 2025-08 version.
+
+1. Make sure `uv` and `justfile` are installed (plus `meson` and other stuff, potentially `protoc`).
+2. `git submodule update`
+3. `uv venv` (!important! do this before running meson; otherwise meson will build module for wrong python)
+4. `uv sync`
+5. `CXX=clang++ CC=clang uv run meson setup build/release/ --buildtype=release --native-file=native.ini` (clang is optional, should build fine with default compiler)
+6. `just build-proto`
+7. `meson compile -C build/release/`
+8. `ln -s -T ../../build/release/_lczero_training.cpython-311-x86_64-linux-gnu.so src/lczero_training/_lczero_training.so`
+
+14. Run it! `uv run python -m lczero_training --config docs/example.textproto`

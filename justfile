@@ -41,11 +41,11 @@ format: format-cpp format-proto format-python
 
 # Build the project
 build:
-    meson compile -C builddir/
+    meson compile -C build/release/
 
 # Run tests
 test-cpp:
-    meson test -C builddir/
+    meson test -C build/release/
 
 test-python: 
     uv run pytest    
