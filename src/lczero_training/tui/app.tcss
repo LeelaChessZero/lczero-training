@@ -43,7 +43,7 @@ StageWidget {
     color: $text;
     border: double $success;
     border-title-color: $success;
-    height: 6;
+    height: 7;
     padding: 1;
 }
 
@@ -79,7 +79,7 @@ QueueWidget {
     color: $text-muted;
     border: hkey $success-darken-2;
     padding: 0 1;
-    height: 6;
+    height: 7;
 }
 
 LoadWidget {

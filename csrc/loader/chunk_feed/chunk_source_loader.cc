@@ -68,6 +68,8 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
                                     .message_type = file.message_type};
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(output));
+      } else {
+        skipped_files_count_++;
       }
     }
   } catch (const QueueClosedException&) {
@@ -85,6 +87,9 @@ ChunkSourceLoaderMetricsProto ChunkSourceLoader::FlushMetrics() {
   }
   // Get queue metrics.
   *result.mutable_queue() = MetricsFromQueue(output_queue_);
+
+  // Atomically get and reset skipped files count.
+  result.set_skipped_files_count(skipped_files_count_.exchange(0));
 
   return result;
 }

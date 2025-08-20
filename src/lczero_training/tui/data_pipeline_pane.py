@@ -9,6 +9,7 @@ from textual.containers import Container
 
 from ..proto import training_metrics_pb2
 from .stage_widgets import (
+    ChunkSourceLoaderStageWidget,
     MetricsStageWidget,
     QueueWidget,
     ShufflingChunkPoolStageWidget,
@@ -48,6 +49,12 @@ class DataPipelinePane(Container):
         for config in STAGES_CONFIG:
             if config.metrics_field == "shuffling_chunk_pool":
                 stage: StageWidget = ShufflingChunkPoolStageWidget(
+                    stage_name=config.stage_name,
+                    metrics_field_name=config.metrics_field,
+                    item_name=config.item_name,
+                )
+            elif config.metrics_field == "chunk_source_loader":
+                stage = ChunkSourceLoaderStageWidget(
                     stage_name=config.stage_name,
                     metrics_field_name=config.metrics_field,
                     item_name=config.item_name,

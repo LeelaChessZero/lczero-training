@@ -78,6 +78,11 @@ To add a new metric, you need to:
 
 * For load metrics, you have to create LoadMetricPauser per thread, e.g. see [ShufflingChunkPool](../csrc/loader/chunk_feed/shuffling_chunk_pool.cc).
 * For queue metrics, just collect the queue statistics in FlushMetrics().
+* For all metrics, both "all time" and "during last second" is provided. The
+  latter is useful to determine rate (items per second).
+* In general, use StatisticsProtoInt64 (or StatisticsProtoDouble) for
+  distribution metrics, and simple number field for additive metrics like
+  counts.
 
 ## TensorGenerator
 

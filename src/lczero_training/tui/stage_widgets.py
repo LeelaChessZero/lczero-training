@@ -280,6 +280,60 @@ class MetricsStageWidget(StageWidget):
             self.load_widget.update_load_metrics(None)
 
 
+class ChunkSourceLoaderStageWidget(StageWidget):
+    """A widget for the ChunkSourceLoader stage with load metrics and skipped files."""
+
+    def __init__(
+        self,
+        stage_name: str,
+        metrics_field_name: str,
+        item_name: str = "items",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(stage_name, **kwargs)
+        self.metrics_field_name = metrics_field_name
+        self.item_name = item_name
+        self.load_widget = LoadWidget()
+        self.skipped_files_display = Static("skipped: --")
+        self._skipped_total = 0
+        self._skipped_rate = 0
+
+    def compose(self) -> ComposeResult:
+        yield self.load_widget
+        yield self.skipped_files_display
+
+    def update_metrics(
+        self,
+        dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
+    ) -> None:
+        """Update the stage metrics display from protobuf data."""
+        if not dataloader_1_second or not dataloader_total:
+            self.load_widget.update_load_metrics(None)
+            self.skipped_files_display.update("skipped: --")
+            return
+
+        try:
+            stage_1sec = getattr(dataloader_1_second, self.metrics_field_name)
+            stage_total = getattr(dataloader_total, self.metrics_field_name)
+
+            self.load_widget.update_load_metrics(stage_1sec.load)
+
+            self._skipped_total = stage_total.skipped_files_count
+            self._skipped_rate = stage_1sec.skipped_files_count
+
+            skipped_text = f"skipped: {format_full_number(self._skipped_total)}"
+            if self._skipped_rate > 0:
+                skipped_text += f" ({format_si(self._skipped_rate)}/s)"
+            else:
+                skipped_text += " (0/s)"
+
+            self.skipped_files_display.update(skipped_text)
+        except AttributeError:
+            self.load_widget.update_load_metrics(None)
+            self.skipped_files_display.update("skipped: --")
+
+
 class ShufflingChunkPoolStageWidget(StageWidget):
     """A widget for the ShufflingChunkPool stage with two load metrics."""
 

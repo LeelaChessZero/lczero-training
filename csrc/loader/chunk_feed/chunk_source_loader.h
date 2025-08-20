@@ -49,6 +49,7 @@ class ChunkSourceLoader {
   Queue<OutputType> output_queue_;
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
+  std::atomic<uint64_t> skipped_files_count_{0};
 };
 
 }  // namespace training
