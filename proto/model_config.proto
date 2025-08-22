@@ -1,0 +1,8 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Configuration for model architecture and parameters.
+message ModelConfig {
+  // Empty for now - will be populated with model-specific configuration
+}

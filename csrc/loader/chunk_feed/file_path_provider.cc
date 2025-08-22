@@ -15,7 +15,7 @@
 #include <stdexcept>
 
 #include "loader/data_loader_metrics.h"
-#include "proto/training_config.pb.h"
+#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {

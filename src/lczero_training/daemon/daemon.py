@@ -10,9 +10,9 @@ from pathlib import Path
 import anyio
 from google.protobuf import text_format
 
-import lczero_training.proto.training_config_pb2 as config_pb2
+import proto.root_config_pb2 as config_pb2
+import proto.training_metrics_pb2 as training_metrics_pb2
 from lczero_training._lczero_training import DataLoader
-from lczero_training.proto import training_metrics_pb2
 
 from .protocol.communicator import Communicator
 from .protocol.messages import StartTrainingPayload, TrainingStatusPayload
@@ -97,10 +97,8 @@ class TrainingDaemon:
         config_path = Path(payload.config_filepath)
         config_text = config_path.read_text()
 
-        training_config = config_pb2.TrainingConfig()
-        text_format.Parse(config_text, training_config)
+        root_config = config_pb2.RootConfig()
+        text_format.Parse(config_text, root_config)
 
-        data_loader_config_bytes = (
-            training_config.data_loader.SerializeToString()
-        )
+        data_loader_config_bytes = root_config.data_loader.SerializeToString()
         self._data_loader = DataLoader(data_loader_config_bytes)

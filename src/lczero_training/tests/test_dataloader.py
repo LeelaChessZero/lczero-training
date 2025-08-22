@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import lczero_training.proto.training_config_pb2 as config_pb2
+import proto.data_loader_config_pb2 as config_pb2
 from lczero_training._lczero_training import DataLoader
 
 

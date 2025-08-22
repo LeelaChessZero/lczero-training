@@ -8,7 +8,7 @@
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
-#include "proto/training_config.pb.h"
+#include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
 #include "utils/thread_pool.h"

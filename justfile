@@ -22,7 +22,10 @@ format-proto:
 build-proto:
     mkdir -p src/lczero_training/proto
     touch src/lczero_training/proto/__init__.py
-    uv run protoc --proto_path=proto --python_out=src/lczero_training/proto --mypy_out=src/lczero_training/proto proto/*.proto
+    protoc \
+        --proto_path=. \
+        --python_out=src/ \
+        proto/*.proto
 
 # Check if all Python files in src/ are formatted according to ruff
 check-python:

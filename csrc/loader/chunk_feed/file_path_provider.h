@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-#include "proto/training_config.pb.h"
+#include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"
 #include "utils/metrics/printer.h"

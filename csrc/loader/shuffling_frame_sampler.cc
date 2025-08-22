@@ -4,7 +4,7 @@
 #include "absl/log/log.h"
 #include "absl/random/uniform_int_distribution.h"
 #include "loader/data_loader_metrics.h"
-#include "proto/training_config.pb.h"
+#include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 
 namespace lczero {

@@ -1,0 +1,19 @@
+syntax = "proto2";
+
+package lczero.training;
+
+import "proto/data_loader_config.proto";
+import "proto/training_config.proto";
+import "proto/model_config.proto";
+
+// Root configuration message containing all subsystem configurations.
+message RootConfig {
+  // Name identifier for this configuration
+  optional string name = 1;
+  // Data loader configuration
+  optional DataLoaderConfig data_loader = 2;
+  // Training configuration
+  optional TrainingConfig training = 3;
+  // Model configuration
+  optional ModelConfig model = 4;
+}

@@ -2,6 +2,8 @@
 # This file demonstrates all available configuration options with their default values
 # and explanations of what each setting controls.
 
+name: "example_training_run"  # Name identifier for this configuration
+
 data_loader {
   file_path_provider {
     directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with training data files
@@ -32,4 +34,12 @@ data_loader {
     batch_size: 1024  # Batch size for tensors
     queue_capacity: 4  # Output queue for batched tensors
   }
+}
+
+training {
+  # Training configuration will be added here in future
+}
+
+model {
+  # Model configuration will be added here in future
 }

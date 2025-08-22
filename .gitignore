@@ -106,8 +106,8 @@ venv.bak/
 
 # protobuf stuff
 tf/proto/
-src/lczero_training/proto/*_pb2.py
-src/lczero_training/proto/*.pyi
+src/proto/*_pb2.py
+src/proto/*.pyi
 
 # Meson
 builddir/

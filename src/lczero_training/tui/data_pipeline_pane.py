@@ -7,7 +7,8 @@ from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Container
 
-from ..proto import training_metrics_pb2
+import proto.training_metrics_pb2 as training_metrics_pb2
+
 from .stage_widgets import (
     ChunkSourceLoaderStageWidget,
     MetricsStageWidget,

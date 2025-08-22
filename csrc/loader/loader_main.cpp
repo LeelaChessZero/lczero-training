@@ -12,7 +12,7 @@
 #include <iostream>
 
 #include "data_loader.h"
-#include "proto/training_config.pb.h"
+#include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/printer.h"
 

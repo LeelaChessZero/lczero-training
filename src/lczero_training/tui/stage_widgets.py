@@ -9,7 +9,7 @@ from textual.containers import Container, Horizontal
 from textual.reactive import reactive
 from textual.widgets import ProgressBar, Sparkline, Static
 
-from ..proto import training_metrics_pb2
+import proto.training_metrics_pb2 as training_metrics_pb2
 
 
 class StageWidget(Static):
