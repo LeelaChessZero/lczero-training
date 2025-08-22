@@ -12,8 +12,11 @@ from textual.app import App, ComposeResult
 from textual.css.query import NoMatches
 from textual.widgets import Footer, Static
 
-from ..protocol.communicator import AsyncCommunicator
-from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
+from ..daemon.protocol.communicator import AsyncCommunicator
+from ..daemon.protocol.messages import (
+    StartTrainingPayload,
+    TrainingStatusPayload,
+)
 from .data_pipeline_pane import DataPipelinePane
 from .log_pane import StreamingLogPane
 

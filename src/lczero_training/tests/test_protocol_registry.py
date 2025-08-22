@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from lczero_training.protocol.registry import (
+from lczero_training.daemon.protocol.registry import (
     CLASS_TO_TYPE_MAP,
     TYPE_TO_CLASS_MAP,
     register,
@@ -121,10 +121,10 @@ def test_registry_persistence() -> None:
         data: str
 
     # Re-import the module
-    from lczero_training.protocol.registry import (
+    from lczero_training.daemon.protocol.registry import (
         CLASS_TO_TYPE_MAP as imported_class_map,
     )
-    from lczero_training.protocol.registry import (
+    from lczero_training.daemon.protocol.registry import (
         TYPE_TO_CLASS_MAP as imported_type_map,
     )
 

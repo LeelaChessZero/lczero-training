@@ -14,8 +14,8 @@ import lczero_training.proto.training_config_pb2 as config_pb2
 from lczero_training._lczero_training import DataLoader
 from lczero_training.proto import training_metrics_pb2
 
-from ..protocol.communicator import Communicator
-from ..protocol.messages import StartTrainingPayload, TrainingStatusPayload
+from .protocol.communicator import Communicator
+from .protocol.messages import StartTrainingPayload, TrainingStatusPayload
 
 
 class TrainingDaemon:

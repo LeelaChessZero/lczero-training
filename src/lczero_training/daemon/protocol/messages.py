@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 
-from ..proto import training_metrics_pb2
+from ...proto import training_metrics_pb2
 from .registry import register
 
 # --- Notifications from UI (Parent) to Trainer (Child) ---
