@@ -113,6 +113,14 @@ src/lczero_training/proto/*.pyi
 builddir/
 subprojects/
 
-# Claude
+# LLM Agents
+# Use AGENTS.md; symlink other files to it if needed.
 .claude/
 CLAUDE.local.md
+.claude.json
+CLAUDE.md
+GEMINI.md
+
+# IDE
+.vscode/
+.idea/
