@@ -46,7 +46,7 @@ class ShufflingChunkPool {
   };
 
   std::vector<std::unique_ptr<ChunkSource>> InitializeChunkSources(
-      size_t num_startup_indexing_threads);
+      size_t startup_indexing_threads);
   void ProcessInputFiles(
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources);
   void IndexingWorker(IndexingThreadContext* context);

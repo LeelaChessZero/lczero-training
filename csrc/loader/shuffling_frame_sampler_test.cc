@@ -15,7 +15,7 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_reservoir_size_per_thread(10);  // Small size for testing
-    config_.set_output_queue_size(20);
+    config_.set_queue_capacity(20);
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {

@@ -16,8 +16,8 @@ class ChunkUnpackerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<std::string>>(10);
-    config_.set_worker_threads(1);
-    config_.set_output_queue_size(10);
+    config_.set_threads(1);
+    config_.set_queue_capacity(10);
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {

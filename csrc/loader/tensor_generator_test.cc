@@ -20,8 +20,8 @@ class TensorGeneratorTest : public ::testing::Test {
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_batch_size(4);
-    config_.set_worker_threads(1);
-    config_.set_output_queue_size(10);
+    config_.set_threads(1);
+    config_.set_queue_capacity(10);
   }
 
   V6TrainingData CreateTestFrame() {

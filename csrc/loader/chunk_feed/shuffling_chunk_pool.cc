@@ -22,17 +22,16 @@ namespace training {
 ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
                                        const ShufflingChunkPoolConfig& config)
     : chunk_pool_size_(config.chunk_pool_size()),
-      indexing_pool_(config.num_indexing_threads(), ThreadPoolOptions{}),
-      chunk_loading_pool_(config.num_chunk_loading_threads(),
-                          ThreadPoolOptions{}),
+      indexing_pool_(config.indexing_threads(), ThreadPoolOptions{}),
+      chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}),
       input_queue_(input_queue),
-      output_queue_(config.output_queue_size()),
+      output_queue_(config.queue_capacity()),
       initialization_thread_([this, config]() {
         try {
           LOG(INFO) << "Starting ShufflingChunkPool with pool size "
                     << config.chunk_pool_size();
           std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
-              InitializeChunkSources(config.num_startup_indexing_threads());
+              InitializeChunkSources(config.startup_indexing_threads());
           ProcessInputFiles(std::move(uninitialized_sources));
 
           // Start input processing worker that continuously processes new
@@ -76,8 +75,7 @@ ShufflingChunkPool::~ShufflingChunkPool() {
 Queue<std::string>* ShufflingChunkPool::output() { return &output_queue_; }
 
 std::vector<std::unique_ptr<ChunkSource>>
-ShufflingChunkPool::InitializeChunkSources(
-    size_t num_startup_indexing_threads) {
+ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources;
 
   // Read from input queue until kInitialScanComplete.
@@ -105,7 +103,7 @@ ShufflingChunkPool::InitializeChunkSources(
   std::atomic<size_t> total_chunks = 0;
   size_t sources_to_keep = 0;
 
-  ThreadPool indexing_pool(num_startup_indexing_threads);
+  ThreadPool indexing_pool(startup_indexing_threads);
 
   // Index sources ≈sequentially until we have enough chunks. It's fine to
   // overshoot a bit due to multiple threads.

@@ -13,8 +13,8 @@ namespace training {
 TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
-  config.set_worker_threads(1);
-  config.set_output_queue_size(10);
+  config.set_threads(1);
+  config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
 
   {
@@ -45,8 +45,8 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
 TEST(ChunkSourceLoaderTest, HandlesPhases) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
-  config.set_worker_threads(1);
-  config.set_output_queue_size(10);
+  config.set_threads(1);
+  config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
 
   {
@@ -75,8 +75,8 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
 TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
-  config.set_worker_threads(1);
-  config.set_output_queue_size(10);
+  config.set_threads(1);
+  config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
 
   {

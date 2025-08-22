@@ -105,10 +105,10 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(100);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
@@ -136,10 +136,10 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(100);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // Constructor should now succeed (initialization is asynchronous)
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
@@ -171,10 +171,10 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(100);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // Test that constructor completes and processes mock chunk sources
   EXPECT_NO_THROW({
@@ -198,10 +198,10 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(20);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
@@ -232,10 +232,10 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(100);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
@@ -266,10 +266,10 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(50);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // Should only keep sources that fit in the window
   EXPECT_NO_THROW({
@@ -289,25 +289,25 @@ TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigDefaults) {
   config.set_chunk_pool_size(1000);
 
   EXPECT_EQ(config.chunk_pool_size(), 1000);
-  EXPECT_EQ(config.num_startup_indexing_threads(), 4);  // Default value
-  EXPECT_EQ(config.num_indexing_threads(), 4);          // Default value
-  EXPECT_EQ(config.num_chunk_loading_threads(), 4);     // Default value
-  EXPECT_EQ(config.output_queue_size(), 16);            // Default value
+  EXPECT_EQ(config.startup_indexing_threads(), 4);  // Default value
+  EXPECT_EQ(config.indexing_threads(), 4);          // Default value
+  EXPECT_EQ(config.chunk_loading_threads(), 4);     // Default value
+  EXPECT_EQ(config.queue_capacity(), 16);           // Default value
 }
 
 TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigCustomValues) {
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(500);
-  config.set_num_startup_indexing_threads(2);
-  config.set_num_indexing_threads(3);
-  config.set_num_chunk_loading_threads(4);
-  config.set_output_queue_size(25);
+  config.set_startup_indexing_threads(2);
+  config.set_indexing_threads(3);
+  config.set_chunk_loading_threads(4);
+  config.set_queue_capacity(25);
 
   EXPECT_EQ(config.chunk_pool_size(), 500);
-  EXPECT_EQ(config.num_startup_indexing_threads(), 2);
-  EXPECT_EQ(config.num_indexing_threads(), 3);
-  EXPECT_EQ(config.num_chunk_loading_threads(), 4);
-  EXPECT_EQ(config.output_queue_size(), 25);
+  EXPECT_EQ(config.startup_indexing_threads(), 2);
+  EXPECT_EQ(config.indexing_threads(), 3);
+  EXPECT_EQ(config.chunk_loading_threads(), 4);
+  EXPECT_EQ(config.queue_capacity(), 25);
 }
 
 TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
@@ -319,10 +319,10 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(70);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // ShufflingChunkPool should handle sorting internally (newest first)
   EXPECT_NO_THROW({
@@ -345,10 +345,10 @@ TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(100);
-  config.set_num_startup_indexing_threads(3);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(3);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // Should work without hanging or crashing
   EXPECT_NO_THROW({
@@ -369,10 +369,10 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(3);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);  // Large enough to hold all chunks
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);  // Large enough to hold all chunks
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
@@ -417,10 +417,10 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(40);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();
@@ -452,10 +452,10 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(15);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(2);
-  config.set_output_queue_size(50);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(2);
+  config.set_queue_capacity(50);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();
@@ -489,10 +489,10 @@ TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(20);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
 
@@ -511,10 +511,10 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(20);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   // Test that destructor calls Close() and properly shuts down
   {
@@ -543,10 +543,10 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
 
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(30);
-  config.set_num_startup_indexing_threads(1);
-  config.set_num_indexing_threads(1);
-  config.set_num_chunk_loading_threads(1);
-  config.set_output_queue_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
 
   ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
   auto* output_queue = shuffling_chunk_pool.output();

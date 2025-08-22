@@ -26,14 +26,14 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
 ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
                                      const ChunkSourceLoaderConfig& config)
     : input_queue_(input_queue),
-      output_queue_(config.output_queue_size()),
-      thread_pool_(config.worker_threads(), ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ChunkSourceLoader with " << config.worker_threads()
+      output_queue_(config.queue_capacity()),
+      thread_pool_(config.threads(), ThreadPoolOptions{}) {
+  LOG(INFO) << "Starting ChunkSourceLoader with " << config.threads()
             << " worker threads";
 
   // Initialize thread contexts and start worker threads.
-  thread_contexts_.reserve(config.worker_threads());
-  for (size_t i = 0; i < config.worker_threads(); ++i) {
+  thread_contexts_.reserve(config.threads());
+  for (size_t i = 0; i < config.threads(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
     thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }

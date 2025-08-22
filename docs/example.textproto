@@ -3,81 +3,33 @@
 # and explanations of what each setting controls.
 
 data_loader {
-  # File Path Provider - Watches directory for new training data files
   file_path_provider {
-    # Directory containing training data files (.gz, .tar, etc.)
-    directory: "/home/crem/tmp/2025-07/lczero-training/data"
-    
-    # Size of internal file queue
-    # Controls how many files can be queued for processing
-    queue_capacity: 16
+    directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with training data files
+    queue_capacity: 16  # Internal file queue size
   }
-
-  # Chunk Source Loader - Converts file paths to chunk sources
   chunk_source_loader {
-    # Number of worker threads for loading chunks from files
-    worker_threads: 1
-    
-    # Size of output queue for processed chunk sources
-    output_queue_size: 16
+    threads: 1  # Threads for loading chunks
+    queue_capacity: 16  # Output queue for chunk sources
   }
-
-  # Shuffling Chunk Pool - Manages chunk shuffling and loading with reservoir sampling
   shuffling_chunk_pool {
-    # Size of chunk shuffle buffer
-    # This determines how many chunks are kept in memory for shuffling
-    # Larger values provide better randomization but use more memory
-    chunk_pool_size: 5000000
-    
-    # Number of threads used during initial startup indexing
-    # Higher values speed up startup but use more CPU
-    num_startup_indexing_threads: 4
-    
-    # Number of threads for ongoing indexing operations
-    num_indexing_threads: 4
-    
-    # Number of threads for loading chunk data from disk
-    num_chunk_loading_threads: 4
-    
-    # Size of output queue for shuffled chunks
-    output_queue_size: 16
+    chunk_pool_size: 5000000  # Shuffle buffer size (chunks in memory)
+    startup_indexing_threads: 4  # Threads for startup indexing
+    indexing_threads: 4  # Threads for ongoing indexing
+    chunk_loading_threads: 4  # Threads for loading chunk data
+    queue_capacity: 16  # Output queue for shuffled chunks
   }
-
-  # Chunk Unpacker - Extracts individual training frames from packed chunks
   chunk_unpacker {
-    # Number of worker threads for unpacking chunks
-    worker_threads: 1
-    
-    # Size of output queue for unpacked frames
-    output_queue_size: 16
+    threads: 1  # Threads for unpacking chunks
+    queue_capacity: 16  # Output queue for unpacked frames
   }
-
-  # Shuffling Frame Sampler - Uses reservoir sampling to randomize frame order
   shuffling_frame_sampler {
-    # Number of worker threads for frame sampling
-    num_worker_threads: 1
-    
-    # Size of sampling reservoir per worker thread
-    # Larger values provide better randomization but use more memory
-    # Each thread maintains its own reservoir of this size
-    reservoir_size_per_thread: 1000000
-    
-    # Size of output queue for sampled frames
-    output_queue_size: 16
+    threads: 1  # Threads for frame sampling
+    reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
+    queue_capacity: 16  # Output queue for sampled frames
   }
-
-  # Tensor Generator - Converts frames to batched tensors for training
   tensor_generator {
-    # Number of worker threads for tensor generation
-    worker_threads: 1
-    
-    # Batch size for generated tensors
-    # This determines how many training examples are grouped together
-    # Adjust based on available GPU memory and training requirements
-    batch_size: 1024
-    
-    # Size of output queue for batched tensors
-    # Smaller than other queues since tensors are larger
-    output_queue_size: 4
+    threads: 1  # Threads for tensor generation
+    batch_size: 1024  # Batch size for tensors
+    queue_capacity: 4  # Output queue for batched tensors
   }
 }
