@@ -25,20 +25,33 @@ build-proto:
     protoc \
         --proto_path=. \
         --python_out=src/ \
+        --pyi_out=src/ \
+        -I libs/lczero-common/ \
+        -I libs/lc0/src/neural/xla/ \
         proto/*.proto
+    protoc \
+        --proto_path=libs/lczero-common/ \
+        --python_out=src/ \
+        --pyi_out=src/ \
+        libs/lczero-common/proto/*.proto
+    protoc \
+        --proto_path=libs/lc0/src/neural/xla/ \
+        --python_out=src/ \
+        --pyi_out=src/ \
+        libs/lc0/src/neural/xla/hlo.proto
 
 # Check if all Python files in src/ are formatted according to ruff
 check-python:
-    uv run ruff check src/ --exclude src/lczero_training/proto
-    uv run ruff check --select I src/ --exclude src/lczero_training/proto
-    uv run ruff format --check src/ --exclude src/lczero_training/proto
+    uv run ruff check src/
+    uv run ruff check --select I src/
+    uv run ruff format --check src/
     uv run mypy -p lczero_training --disallow-untyped-defs --disallow-incomplete-defs
 
 # Format all Python files in src/ using ruff
 format-python:
-    uv run ruff check --fix --select I src/ --exclude src/lczero_training/proto
-    uv run ruff format src/ --exclude src/lczero_training/proto
-    uv run ruff check --fix src/ --exclude src/lczero_training/proto
+    uv run ruff check --fix --select I src/
+    uv run ruff format src/
+    uv run ruff check --fix src/
 
 format: format-cpp format-proto format-python
 

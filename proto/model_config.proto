@@ -1,8 +1,19 @@
 syntax = "proto2";
 
+import "proto/net.proto";
+import "hlo.proto";
+
 package lczero.training;
 
-// Configuration for model architecture and parameters.
 message ModelConfig {
-  // Empty for now - will be populated with model-specific configuration
+  // Number of intermediate attention layers in the policy head.
+  optional uint32 encoder_layers = 1;
+  optional pblczero.NetworkFormat.PolicyFormat policy = 2;
+  optional pblczero.NetworkFormat.ActivationFunction default_activation = 3;
+  optional uint32 embedding_dense_sz = 4;
+  optional uint32 embedding_size = 5;
+  optional pblczero.XlaShapeProto.Type weights_type = 6;
+  optional pblczero.XlaShapeProto.Type activations_type = 7;
+  optional pblczero.NetworkFormat.ActivationFunction ffn_activation = 8;
+  optional uint32 encoder_dff = 9;
 }

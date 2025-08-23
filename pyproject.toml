@@ -13,7 +13,7 @@ dependencies = [
     "mypy>=1.17.1",
     "pytest>=8.4.1",
     "anyio>=4.10.0",
-    "jax>=0.7.1",
+    "jax[cuda12]>=0.7.1",
     "flax>=0.11.1",
     "optax>=0.2.5",
     "orbax-checkpoint>=0.11.23",
@@ -49,8 +49,16 @@ dev = [
 [tool.mypy]
 mypy_path = "src"
 
+[[tool.mypy.overrides]]
+module = "lczero_training.proto.*_pb2"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["src"]
 python_files = ["test_*.py", "*_test.py"]
 pythonpath = ["src"]
 addopts = "-v"
+
+[tool.ruff]
+exclude = ["*_pb2.py*"]
+line-length = 80
