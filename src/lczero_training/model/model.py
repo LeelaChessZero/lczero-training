@@ -7,7 +7,7 @@ from hlo_pb2 import XlaShapeProto
 from proto import model_config_pb2, net_pb2
 
 from .embedding import Embedding
-from .encoder import EncoderLayer
+from .encoder import EncoderTower
 from .utils import get_dtype
 
 
@@ -25,25 +25,10 @@ class LczeroModel(nnx.Module):
         assert self.config.policy == net_pb2.NetworkFormat.POLICY_ATTENTION
         assert self.config.encoder.num_blocks > 0
 
-        self.smolgen_shared_gen_dense = None
-        if config.encoder.HasField("smolgen"):
-            self.smolgen_shared_gen_dense = nnx.Linear(
-                in_features=config.encoder.smolgen.gen_size,
-                out_features=64 * 64,
-                use_bias=False,
-                rngs=rngs,
-            )
-
-        self.encoders = nnx.Sequential(
-            *[
-                EncoderLayer(
-                    in_features=config.embedding.embedding_size,
-                    config=config.encoder,
-                    smol_gen_dense=self.smolgen_shared_gen_dense,
-                    rngs=rngs,
-                )
-                for _ in range(config.encoder.num_blocks)
-            ]
+        self.encoders = EncoderTower(
+            in_features=config.embedding.embedding_size,
+            config=config.encoder,
+            rngs=rngs,
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -51,7 +36,6 @@ class LczeroModel(nnx.Module):
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
         x = self.embedding(x)
-
         x = self.encoders(x)
 
         return x

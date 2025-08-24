@@ -11,8 +11,41 @@ from .shared import Ffn
 from .utils import get_activation
 
 
-class EncoderLayer(nnx.Module):
-    """A single layer of the transformer encoder."""
+class EncoderTower(nnx.Module):
+    def __init__(
+        self,
+        *,
+        in_features: int,
+        config: model_config_pb2.EncoderConfig,
+        rngs: nnx.Rngs,
+    ):
+        self.smolgen_shared_gen_dense = None
+        if config.HasField("smolgen"):
+            self.smolgen_shared_gen_dense = nnx.Linear(
+                in_features=config.smolgen.gen_size,
+                out_features=64 * 64,
+                use_bias=False,
+                rngs=rngs,
+            )
+
+        self.encoders = nnx.Sequential(
+            *[
+                EncoderBlock(
+                    in_features=in_features,
+                    config=config,
+                    smol_gen_dense=self.smolgen_shared_gen_dense,
+                    rngs=rngs,
+                )
+                for _ in range(config.num_blocks)
+            ]
+        )
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        return self.encoders(x)
+
+
+class EncoderBlock(nnx.Module):
+    """A single block of the transformer encoder."""
 
     def __init__(
         self,
