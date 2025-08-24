@@ -4,52 +4,84 @@ import jax.random
 from flax import nnx
 
 from hlo_pb2 import XlaShapeProto
-from proto import net_pb2
-from proto.model_config_pb2 import ModelConfig
+from proto import model_config_pb2, net_pb2
 
 from .embedding import Embedding
+from .encoder import EncoderLayer
 from .utils import get_dtype
 
 
 class LczeroModel(nnx.Module):
-    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: model_config_pb2.ModelConfig, *, rngs: nnx.Rngs):
         self.config = config
         self._input_channels = 112
-        self._rngs = rngs
 
         self.embedding = Embedding(
             input_channels=self._input_channels,
-            dense_size=config.embedding_dense_sz,
-            embedding_size=config.embedding_size,
-            dff=config.encoder_dff,
-            default_activation=config.default_activation,
-            ffn_activation=config.ffn_activation,
-            rngs=self._rngs,
+            config=config.embedding,
+            rngs=rngs,
         )
 
         assert self.config.policy == net_pb2.NetworkFormat.POLICY_ATTENTION
-        assert self.config.encoder_layers > 0
+        assert self.config.encoder.num_blocks > 0
+
+        self.smolgen_shared_gen_dense = None
+        if config.encoder.HasField("smolgen"):
+            self.smolgen_shared_gen_dense = nnx.Linear(
+                in_features=config.encoder.smolgen.gen_size,
+                out_features=64 * 64,
+                use_bias=False,
+                rngs=rngs,
+            )
+
+        self.encoders = nnx.Sequential(
+            *[
+                EncoderLayer(
+                    in_features=config.embedding.embedding_size,
+                    config=config.encoder,
+                    smol_gen_dense=self.smolgen_shared_gen_dense,
+                    rngs=rngs,
+                )
+                for _ in range(config.encoder.num_blocks)
+            ]
+        )
 
     def __call__(self, x: jax.Array) -> jax.Array:
         x = jnp.astype(x, get_dtype(self.config.activations_type))
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
-
         x = self.embedding(x)
+
+        x = self.encoders(x)
+
         return x
 
 
-def _tmp_make_config() -> ModelConfig:
-    config = ModelConfig()
-    config.encoder_layers = 15
-    config.policy = net_pb2.NetworkFormat.POLICY_ATTENTION
-    config.default_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
-    config.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+def _tmp_make_config() -> model_config_pb2.ModelConfig:
+    config = model_config_pb2.ModelConfig()
+
     config.weights_type = XlaShapeProto.F32
     config.activations_type = XlaShapeProto.BF16
-    config.embedding_dense_sz = 512
-    config.embedding_size = 1024
-    config.encoder_dff = 1536
+    config.policy = net_pb2.NetworkFormat.POLICY_ATTENTION
+
+    config.embedding.dense_size = 512
+    config.embedding.dff = 1536
+    config.embedding.embedding_size = 1024
+    config.embedding.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+    config.embedding.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+
+    config.encoder.num_blocks = 15
+    config.encoder.dff = 1536
+    config.encoder.d_model = 1024
+    config.encoder.heads = 32
+    config.encoder.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+    config.encoder.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+
+    config.encoder.smolgen.hidden_channels = 32
+    config.encoder.smolgen.hidden_size = 256
+    config.encoder.smolgen.gen_size = 256
+    config.encoder.smolgen.activation = net_pb2.NetworkFormat.ACTIVATION_SWISH
+
     return config
 
 
@@ -63,4 +95,8 @@ if __name__ == "__main__":
     random_input = jax.random.normal(key, (112, 8, 8))
     output = model(random_input)
     print(output)
-    print(output.shape)
+    if isinstance(output, (list, tuple)):
+        for o in output:
+            print(o.shape)
+    else:
+        print(output.shape)

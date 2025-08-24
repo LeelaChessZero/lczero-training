@@ -6,14 +6,35 @@ import "hlo.proto";
 package lczero.training;
 
 message ModelConfig {
-  // Number of intermediate attention layers in the policy head.
-  optional uint32 encoder_layers = 1;
-  optional pblczero.NetworkFormat.PolicyFormat policy = 2;
-  optional pblczero.NetworkFormat.ActivationFunction default_activation = 3;
-  optional uint32 embedding_dense_sz = 4;
-  optional uint32 embedding_size = 5;
-  optional pblczero.XlaShapeProto.Type weights_type = 6;
-  optional pblczero.XlaShapeProto.Type activations_type = 7;
+  optional pblczero.XlaShapeProto.Type weights_type = 1;
+  optional pblczero.XlaShapeProto.Type activations_type = 2;
+  optional pblczero.NetworkFormat.PolicyFormat policy = 3;
+  // optional pblczero.NetworkFormat.ActivationFunction default_activation = 4;
+  optional EmbeddingConfig embedding = 5;
+  optional EncoderConfig encoder = 6;
+}
+
+message EmbeddingConfig {
+  optional uint32 dense_size = 1;
+  optional uint32 dff = 2;
+  optional uint32 embedding_size = 3;
+  optional pblczero.NetworkFormat.ActivationFunction activation = 4;
+  optional pblczero.NetworkFormat.ActivationFunction ffn_activation = 5;
+}
+
+message EncoderConfig {
+  optional uint32 num_blocks = 3;
+  optional uint32 dff = 4;
+  optional uint32 d_model = 5;
+  optional uint32 heads = 6;
+  optional pblczero.NetworkFormat.ActivationFunction activation = 7;
   optional pblczero.NetworkFormat.ActivationFunction ffn_activation = 8;
-  optional uint32 encoder_dff = 9;
+  optional SmolgenConfig smolgen = 9;
+}
+
+message SmolgenConfig {
+  optional uint32 hidden_channels = 1;
+  optional uint32 hidden_size = 2;
+  optional uint32 gen_size = 3;
+  optional pblczero.NetworkFormat.ActivationFunction activation = 4;
 }
