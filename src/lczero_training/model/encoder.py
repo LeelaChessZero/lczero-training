@@ -17,6 +17,7 @@ class EncoderTower(nnx.Module):
         *,
         in_features: int,
         config: model_config_pb2.EncoderConfig,
+        defaults: model_config_pb2.DefaultsConfig,
         rngs: nnx.Rngs,
     ):
         self.smolgen_shared_gen_dense = None
@@ -33,6 +34,7 @@ class EncoderTower(nnx.Module):
                 EncoderBlock(
                     in_features=in_features,
                     config=config,
+                    defaults=defaults,
                     smol_gen_dense=self.smolgen_shared_gen_dense,
                     rngs=rngs,
                 )
@@ -52,6 +54,7 @@ class EncoderBlock(nnx.Module):
         *,
         in_features: int,
         config: model_config_pb2.EncoderConfig,
+        defaults: model_config_pb2.DefaultsConfig,
         smol_gen_dense: Optional[nnx.Linear],
         rngs: nnx.Rngs,
     ):
@@ -59,6 +62,7 @@ class EncoderBlock(nnx.Module):
         self.mha = MultiHeadAttention(
             in_features=in_features,
             config=config,
+            defaults=defaults,
             smol_gen_dense=smol_gen_dense,
             rngs=rngs,
         )
@@ -68,7 +72,7 @@ class EncoderBlock(nnx.Module):
         self.ffn = Ffn(
             in_features=in_features,
             hidden_features=in_features,
-            hidden_activation=config.ffn_activation,
+            hidden_activation=defaults.ffn_activation,
             rngs=rngs,
         )
         self.layer_norm2 = nnx.LayerNorm(in_features, rngs=rngs)
@@ -87,6 +91,7 @@ class MultiHeadAttention(nnx.Module):
         self,
         in_features: int,
         config: model_config_pb2.EncoderConfig,
+        defaults: model_config_pb2.DefaultsConfig,
         smol_gen_dense: Optional[nnx.Linear],
         *,
         rngs: nnx.Rngs,
@@ -95,7 +100,7 @@ class MultiHeadAttention(nnx.Module):
         assert depth % config.heads == 0, (
             "Model depth must be divisible by the number of heads."
         )
-        self.activation = config.activation
+        self.activation = defaults.activation
         self.depth = depth
         self.num_heads = config.heads
         self.q = nnx.Linear(
@@ -125,6 +130,7 @@ class MultiHeadAttention(nnx.Module):
             self.smolgen = Smolgen(
                 in_features=in_features,
                 config=config.smolgen,
+                defaults=defaults,
                 heads=config.heads,
                 weight_gen_dense=smol_gen_dense,
                 rngs=rngs,
@@ -164,6 +170,7 @@ class Smolgen(nnx.Module):
         self,
         in_features: int,
         config: model_config_pb2.SmolgenConfig,
+        defaults: model_config_pb2.DefaultsConfig,
         heads: int,
         weight_gen_dense: nnx.Linear,
         *,
@@ -190,7 +197,7 @@ class Smolgen(nnx.Module):
         )
         self.gen_from_ln = nnx.LayerNorm(config.gen_size * heads, rngs=rngs)
         self.weight_gen_dense = weight_gen_dense
-        self.activation = config.activation
+        self.activation = config.activation or defaults.activation
 
     def __call__(self, x: jax.Array) -> jax.Array:
         compressed = self.compressed(x).flatten()

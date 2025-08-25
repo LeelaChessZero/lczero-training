@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import jax
 import jax.numpy as jnp
 import jax.random
@@ -9,6 +11,7 @@ from proto import model_config_pb2, net_pb2
 from .embedding import Embedding
 from .encoder import EncoderTower
 from .utils import get_dtype
+from .value_head import ValueHead
 
 
 class LczeroModel(nnx.Module):
@@ -19,52 +22,60 @@ class LczeroModel(nnx.Module):
         self.embedding = Embedding(
             input_channels=self._input_channels,
             config=config.embedding,
+            defaults=config.defaults,
             rngs=rngs,
         )
 
-        assert self.config.policy == net_pb2.NetworkFormat.POLICY_ATTENTION
         assert self.config.encoder.num_blocks > 0
 
         self.encoders = EncoderTower(
             in_features=config.embedding.embedding_size,
             config=config.encoder,
+            defaults=config.defaults,
             rngs=rngs,
         )
 
-    def __call__(self, x: jax.Array) -> jax.Array:
-        x = jnp.astype(x, get_dtype(self.config.activations_type))
+        self.value_head = ValueHead(
+            in_features=config.embedding.embedding_size,
+            config=config.value_head,
+            defaults=config.defaults,
+            rngs=rngs,
+        )
+
+    def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array]:
+        x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
         x = self.embedding(x)
         x = self.encoders(x)
 
-        return x
+        value = self.value_head(x)
+
+        return x, value
 
 
 def _tmp_make_config() -> model_config_pb2.ModelConfig:
     config = model_config_pb2.ModelConfig()
 
-    config.weights_type = XlaShapeProto.F32
-    config.activations_type = XlaShapeProto.BF16
-    config.policy = net_pb2.NetworkFormat.POLICY_ATTENTION
+    config.defaults.compute_dtype = XlaShapeProto.BF16
+    config.defaults.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
+    config.defaults.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
 
     config.embedding.dense_size = 512
     config.embedding.dff = 1536
     config.embedding.embedding_size = 1024
-    config.embedding.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
-    config.embedding.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
 
     config.encoder.num_blocks = 15
     config.encoder.dff = 1536
     config.encoder.d_model = 1024
     config.encoder.heads = 32
-    config.encoder.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
-    config.encoder.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
 
     config.encoder.smolgen.hidden_channels = 32
     config.encoder.smolgen.hidden_size = 256
     config.encoder.smolgen.gen_size = 256
     config.encoder.smolgen.activation = net_pb2.NetworkFormat.ACTIVATION_SWISH
+
+    config.value_head.embedding_size = 128
 
     return config
 

@@ -16,12 +16,13 @@ class Embedding(nnx.Module):
         *,
         input_channels: int,
         config: model_config_pb2.EmbeddingConfig,
+        defaults: model_config_pb2.DefaultsConfig,
         rngs: nnx.Rngs,
     ):
         self._input_channels = input_channels
         dense_size = config.dense_size
         embedding_size = config.embedding_size
-        self.activation = config.activation
+        self.activation = defaults.activation
 
         assert dense_size > 0
         self.preprocess = nnx.Linear(
@@ -41,7 +42,7 @@ class Embedding(nnx.Module):
         self.ffn = Ffn(
             in_features=embedding_size,
             hidden_features=config.dff,
-            hidden_activation=config.ffn_activation,
+            hidden_activation=defaults.ffn_activation,
             rngs=rngs,
         )
         self.out_norm = nnx.LayerNorm(embedding_size, rngs=rngs)
