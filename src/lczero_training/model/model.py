@@ -10,6 +10,7 @@ from proto import model_config_pb2, net_pb2
 
 from .embedding import Embedding
 from .encoder import EncoderTower
+from .movesleft_head import MovesLeftHead
 from .policy_head import PolicyHead
 from .utils import get_dtype
 from .value_head import ValueHead
@@ -49,8 +50,14 @@ class LczeroModel(nnx.Module):
             defaults=config.defaults,
             rngs=rngs,
         )
+        self.movesleft_head = MovesLeftHead(
+            in_features=config.embedding.embedding_size,
+            config=config.movesleft_head,
+            defaults=config.defaults,
+            rngs=rngs,
+        )
 
-    def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array]:
+    def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
@@ -59,8 +66,9 @@ class LczeroModel(nnx.Module):
 
         value = self.value_head(x)
         policy = self.policy_head(x)
+        movesleft = self.movesleft_head(x)
 
-        return value, policy
+        return value, policy, movesleft
 
 
 def _tmp_make_config() -> model_config_pb2.ModelConfig:
@@ -84,10 +92,12 @@ def _tmp_make_config() -> model_config_pb2.ModelConfig:
     config.encoder.smolgen.gen_size = 256
     config.encoder.smolgen.activation = net_pb2.NetworkFormat.ACTIVATION_SWISH
 
-    config.value_head.embedding_size = 128
-
     config.policy_head.embedding_size = 1024
     config.policy_head.d_model = 1024
+
+    config.value_head.embedding_size = 128
+
+    config.movesleft_head.embedding_size = 32
 
     return config
 

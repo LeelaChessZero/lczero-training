@@ -11,6 +11,7 @@ message ModelConfig {
   optional EncoderConfig encoder = 6;
   optional PolicyHeadConfig policy_head = 7;
   optional ValueHeadConfig value_head = 8;
+  optional MovesLeftHeadConfig movesleft_head = 9;
 }
 
 message DefaultsConfig {
@@ -46,5 +47,9 @@ message PolicyHeadConfig {
 }
 
 message ValueHeadConfig {
+  optional uint32 embedding_size = 1;
+}
+
+message MovesLeftHeadConfig {
   optional uint32 embedding_size = 1;
 }
