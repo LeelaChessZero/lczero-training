@@ -9,7 +9,8 @@ message ModelConfig {
   optional DefaultsConfig defaults = 4;
   optional EmbeddingConfig embedding = 5;
   optional EncoderConfig encoder = 6;
-  optional ValueHeadConfig value_head = 7;
+  optional PolicyHeadConfig policy_head = 7;
+  optional ValueHeadConfig value_head = 8;
 }
 
 message DefaultsConfig {
@@ -37,6 +38,11 @@ message SmolgenConfig {
   optional uint32 hidden_size = 2;
   optional uint32 gen_size = 3;
   optional pblczero.NetworkFormat.ActivationFunction activation = 5;
+}
+
+message PolicyHeadConfig {
+  optional uint32 embedding_size = 1;
+  optional uint32 d_model = 2;
 }
 
 message ValueHeadConfig {

@@ -10,6 +10,7 @@ from proto import model_config_pb2, net_pb2
 
 from .embedding import Embedding
 from .encoder import EncoderTower
+from .policy_head import PolicyHead
 from .utils import get_dtype
 from .value_head import ValueHead
 
@@ -42,6 +43,13 @@ class LczeroModel(nnx.Module):
             rngs=rngs,
         )
 
+        self.policy_head = PolicyHead(
+            in_features=config.embedding.embedding_size,
+            config=config.policy_head,
+            defaults=config.defaults,
+            rngs=rngs,
+        )
+
     def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array]:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))
@@ -50,8 +58,9 @@ class LczeroModel(nnx.Module):
         x = self.encoders(x)
 
         value = self.value_head(x)
+        policy = self.policy_head(x)
 
-        return x, value
+        return value, policy
 
 
 def _tmp_make_config() -> model_config_pb2.ModelConfig:
@@ -76,6 +85,9 @@ def _tmp_make_config() -> model_config_pb2.ModelConfig:
     config.encoder.smolgen.activation = net_pb2.NetworkFormat.ACTIVATION_SWISH
 
     config.value_head.embedding_size = 128
+
+    config.policy_head.embedding_size = 1024
+    config.policy_head.d_model = 1024
 
     return config
 
