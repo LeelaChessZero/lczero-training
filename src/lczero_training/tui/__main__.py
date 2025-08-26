@@ -4,7 +4,7 @@
 
 import anyio
 
-from .tui.app import TrainingTuiApp
+from .app import TrainingTuiApp
 
 
 async def main() -> None:
