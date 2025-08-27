@@ -15,12 +15,12 @@ class ValueHead(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.activation = defaults.activation
-        self.in_dense = nnx.Linear(
+        self.embed = nnx.Linear(
             in_features=in_features,
             out_features=config.num_channels,
             rngs=rngs,
         )
-        self.h_fc2 = nnx.Linear(
+        self.dense1 = nnx.Linear(
             in_features=config.num_channels * 64,
             out_features=128,
             rngs=rngs,
@@ -32,9 +32,9 @@ class ValueHead(nnx.Module):
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        x = self.in_dense(x).flatten()
+        x = self.embed(x).flatten()
         x = get_activation(self.activation)(x)
-        x = self.h_fc2(x)
+        x = self.dense1(x)
         x = get_activation(self.activation)(x)
         x = nnx.softmax(self.wdl(x))
 

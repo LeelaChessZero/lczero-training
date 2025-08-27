@@ -16,13 +16,13 @@ class MovesLeftHead(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.activation = defaults.activation
-        self.embedding = nnx.Linear(
+        self.embed = nnx.Linear(
             in_features=in_features,
             out_features=config.num_channels,
             rngs=rngs,
         )
 
-        self.fc4 = nnx.Linear(
+        self.dense1 = nnx.Linear(
             in_features=config.num_channels * 64,
             out_features=128,
             rngs=rngs,
@@ -34,9 +34,9 @@ class MovesLeftHead(nnx.Module):
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        x = self.embedding(x).flatten()
+        x = self.embed(x).flatten()
         x = get_activation(self.activation)(x)
-        x = self.fc4(x)
+        x = self.dense1(x)
         x = get_activation(self.activation)(x)
         x = self.out(x)
         return nnx.relu(x)

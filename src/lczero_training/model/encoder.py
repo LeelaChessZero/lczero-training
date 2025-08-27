@@ -20,9 +20,10 @@ class EncoderTower(nnx.Module):
         defaults: model_config_pb2.DefaultsConfig,
         rngs: nnx.Rngs,
     ):
-        self.smolgen_shared_gen_dense = None
+        smolgen_shared_gen_dense = None
+        assert config.HasField("smolgen")
         if config.HasField("smolgen"):
-            self.smolgen_shared_gen_dense = nnx.Linear(
+            smolgen_shared_gen_dense = nnx.Linear(
                 in_features=config.smolgen.gen_size,
                 out_features=64 * 64,
                 use_bias=False,
@@ -35,7 +36,7 @@ class EncoderTower(nnx.Module):
                     in_features=in_features,
                     config=config,
                     defaults=defaults,
-                    smol_gen_dense=self.smolgen_shared_gen_dense,
+                    smol_gen_dense=smolgen_shared_gen_dense,
                     rngs=rngs,
                 )
                 for _ in range(config.num_blocks)
@@ -68,20 +69,20 @@ class EncoderBlock(nnx.Module):
         )
 
         self.alpha = (2.0 * in_features) ** -0.25
-        self.layer_norm1 = nnx.LayerNorm(in_features, rngs=rngs)
+        self.ln1 = nnx.LayerNorm(in_features, rngs=rngs)
         self.ffn = Ffn(
             in_features=in_features,
-            hidden_features=in_features,
+            hidden_features=config.dff,
             hidden_activation=defaults.ffn_activation,
             rngs=rngs,
         )
-        self.layer_norm2 = nnx.LayerNorm(in_features, rngs=rngs)
+        self.ln2 = nnx.LayerNorm(in_features, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         x = x + self.mha(x) * self.alpha
-        out1 = self.layer_norm1(x)
+        out1 = self.ln1(x)
         ffn_out = self.ffn(out1)
-        return self.layer_norm2(out1 + ffn_out * self.alpha)
+        return self.ln2(out1 + ffn_out * self.alpha)
 
 
 class MultiHeadAttention(nnx.Module):
@@ -177,33 +178,33 @@ class Smolgen(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.heads = heads
-        self.compressed = nnx.Linear(
+        self.compress = nnx.Linear(
             in_features=in_features,
             out_features=config.hidden_channels,
             use_bias=False,
             rngs=rngs,
         )
-        self.hidden = nnx.Linear(
+        self.dense1 = nnx.Linear(
             in_features=config.hidden_channels * 64,
             out_features=config.hidden_size,
             rngs=rngs,
         )
-        self.hidden_ln = nnx.LayerNorm(config.hidden_size, rngs=rngs)
+        self.ln1 = nnx.LayerNorm(config.hidden_size, rngs=rngs)
 
-        self.gen_from = nnx.Linear(
+        self.dense2 = nnx.Linear(
             in_features=config.hidden_size,
             out_features=config.gen_size * heads,
             rngs=rngs,
         )
-        self.gen_from_ln = nnx.LayerNorm(config.gen_size * heads, rngs=rngs)
+        self.ln2 = nnx.LayerNorm(config.gen_size * heads, rngs=rngs)
         self.weight_gen_dense = weight_gen_dense
         self.activation = config.activation or defaults.activation
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        compressed = self.compressed(x).flatten()
-        hidden = self.hidden_ln(self.hidden(compressed))
+        compressed = self.compress(x).flatten()
+        hidden = self.ln1(self.dense1(compressed))
 
-        gen_from = self.gen_from_ln(self.gen_from(hidden))
+        gen_from = self.ln2(self.dense2(hidden))
         gen_from = gen_from.reshape((self.heads, -1))
 
         out = get_activation(self.activation)(self.weight_gen_dense(gen_from))

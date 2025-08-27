@@ -32,13 +32,13 @@ class Embedding(nnx.Module):
         )
 
         assert embedding_size > 0
-        self.square_embedding = nnx.Linear(
+        self.embedding = nnx.Linear(
             in_features=input_channels + dense_size,
             out_features=embedding_size,
             rngs=rngs,
         )
         self.norm = nnx.LayerNorm(embedding_size, rngs=rngs)
-        self.ma_gating = MaGating(feature_shape=(embedding_size,), rngs=rngs)
+        self.ma_gating = MaGating(feature_shape=(64, embedding_size), rngs=rngs)
         self.ffn = Ffn(
             in_features=embedding_size,
             hidden_features=config.dff,
@@ -53,7 +53,7 @@ class Embedding(nnx.Module):
         x = jnp.concatenate([x, pos_info], axis=1)
 
         # Square embedding.
-        x = self.square_embedding(x)
+        x = self.embedding(x)
         x = get_activation(self.activation)(x)
         x = self.norm(x)
         x = self.ma_gating(x)

@@ -1,8 +1,14 @@
 import argparse
 import gzip
+import math
 
+import jax.numpy as jnp
+from flax import nnx, serialization
+
+from lczero_training.model.model import LczeroModel
 from proto import net_pb2
 
+from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
 from .leela_to_modelconfig import leela_to_modelconfig
 
 
@@ -58,6 +64,25 @@ def _fix_older_weights_file(file: net_pb2.Net) -> None:
             net.input_embedding = nf.INPUT_EMBEDDING_PE_MAP
 
 
+class LeelaToJax(LeelaPytreeWeightsVisitor):
+    def tensor(
+        self,
+        param: nnx.Param,
+        leela: net_pb2.Weights.Layer,
+    ) -> None:
+        assert len(leela.params) // 2 == math.prod(param.shape)
+        assert len(leela.params) != 0
+
+        values = jnp.frombuffer(leela.params, dtype=jnp.uint16)
+        values = values.astype(jnp.float32)
+        values /= 65535.0
+        values *= leela.max_val - leela.min_val
+        values += leela.min_val
+        values = values.astype(param.dtype)
+        values = values.reshape(param.shape)
+        param.values = values
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert Leela Zero weights to JAX format and back."
@@ -101,8 +126,21 @@ def main() -> None:
     config = leela_to_modelconfig(
         lc0_weights, args.weights_dtype, args.compute_dtype
     )
+    if args.model_config:
+        with open(args.model_config, "w") as f:
+            f.write(str(config))
 
-    print(config)
+    if args.jax_checkpoint is None:
+        return
+
+    model = LczeroModel(config=config, rngs=nnx.Rngs(params=42))
+    state = nnx.state(model)
+    as_dict = nnx.to_pure_dict(state)
+    visitor = LeelaToJax(as_dict, lc0_weights)
+    visitor.run()
+
+    with open(args.jax_checkpoint, "wb") as f:
+        f.write(serialization.to_bytes(as_dict))
 
 
 if __name__ == "__main__":
