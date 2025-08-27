@@ -95,9 +95,9 @@ def _tmp_make_config() -> model_config_pb2.ModelConfig:
     config.policy_head.embedding_size = 1024
     config.policy_head.d_model = 1024
 
-    config.value_head.embedding_size = 128
+    config.value_head.num_channels = 128
 
-    config.movesleft_head.embedding_size = 32
+    config.movesleft_head.num_channels = 32
 
     return config
 

@@ -17,11 +17,11 @@ class ValueHead(nnx.Module):
         self.activation = defaults.activation
         self.in_dense = nnx.Linear(
             in_features=in_features,
-            out_features=config.embedding_size,
+            out_features=config.num_channels,
             rngs=rngs,
         )
         self.h_fc2 = nnx.Linear(
-            in_features=config.embedding_size * 64,
+            in_features=config.num_channels * 64,
             out_features=128,
             rngs=rngs,
         )

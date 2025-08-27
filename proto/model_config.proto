@@ -22,8 +22,8 @@ message DefaultsConfig {
 
 message EmbeddingConfig {
   optional uint32 dense_size = 1;
-  optional uint32 dff = 2;
-  optional uint32 embedding_size = 3;
+  optional uint32 embedding_size = 2;
+  optional uint32 dff = 3;
 }
 
 message EncoderConfig {
@@ -47,9 +47,9 @@ message PolicyHeadConfig {
 }
 
 message ValueHeadConfig {
-  optional uint32 embedding_size = 1;
+  optional uint32 num_channels = 1;
 }
 
 message MovesLeftHeadConfig {
-  optional uint32 embedding_size = 1;
+  optional uint32 num_channels = 1;
 }
