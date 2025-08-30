@@ -106,8 +106,8 @@ venv.bak/
 
 # protobuf stuff
 tf/proto/
-src/proto/*_pb2.py
-src/proto/*.pyi
+**/*_pb2.py
+**/*_pb2.pyi
 
 # Meson
 builddir/

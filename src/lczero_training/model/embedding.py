@@ -17,6 +17,7 @@ class Embedding(nnx.Module):
         input_channels: int,
         config: model_config_pb2.EmbeddingConfig,
         defaults: model_config_pb2.DefaultsConfig,
+        alpha: float,
         rngs: nnx.Rngs,
     ):
         self._input_channels = input_channels
@@ -37,15 +38,16 @@ class Embedding(nnx.Module):
             out_features=embedding_size,
             rngs=rngs,
         )
-        self.norm = nnx.LayerNorm(embedding_size, rngs=rngs)
+        self.norm = nnx.LayerNorm(embedding_size, epsilon=1e-3, rngs=rngs)
         self.ma_gating = MaGating(feature_shape=(64, embedding_size), rngs=rngs)
+        self.alpha = alpha
         self.ffn = Ffn(
             in_features=embedding_size,
             hidden_features=config.dff,
             hidden_activation=defaults.ffn_activation,
             rngs=rngs,
         )
-        self.out_norm = nnx.LayerNorm(embedding_size, rngs=rngs)
+        self.out_norm = nnx.LayerNorm(embedding_size, epsilon=1e-3, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         # Preprocess positional info and concatenate to input.
@@ -57,9 +59,9 @@ class Embedding(nnx.Module):
         x = get_activation(self.activation)(x)
         x = self.norm(x)
         x = self.ma_gating(x)
-
         # FFN block with residual connection and layer norm.
-        x = self.out_norm(x + self.ffn(x))
+        x = x + self.ffn(x) * self.alpha
+        x = self.out_norm(x)
         return x
 
 

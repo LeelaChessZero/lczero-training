@@ -19,7 +19,6 @@ class Ffn(nnx.Module):
         rngs: nnx.Rngs,
     ):
         out_features = in_features
-        self.alpha = math.pow(2.0 * out_features, -0.25)
         beta = math.pow(8.0 * out_features, -0.25)
         kernel_init = flax_initializers.variance_scaling(
             scale=beta, mode="fan_avg", distribution="truncated_normal"
@@ -43,4 +42,4 @@ class Ffn(nnx.Module):
         x = self.linear1(x)
         x = get_activation(self.activation)(x)
         x = self.linear2(x)
-        return x * self.alpha
+        return x

@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import jax
@@ -68,15 +69,15 @@ class EncoderBlock(nnx.Module):
             rngs=rngs,
         )
 
-        self.alpha = (2.0 * in_features) ** -0.25
-        self.ln1 = nnx.LayerNorm(in_features, rngs=rngs)
+        self.alpha = math.pow(2.0 * config.num_blocks, -0.25)
+        self.ln1 = nnx.LayerNorm(in_features, epsilon=1e-3, rngs=rngs)
         self.ffn = Ffn(
             in_features=in_features,
             hidden_features=config.dff,
             hidden_activation=defaults.ffn_activation,
             rngs=rngs,
         )
-        self.ln2 = nnx.LayerNorm(in_features, rngs=rngs)
+        self.ln2 = nnx.LayerNorm(in_features, epsilon=1e-3, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         x = x + self.mha(x) * self.alpha
@@ -189,23 +190,29 @@ class Smolgen(nnx.Module):
             out_features=config.hidden_size,
             rngs=rngs,
         )
-        self.ln1 = nnx.LayerNorm(config.hidden_size, rngs=rngs)
+        self.ln1 = nnx.LayerNorm(config.hidden_size, epsilon=1e-3, rngs=rngs)
 
         self.dense2 = nnx.Linear(
             in_features=config.hidden_size,
             out_features=config.gen_size * heads,
             rngs=rngs,
         )
-        self.ln2 = nnx.LayerNorm(config.gen_size * heads, rngs=rngs)
+        self.ln2 = nnx.LayerNorm(
+            config.gen_size * heads, epsilon=1e-3, rngs=rngs
+        )
         self.weight_gen_dense = weight_gen_dense
         self.activation = config.activation or defaults.activation
 
     def __call__(self, x: jax.Array) -> jax.Array:
         compressed = self.compress(x).flatten()
-        hidden = self.ln1(self.dense1(compressed))
+        hidden = self.dense1(compressed)
+        hidden = get_activation(self.activation)(hidden)
+        hidden = self.ln1(hidden)
 
-        gen_from = self.ln2(self.dense2(hidden))
+        gen_from = self.dense2(hidden)
+        gen_from = get_activation(self.activation)(gen_from)
+        gen_from = self.ln2(gen_from)
         gen_from = gen_from.reshape((self.heads, -1))
 
-        out = get_activation(self.activation)(self.weight_gen_dense(gen_from))
+        out = self.weight_gen_dense(gen_from)
         return out.reshape((self.heads, 64, 64))

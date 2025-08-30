@@ -1,3 +1,4 @@
+import math
 from typing import Tuple
 
 import jax
@@ -25,6 +26,7 @@ class LczeroModel(nnx.Module):
             input_channels=self._input_channels,
             config=config.embedding,
             defaults=config.defaults,
+            alpha=math.pow(2.0 * config.encoder.num_blocks, -0.25),
             rngs=rngs,
         )
 

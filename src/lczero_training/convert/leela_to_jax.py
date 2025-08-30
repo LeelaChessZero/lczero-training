@@ -1,6 +1,6 @@
-import argparse
 import gzip
 import math
+from typing import Optional
 
 import jax.numpy as jnp
 from flax import nnx, serialization
@@ -79,69 +79,40 @@ class LeelaToJax(LeelaPytreeWeightsVisitor):
         values *= leela.max_val - leela.min_val
         values += leela.min_val
         values = values.astype(param.dtype)
-        values = values.reshape(param.shape)
-        param.values = values
+        values = values.reshape(param.shape[::-1]).transpose()
+        param.value = values
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Convert Leela Zero weights to JAX format and back."
-    )
-    parser.add_argument(
-        "input", type=str, help="Path to the input Lc0 weights file."
-    )
-    parser.add_argument(
-        "--model_config",
-        type=str,
-        help="Output path to the ModelConfig textproto.",
-    )
-    parser.add_argument(
-        "--weights_dtype",
-        default="F32",
-        type=str,
-        help="The data type of the weights.",
-    )
-    parser.add_argument(
-        "--compute_dtype",
-        default="BF16",
-        type=str,
-        help="The data type for computation.",
-    )
-    parser.add_argument(
-        "--jax_checkpoint",
-        type=str,
-        help="Path to save the output JAX checkpoint.",
-    )
-
-    args = parser.parse_args()
-
+def leela_to_jax(
+    input_path: str,
+    weights_dtype: str,
+    compute_dtype: str,
+    output_modelconfig: Optional[str],
+    output_serialized_jax: Optional[str],
+) -> None:
     lc0_weights = net_pb2.Net()
-    with gzip.open(args.input, "rb") as f:
+    with gzip.open(input_path, "rb") as f:
         contents = f.read()
         assert isinstance(contents, bytes)
         lc0_weights.ParseFromString(contents)
 
     _fix_older_weights_file(lc0_weights)
 
-    config = leela_to_modelconfig(
-        lc0_weights, args.weights_dtype, args.compute_dtype
-    )
-    if args.model_config:
-        with open(args.model_config, "w") as f:
+    config = leela_to_modelconfig(lc0_weights, weights_dtype, compute_dtype)
+
+    if output_modelconfig:
+        with open(output_modelconfig, "w") as f:
             f.write(str(config))
 
-    if args.jax_checkpoint is None:
+    if output_serialized_jax is None:
         return
 
     model = LczeroModel(config=config, rngs=nnx.Rngs(params=42))
     state = nnx.state(model)
-    as_dict = nnx.to_pure_dict(state)
-    visitor = LeelaToJax(as_dict, lc0_weights)
+    visitor = LeelaToJax(state, lc0_weights)
     visitor.run()
 
-    with open(args.jax_checkpoint, "wb") as f:
-        f.write(serialization.to_bytes(as_dict))
+    with open(output_serialized_jax, "wb") as f:
+        f.write(serialization.to_bytes(state))
 
-
-if __name__ == "__main__":
-    main()
+    # nnx.update(model, state)
