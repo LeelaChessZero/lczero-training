@@ -4,5 +4,9 @@ package lczero.training;
 
 // Configuration for training algorithm and parameters.
 message TrainingConfig {
-  // Empty for now - will be populated with training-specific configuration
+  optional CheckpointConfig checkpoint = 1;
+}
+
+message CheckpointConfig {
+  optional string path = 1;
 }
