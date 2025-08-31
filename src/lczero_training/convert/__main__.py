@@ -38,6 +38,11 @@ def main() -> None:
         type=str,
         help="Path to save the output JAX serialized state.",
     )
+    leela2jax.add_argument(
+        "--output-orbax-checkpoint",
+        type=str,
+        help="Path to save the output Orbax checkpoint.",
+    )
 
     args = parser.parse_args()
 
@@ -48,6 +53,7 @@ def main() -> None:
             compute_dtype=args.compute_dtype,
             output_modelconfig=args.output_model_config,
             output_serialized_jax=args.output_serialized_jax,
+            output_orbax_checkpoint=args.output_orbax_checkpoint,
         )
 
 

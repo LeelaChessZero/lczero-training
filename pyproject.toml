@@ -53,6 +53,10 @@ mypy_path = "src"
 module = "lczero_training.proto.*"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "orbax.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["src"]
 python_files = ["test_*.py", "*_test.py"]

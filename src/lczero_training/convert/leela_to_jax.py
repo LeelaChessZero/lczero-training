@@ -3,6 +3,7 @@ import math
 from typing import Optional
 
 import jax.numpy as jnp
+import orbax.checkpoint as ocp
 from flax import nnx, serialization
 
 from lczero_training.model.model import LczeroModel
@@ -89,6 +90,7 @@ def leela_to_jax(
     compute_dtype: str,
     output_modelconfig: Optional[str],
     output_serialized_jax: Optional[str],
+    output_orbax_checkpoint: Optional[str],
 ) -> None:
     lc0_weights = net_pb2.Net()
     with gzip.open(input_path, "rb") as f:
@@ -104,7 +106,7 @@ def leela_to_jax(
         with open(output_modelconfig, "w") as f:
             f.write(str(config))
 
-    if output_serialized_jax is None:
+    if output_serialized_jax is None and output_orbax_checkpoint is None:
         return
 
     model = LczeroModel(config=config, rngs=nnx.Rngs(params=42))
@@ -112,7 +114,13 @@ def leela_to_jax(
     visitor = LeelaToJax(state, lc0_weights)
     visitor.run()
 
-    with open(output_serialized_jax, "wb") as f:
-        f.write(serialization.to_bytes(state))
+    if output_serialized_jax:
+        with open(output_serialized_jax, "wb") as f:
+            f.write(serialization.to_bytes(state))
+
+    if output_orbax_checkpoint:
+        checkpointer = ocp.StandardCheckpointer()
+        checkpointer.save(output_orbax_checkpoint, state)
+        checkpointer.wait_until_finished()
 
     # nnx.update(model, state)
