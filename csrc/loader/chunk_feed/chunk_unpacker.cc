@@ -26,6 +26,8 @@ ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
   }
 }
 
+ChunkUnpacker::~ChunkUnpacker() { LOG(INFO) << "ChunkUnpacker shutting down."; }
+
 Queue<ChunkUnpacker::OutputType>* ChunkUnpacker::output() {
   return &output_queue_;
 }
@@ -62,6 +64,7 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
       }
     }
   } catch (const QueueClosedException&) {
+    LOG(INFO) << "ChunkUnpacker worker stopping, input queue closed.";
     // Input queue is closed, the local producer will be destroyed when this
     // function exits which may close the output queue if this is the last
     // producer.

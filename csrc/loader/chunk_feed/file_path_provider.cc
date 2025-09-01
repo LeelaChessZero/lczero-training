@@ -34,8 +34,10 @@ FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
 }
 
 FilePathProvider::~FilePathProvider() {
+  LOG(INFO) << "FilePathProvider shutting down.";
   Close();
   if (inotify_fd_ != -1) close(inotify_fd_);
+  LOG(INFO) << "FilePathProvider shutdown complete.";
 }
 
 Queue<FilePathProvider::File>* FilePathProvider::output() {
@@ -43,20 +45,22 @@ Queue<FilePathProvider::File>* FilePathProvider::output() {
 }
 
 void FilePathProvider::Close() {
-  // First stop all watches
+  LOG(INFO) << "Stopping all watches...";
   for (const auto& [wd, path] : watch_descriptors_) {
     inotify_rm_watch(inotify_fd_, wd);
   }
   watch_descriptors_.clear();
 
-  // Then stop the thread
+  LOG(INFO) << "Notifying threads to stop.";
   stop_condition_.Notify();
   if (monitor_thread_.joinable()) {
+    LOG(INFO) << "Joining monitor thread...";
     monitor_thread_.join();
   }
 
-  // Finally close the producer to close the queue
+  LOG(INFO) << "Closing producer to close the queue...";
   producer_.Close();
+  LOG(INFO) << "FilePathProvider closed.";
 }
 
 FilePathProviderMetricsProto FilePathProvider::FlushMetrics() {
@@ -122,10 +126,9 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
   // Step 4: Clean the files vector to save memory
   files.clear();
 
-  if (stop_condition_.HasBeenNotified()) return;
-
   // Step 5: Recursively call for subdirectories
   for (const auto& subdir : subdirectories) {
+    if (stop_condition_.HasBeenNotified()) return;
     ScanDirectoryWithWatch(subdir);
   }
 

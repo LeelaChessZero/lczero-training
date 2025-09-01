@@ -33,6 +33,7 @@ class ChunkSourceLoader {
 
   ChunkSourceLoader(Queue<InputType>* input_queue,
                     const ChunkSourceLoaderConfig& config);
+  ~ChunkSourceLoader();
 
   Queue<OutputType>* output();
 

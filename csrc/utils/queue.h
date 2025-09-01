@@ -75,6 +75,9 @@ class Queue {
   // Explicitly close the queue, preventing further Put operations.
   void Close();
 
+  // Returns true if the queue is closed.
+  bool IsClosed() const;
+
   // Wait until queue has at least the specified amount of free space.
   void WaitForRoomAtLeast(size_t room);
 
@@ -340,6 +343,12 @@ template <typename T>
 void Queue<T>::Close() {
   absl::MutexLock lock(&mutex_);
   closed_ = true;
+}
+
+template <typename T>
+bool Queue<T>::IsClosed() const {
+  absl::MutexLock lock(&mutex_);
+  return closed_;
 }
 
 template <typename T>

@@ -28,6 +28,7 @@ class ChunkUnpacker {
 
   ChunkUnpacker(Queue<InputType>* input_queue,
                 const ChunkUnpackerConfig& config);
+  ~ChunkUnpacker();
 
   Queue<OutputType>* output();
   ChunkUnpackerMetricsProto FlushMetrics();

@@ -55,10 +55,11 @@ PYBIND11_MODULE(_lczero_training, m) {
 
   // Expose the main DataLoader class.
   py::class_<DataLoader>(m, "DataLoader")
-      .def(py::init([](py::bytes config_bytes) {
-             std::string config_string = config_bytes;
+      .def(py::init([](py::bytes config) {
+             std::string config_string = config;
              return new DataLoader(config_string);
            }),
+           py::arg("config"),
            "Create DataLoader with serialized protobuf configuration bytes")
       .def(
           "get_next",

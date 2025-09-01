@@ -33,6 +33,10 @@ TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
   }
 }
 
+TensorGenerator::~TensorGenerator() {
+  LOG(INFO) << "TensorGenerator shutting down.";
+}
+
 Queue<TensorGenerator::OutputType>* TensorGenerator::output() {
   return &output_queue_;
 }
@@ -60,6 +64,7 @@ void TensorGenerator::Worker(ThreadContext* context) {
       }
     }
   } catch (const QueueClosedException&) {
+    LOG(INFO) << "TensorGenerator worker stopping, input queue closed.";
     // Input queue is closed.
   }
 }

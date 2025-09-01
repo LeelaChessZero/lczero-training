@@ -30,6 +30,7 @@ class ShufflingFrameSampler {
 
   ShufflingFrameSampler(Queue<InputType>* input_queue,
                         const ShufflingFrameSamplerConfig& config);
+  ~ShufflingFrameSampler();
 
   Queue<OutputType>* output();
   ShufflingFrameSamplerMetricsProto FlushMetrics();

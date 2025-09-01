@@ -64,12 +64,17 @@ ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
       }) {}
 
 ShufflingChunkPool::~ShufflingChunkPool() {
+  LOG(INFO) << "ShufflingChunkPool shutting down.";
   Close();
   if (initialization_thread_.joinable()) {
+    LOG(INFO) << "Waiting for initialization thread to join...";
     initialization_thread_.join();
   }
+  LOG(INFO) << "Waiting for indexing pool to finish...";
   indexing_pool_.WaitAll();
+  LOG(INFO) << "Waiting for chunk loading pool to finish...";
   chunk_loading_pool_.WaitAll();
+  LOG(INFO) << "ShufflingChunkPool shutdown complete.";
 }
 
 Queue<std::string>* ShufflingChunkPool::output() { return &output_queue_; }
@@ -109,6 +114,10 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   // overshoot a bit due to multiple threads.
   for (auto& source : uninitialized_sources) {
     indexing_pool.WaitForAvailableThread();
+    if (output_queue_.IsClosed()) {
+      LOG(INFO) << "Output queue closed, stopping indexing.";
+      break;
+    }
     if (total_chunks >= chunk_pool_size_) break;
     indexing_pool.Enqueue([&source, &total_chunks]() {
       source->Index();
@@ -119,7 +128,7 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   }
   indexing_pool.WaitAll();
 
-  if (total_chunks < chunk_pool_size_) {
+  if (total_chunks < chunk_pool_size_ && !output_queue_.IsClosed()) {
     throw std::runtime_error(
         absl::StrCat("Not enough chunks to initialize ShufflingChunkPool: ",
                      total_chunks.load(), " < ", chunk_pool_size_));
@@ -192,6 +201,7 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
       producer.Put(std::move(chunk_data));
     }
   } catch (const QueueClosedException&) {
+    LOG(INFO) << "ShufflingChunkPool output worker stopping, queue closed.";
     // Output queue was closed, stop this worker
   } catch (const std::exception& e) {
     LOG(FATAL) << "Output worker encountered an error: " << e.what();

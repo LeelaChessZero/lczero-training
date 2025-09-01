@@ -28,6 +28,10 @@ ShufflingFrameSampler::ShufflingFrameSampler(
   }
 }
 
+ShufflingFrameSampler::~ShufflingFrameSampler() {
+  LOG(INFO) << "ShufflingFrameSampler shutting down.";
+}
+
 Queue<ShufflingFrameSampler::OutputType>* ShufflingFrameSampler::output() {
   return &output_queue_;
 }
@@ -49,6 +53,7 @@ void ShufflingFrameSampler::Worker(ThreadContext* context) {
     // Phase 2: Main sampling loop
     MainSamplingLoop(reservoir, producer, context);
   } catch (const QueueClosedException&) {
+    LOG(INFO) << "ShufflingFrameSampler worker stopping, input queue closed.";
     // Input queue is closed.
   }
 }

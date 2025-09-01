@@ -29,6 +29,7 @@ class TensorGenerator {
 
   TensorGenerator(Queue<InputType>* input_queue,
                   const TensorGeneratorConfig& config);
+  ~TensorGenerator();
 
   Queue<OutputType>* output();
   TensorGeneratorMetricsProto FlushMetrics();

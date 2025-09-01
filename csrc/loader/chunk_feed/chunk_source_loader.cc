@@ -39,6 +39,10 @@ ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
   }
 }
 
+ChunkSourceLoader::~ChunkSourceLoader() {
+  LOG(INFO) << "ChunkSourceLoader shutting down.";
+}
+
 Queue<ChunkSourceLoader::OutputType>* ChunkSourceLoader::output() {
   return &output_queue_;
 }
@@ -73,6 +77,7 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
       }
     }
   } catch (const QueueClosedException&) {
+    LOG(INFO) << "ChunkSourceLoader worker stopping, input queue closed.";
     // Input queue is closed, the local producer will be destroyed when this
     // function exits which may close the output queue if this is the last
     // producer

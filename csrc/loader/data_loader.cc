@@ -34,9 +34,17 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
             UpdateFrom(dest, src);
           }),
       metrics_thread_(
-          [this](std::stop_token stop_token) { MetricsThread(stop_token); }) {}
+          [this](std::stop_token stop_token) { MetricsThread(stop_token); }) {
+  LOG(INFO) << "DataLoader started.";
+}
 
-DataLoader::~DataLoader() { file_path_provider_.Close(); }
+DataLoader::~DataLoader() {
+  LOG(INFO) << "Shutting down FilePathProvider.";
+  file_path_provider_.Close();
+  LOG(INFO) << "Shutting down ShufflingChunkPool.";
+  shuffling_chunk_pool_.Close();
+  LOG(INFO) << "DataLoader shutting down.";
+}
 
 TensorTuple DataLoader::GetNext() { return output()->Get(); }
 
@@ -84,6 +92,7 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
     metrics_aggregator_.RecordMetrics(std::move(metrics));
     metrics_aggregator_.Advance(std::chrono::steady_clock::now());
   }
+  LOG(INFO) << "Metrics thread stopping.";
 }
 
 }  // namespace training
