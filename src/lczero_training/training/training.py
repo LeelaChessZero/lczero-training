@@ -1,11 +1,14 @@
 import logging
+from typing import Generator, Tuple
 
+import numpy as np
 import orbax.checkpoint as ocp
 from absl import app
 from absl import logging as absl_logging
 from flax import nnx
 from google.protobuf import text_format
 
+from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.model import LczeroModel
 from proto.root_config_pb2 import RootConfig
 from proto.training_config_pb2 import TrainingConfig
@@ -13,11 +16,29 @@ from proto.training_config_pb2 import TrainingConfig
 logger = logging.getLogger(__name__)
 
 
+def from_dataloader(
+    loader: DataLoader,
+) -> Generator[Tuple[np.ndarray, ...], None, None]:
+    while True:
+        yield loader.get_next()
+
+
 class Training:
-    def __init__(self, config: TrainingConfig, model: LczeroModel):
+    config: TrainingConfig
+    model: LczeroModel
+    checkpointer: ocp.StandardCheckpointer
+    datagen: Generator[Tuple[np.ndarray, ...], None, None]
+
+    def __init__(
+        self,
+        config: TrainingConfig,
+        model: LczeroModel,
+        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+    ):
         self.config = config
         self.model = model
         self.checkpointer = ocp.StandardCheckpointer()
+        self.datagen = datagen
 
         assert config.checkpoint.path, "Checkpoint path must be set"
         logger.info(f"Loading checkpoint from {config.checkpoint.path}")
@@ -42,8 +63,11 @@ def main(argv: list[str]) -> None:
     rngs = nnx.Rngs(params=42)
     model = LczeroModel(config=config.model, rngs=rngs)
 
+    logger.info("Creating dataloader from configuration")
+    datagen = make_dataloader(config.data_loader)
+
     logger.info("Creating training instance")
-    training = Training(config.training, model)
+    training = Training(config.training, model, from_dataloader(datagen))
     training.run()
 
 

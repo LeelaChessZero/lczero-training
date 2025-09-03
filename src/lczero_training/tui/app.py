@@ -2,6 +2,7 @@
 # ABOUTME: Uses Textual framework to create a full-screen interface with four panes.
 
 import argparse
+import signal
 import subprocess
 import sys
 import time
@@ -148,9 +149,13 @@ class TrainingTuiApp(App):
         payload = StartTrainingPayload(config_filepath=self._config_file)
         await self._communicator.send(payload)
 
-    def action_quit(self) -> None:  # type: ignore
+    async def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
-        self._daemon_process.terminate()
+        self._daemon_process.send_signal(signal.SIGINT)
+        with anyio.move_on_after(20) as scope:
+            await self._daemon_process.wait()
+        if scope.cancelled_caught:
+            self._daemon_process.terminate()
         self.exit()
 
     async def on_training_status(self, payload: TrainingStatusPayload) -> None:

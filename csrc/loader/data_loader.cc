@@ -38,11 +38,21 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
   LOG(INFO) << "DataLoader started.";
 }
 
-DataLoader::~DataLoader() {
+DataLoader::~DataLoader() { Close(true); }
+
+void DataLoader::Close(bool graceful_drain) {
   LOG(INFO) << "Shutting down FilePathProvider.";
   file_path_provider_.Close();
   LOG(INFO) << "Shutting down ShufflingChunkPool.";
   shuffling_chunk_pool_.Close();
+  if (!graceful_drain) {
+    file_path_provider_.output()->Close();
+    chunk_source_loader_.output()->Close();
+    shuffling_chunk_pool_.output()->Close();
+    chunk_unpacker_.output()->Close();
+    shuffling_frame_sampler_.output()->Close();
+    tensor_generator_.output()->Close();
+  }
   LOG(INFO) << "DataLoader shutting down.";
 }
 

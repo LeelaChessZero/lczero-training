@@ -2,6 +2,7 @@
 # ABOUTME: Handles IPC communication via Communicator and implements message handlers.
 
 import logging
+import signal
 import sys
 import threading
 import time
@@ -23,6 +24,7 @@ class TrainingDaemon:
 
     def __init__(self) -> None:
         self._setup_logging()
+        self._setup_signal_handling()
         self._communicator = Communicator(self, sys.stdin, sys.stdout)
         self._communicator_thread = threading.Thread(
             target=lambda: self._communicator.run(), daemon=True
@@ -32,6 +34,10 @@ class TrainingDaemon:
             target=lambda: anyio.run(self._metrics_main), daemon=True
         )
         self._async_thread.start()
+        self._signal_thread = threading.Thread(
+            target=self._signal_handler_thread, daemon=True
+        )
+        self._signal_thread.start()
 
     def _setup_logging(self) -> None:
         logging.basicConfig(
@@ -44,6 +50,22 @@ class TrainingDaemon:
             stream=sys.stderr,
         )
         logging.info("TrainingDaemon starting up")
+
+    def _setup_signal_handling(self) -> None:
+        # Block SIGINT and SIGTERM on all threads
+        signal.pthread_sigmask(
+            signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM}
+        )
+
+    def _signal_handler_thread(self) -> None:
+        # Wait for SIGINT or SIGTERM
+        signum = signal.sigwait({signal.SIGINT, signal.SIGTERM})
+        self._shutdown(signum)
+
+    def _shutdown(self, signum: int) -> None:
+        logging.info(f"Received signal {signum}, shutting down...")
+        if self._data_loader is not None:
+            self._data_loader.close()
 
     async def _metrics_main(self) -> None:
         async with anyio.create_task_group() as tg:

@@ -26,6 +26,7 @@ class DataLoader {
   ~DataLoader();
 
   TensorTuple GetNext();
+  void Close(bool graceful_drain = false);
   std::pair<std::string, float> GetBucketMetrics(int time_period,
                                                  bool include_pending) const;
   std::pair<std::string, float> GetAggregateEndingNow(
