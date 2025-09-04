@@ -57,6 +57,10 @@ ignore_errors = true
 module = "orbax.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "optax"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["src"]
 python_files = ["test_*.py", "*_test.py"]

@@ -2,8 +2,7 @@
 # This file demonstrates all available configuration options with their default values
 # and explanations of what each setting controls.
 
-name: "example_training_run"  # Name identifier for this configuration
-
+name: "little-teapot"
 data_loader {
   file_path_provider {
     directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with training data files
@@ -31,15 +30,49 @@ data_loader {
   }
   tensor_generator {
     threads: 1  # Threads for tensor generation
-    batch_size: 1024  # Batch size for tensors
-    queue_capacity: 4  # Output queue for batched tensors
+    batch_size: 128  # Batch size for tensors
+    queue_capacity: 8  # Output queue for batched tensors
   }
 }
-
-training {
-  # Training configuration will be added here in future
-}
-
 model {
-  # Model configuration will be added here in future
+  defaults {
+    compute_dtype : F32
+    activation : ACTIVATION_MISH
+    ffn_activation : ACTIVATION_MISH
+  }
+  embedding {dense_size : 512 embedding_size : 1024 dff : 1536}
+  encoder {
+    num_blocks : 15
+    dff : 1536
+    d_model : 1024
+    heads : 32
+    smolgen {
+      hidden_channels : 32
+      hidden_size : 256
+      gen_size : 256
+      activation : ACTIVATION_SWISH
+    }
+  }
+  policy_head {embedding_size : 1024 d_model : 1024}
+  value_head {num_channels : 128}
+  movesleft_head {num_channels : 32}
+}
+training {
+  checkpoint {
+    path: "/home/crem/tmp/2025-08/lc0_training/checkpoint"
+  }
+  losses {
+    policy {
+      name: "main"
+      weight: 1.0
+    }
+    value {
+      name: "winner"
+      weight: 1.0
+    }
+    movesleft {
+      name: "main"
+      weight: 1.0
+    }
+  }
 }

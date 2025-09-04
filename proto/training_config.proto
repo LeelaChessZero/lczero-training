@@ -5,8 +5,31 @@ package lczero.training;
 // Configuration for training algorithm and parameters.
 message TrainingConfig {
   optional CheckpointConfig checkpoint = 1;
+  optional LossWeightsConfig losses = 2;
 }
 
 message CheckpointConfig {
   optional string path = 1;
+}
+
+message LossWeightsConfig {
+  optional float l2_weight = 1;
+  repeated PolicyLossWeightsConfig policy = 2;
+  repeated ValueLossWeightsConfig value = 3;
+  repeated MovesLeftLossWeightsConfig movesleft = 4;
+}
+
+message PolicyLossWeightsConfig {
+  optional string name = 1;
+  optional float weight = 2;
+}
+
+message ValueLossWeightsConfig {
+  optional string name = 1;
+  optional float weight = 2;
+}
+
+message MovesLeftLossWeightsConfig {
+  optional string name = 1;
+  optional float weight = 2;
 }
