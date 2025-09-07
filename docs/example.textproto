@@ -1,78 +1,74 @@
 # Example configuration file for lczero-training
-# This file demonstrates all available configuration options with their default values
-# and explanations of what each setting controls.
+# This file demonstrates all available configuration options with their default
+# values and explanations of what each setting controls.
 
 name: "little-teapot"
 data_loader {
   file_path_provider {
-    directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with training data files
-    queue_capacity: 16  # Internal file queue size
+    directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with
+                                                              # training data
+                                                              # files
+    queue_capacity: 16                                        # Internal file queue size
   }
   chunk_source_loader {
-    threads: 1  # Threads for loading chunks
+    threads: 1          # Threads for loading chunks
     queue_capacity: 16  # Output queue for chunk sources
   }
   shuffling_chunk_pool {
-    chunk_pool_size: 5000000  # Shuffle buffer size (chunks in memory)
+    chunk_pool_size: 5000000     # Shuffle buffer size (chunks in memory)
     startup_indexing_threads: 4  # Threads for startup indexing
-    indexing_threads: 4  # Threads for ongoing indexing
-    chunk_loading_threads: 4  # Threads for loading chunk data
-    queue_capacity: 16  # Output queue for shuffled chunks
+    indexing_threads: 4          # Threads for ongoing indexing
+    chunk_loading_threads: 4     # Threads for loading chunk data
+    queue_capacity: 16           # Output queue for shuffled chunks
   }
   chunk_unpacker {
-    threads: 1  # Threads for unpacking chunks
+    threads: 1          # Threads for unpacking chunks
     queue_capacity: 16  # Output queue for unpacked frames
   }
   shuffling_frame_sampler {
-    threads: 1  # Threads for frame sampling
+    threads: 1                          # Threads for frame sampling
     reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
-    queue_capacity: 16  # Output queue for sampled frames
+    queue_capacity: 16                  # Output queue for sampled frames
   }
   tensor_generator {
-    threads: 1  # Threads for tensor generation
-    batch_size: 128  # Batch size for tensors
+    threads: 1         # Threads for tensor generation
+    batch_size: 128    # Batch size for tensors
     queue_capacity: 8  # Output queue for batched tensors
   }
 }
 model {
   defaults {
-    compute_dtype : F32
-    activation : ACTIVATION_MISH
-    ffn_activation : ACTIVATION_MISH
+    compute_dtype: F32
+    activation: ACTIVATION_MISH
+    ffn_activation: ACTIVATION_MISH
   }
-  embedding {dense_size : 512 embedding_size : 1024 dff : 1536}
+  embedding { dense_size: 512 embedding_size: 1024 dff: 1536 }
   encoder {
-    num_blocks : 15
-    dff : 1536
-    d_model : 1024
-    heads : 32
+    num_blocks: 15
+    dff: 1536
+    d_model: 1024
+    heads: 32
     smolgen {
-      hidden_channels : 32
-      hidden_size : 256
-      gen_size : 256
-      activation : ACTIVATION_SWISH
+      hidden_channels: 32
+      hidden_size: 256
+      gen_size: 256
+      activation: ACTIVATION_SWISH
     }
   }
-  policy_head {embedding_size : 1024 d_model : 1024}
-  value_head {num_channels : 128}
-  movesleft_head {num_channels : 32}
+  policy_head { embedding_size: 1024 d_model: 1024 }
+  value_head { num_channels: 128 }
+  movesleft_head { num_channels: 32 }
 }
 training {
-  checkpoint {
-    path: "/home/crem/tmp/2025-08/lc0_training/checkpoint"
+  checkpoint { path: "/home/crem/tmp/2025-08/lc0_training/checkpoint" }
+  optimizer {
+    nadam { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 }
+    constant_lr { lr: 0.001 }
   }
   losses {
-    policy {
-      name: "main"
-      weight: 1.0
-    }
-    value {
-      name: "winner"
-      weight: 1.0
-    }
-    movesleft {
-      name: "main"
-      weight: 1.0
-    }
+    l2_weight: 1.0
+    policy { name: "main" weight: 1.0 }
+    value { name: "winner" weight: 1.0 }
+    movesleft { name: "main" weight: 1.0 }
   }
 }

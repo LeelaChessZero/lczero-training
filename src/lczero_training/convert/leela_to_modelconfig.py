@@ -12,17 +12,18 @@ def _defaultactivation_to_activation(
 
 
 def leela_to_modelconfig(
-    leela_net: net_pb2.Net, weights_dtype: str, compute_dtype: str
+    leela_net: net_pb2.Net,
+    weights_dtype: hlo_pb2.XlaShapeProto.Type,
+    compute_dtype: hlo_pb2.XlaShapeProto.Type,
 ) -> model_config_pb2.ModelConfig:
-    assert weights_dtype == "F32", "Only float32 weights are supported."
+    assert weights_dtype == hlo_pb2.XlaShapeProto.F32, (
+        "Only float32 weights are supported."
+    )
     assert leela_net.format.weights_encoding == net_pb2.Format.LINEAR16
     leela_net_format = leela_net.format.network_format
-
     model_config = model_config_pb2.ModelConfig()
 
-    model_config.defaults.compute_dtype = getattr(
-        hlo_pb2.XlaShapeProto, compute_dtype
-    )
+    model_config.defaults.compute_dtype = compute_dtype
     model_config.defaults.activation = _defaultactivation_to_activation(
         leela_net_format.default_activation
     )

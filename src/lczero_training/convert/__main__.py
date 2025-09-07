@@ -3,11 +3,10 @@ import argparse
 from .leela_to_jax import leela_to_jax
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Convert Leela networks between various formats."
+def configure_parser(parser: argparse.ArgumentParser) -> None:
+    subparsers = parser.add_subparsers(
+        dest="subcommand", help="Sub-command help"
     )
-    subparsers = parser.add_subparsers(dest="command", help="Sub-command help")
     subparsers.required = True
 
     leela2jax = subparsers.add_parser(
@@ -34,6 +33,11 @@ def main() -> None:
         help="The data type for computation.",
     )
     leela2jax.add_argument(
+        "--print-model-config",
+        action="store_true",
+        help="Print the ModelConfig textproto to stdout.",
+    )
+    leela2jax.add_argument(
         "--output-serialized-jax",
         type=str,
         help="Path to save the output JAX serialized state.",
@@ -44,9 +48,11 @@ def main() -> None:
         help="Path to save the output Orbax checkpoint.",
     )
 
-    args = parser.parse_args()
+    parser.set_defaults(func=run)
 
-    if args.command == "leela2jax":
+
+def run(args: argparse.Namespace) -> None:
+    if args.subcommand == "leela2jax":
         leela_to_jax(
             input_path=args.input,
             weights_dtype=args.weights_dtype,
@@ -54,8 +60,14 @@ def main() -> None:
             output_modelconfig=args.output_model_config,
             output_serialized_jax=args.output_serialized_jax,
             output_orbax_checkpoint=args.output_orbax_checkpoint,
+            print_modelconfig=args.print_model_config,
         )
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Convert Leela networks between various formats."
+    )
+    configure_parser(parser)
+    args = parser.parse_args()
+    args.func(args)

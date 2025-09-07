@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Optional
 
 import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
@@ -78,6 +79,15 @@ class TrainingTuiApp(App):
 
     CSS_PATH = "app.tcss"
 
+    @staticmethod
+    def add_arguments(parser: argparse.ArgumentParser) -> None:
+        """Adds all required command-line arguments to the given parser."""
+        parser.add_argument(
+            "--config",
+            required=True,
+            help="Path to the training configuration file",
+        )
+
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
     _communicator: AsyncCommunicator
@@ -89,19 +99,22 @@ class TrainingTuiApp(App):
         ("ctrl+c", "quit", "Quit"),
     ]
 
-    def __init__(self) -> None:
-        """Initialize the TUI app with config file path."""
+    def __init__(self, args: Optional[argparse.Namespace] = None) -> None:
+        """
+        Initializes the app.
+        If 'args' is provided, it's used directly.
+        If 'args' is None, fallback to parsing sys.argv.
+        """
         super().__init__()
-        parser = argparse.ArgumentParser(
-            description="LCZero Training Dashboard"
-        )
-        parser.add_argument(
-            "--config",
-            required=True,
-            help="Path to the training configuration file",
-        )
-        args = parser.parse_args()
-        self._config_file = args.config
+
+        if args is None:
+            # Fallback for when run by "textual run"
+            parser = argparse.ArgumentParser()
+            TrainingTuiApp.add_arguments(parser)
+            args, _ = parser.parse_known_args()
+
+        # Consume configuration from the args object
+        self._config_file: str = args.config
 
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""

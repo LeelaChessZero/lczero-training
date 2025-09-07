@@ -1,4 +1,5 @@
 import gzip
+import logging
 import math
 from typing import Optional
 
@@ -6,14 +7,18 @@ import jax.numpy as jnp
 import orbax.checkpoint as ocp
 from flax import nnx, serialization
 
+import hlo_pb2
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.state import TrainingState
 from proto import net_pb2
 
 from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
 from .leela_to_modelconfig import leela_to_modelconfig
 
+logger = logging.getLogger(__name__)
 
-def _fix_older_weights_file(file: net_pb2.Net) -> None:
+
+def fix_older_weights_file(file: net_pb2.Net) -> None:
     nf = net_pb2.NetworkFormat
     has_network_format = file.format.HasField("network_format")
     network_format = (
@@ -58,7 +63,9 @@ def _fix_older_weights_file(file: net_pb2.Net) -> None:
     ):
         weights = file.weights
         if weights.HasField("policy_heads") and weights.HasField("value_heads"):
-            print("Weights file has multihead format, updating format flag")
+            logger.info(
+                "Weights file has multihead format, updating format flag"
+            )
             net.network = nf.NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT
             net.input_embedding = nf.INPUT_EMBEDDING_PE_DENSE
         if not file.format.network_format.HasField("input_embedding"):
@@ -91,6 +98,7 @@ def leela_to_jax(
     output_modelconfig: Optional[str],
     output_serialized_jax: Optional[str],
     output_orbax_checkpoint: Optional[str],
+    print_modelconfig: bool = False,
 ) -> None:
     lc0_weights = net_pb2.Net()
     with gzip.open(input_path, "rb") as f:
@@ -98,9 +106,16 @@ def leela_to_jax(
         assert isinstance(contents, bytes)
         lc0_weights.ParseFromString(contents)
 
-    _fix_older_weights_file(lc0_weights)
+    fix_older_weights_file(lc0_weights)
 
-    config = leela_to_modelconfig(lc0_weights, weights_dtype, compute_dtype)
+    config = leela_to_modelconfig(
+        lc0_weights,
+        getattr(hlo_pb2.XlaShapeProto, weights_dtype),
+        getattr(hlo_pb2.XlaShapeProto, compute_dtype),
+    )
+
+    if print_modelconfig:
+        print(config)
 
     if output_modelconfig:
         with open(output_modelconfig, "w") as f:
@@ -119,8 +134,13 @@ def leela_to_jax(
             f.write(serialization.to_bytes(state))
 
     if output_orbax_checkpoint:
+        training_state = TrainingState(
+            step=lc0_weights.training_params.training_steps,
+            model_state=state,
+            opt_state=None,
+        )
         checkpointer = ocp.StandardCheckpointer()
-        checkpointer.save(output_orbax_checkpoint, state)
+        checkpointer.save(output_orbax_checkpoint, training_state)
         checkpointer.wait_until_finished()
 
     # nnx.update(model, state)

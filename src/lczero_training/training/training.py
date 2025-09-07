@@ -1,15 +1,17 @@
 import logging
+import sys
 from typing import Generator, Tuple
 
 import numpy as np
+import optax
 import orbax.checkpoint as ocp
-from absl import app
-from absl import logging as absl_logging
 from flax import nnx
 from google.protobuf import text_format
 
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.optimizer import make_gradient_transformation
+from lczero_training.training.state import TrainingState
 from proto.root_config_pb2 import RootConfig
 from proto.training_config_pb2 import TrainingConfig
 
@@ -25,52 +27,80 @@ def from_dataloader(
 
 class Training:
     config: TrainingConfig
-    model: LczeroModel
-    checkpointer: ocp.StandardCheckpointer
+    model: nnx.GraphDef
     datagen: Generator[Tuple[np.ndarray, ...], None, None]
+    optimizer: optax.GradientTransformation
+    step: int
+    model_state: nnx.State
+    opt_state: optax.OptState
 
     def __init__(
         self,
         config: TrainingConfig,
-        model: LczeroModel,
+        model: nnx.GraphDef,
+        training_state: TrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
     ):
         self.config = config
         self.model = model
-        self.checkpointer = ocp.StandardCheckpointer()
+        self.step = training_state.step
+        self.model_state = training_state.model_state
+        assert training_state.opt_state is not None
+        self.opt_state = training_state.opt_state
+
         self.datagen = datagen
+        self.optimizer = make_gradient_transformation(config.optimizer)
 
-        assert config.checkpoint.path, "Checkpoint path must be set"
-        logger.info(f"Loading checkpoint from {config.checkpoint.path}")
-        state = nnx.state(model)
-        state = self.checkpointer.restore(config.checkpoint.path, state)
-        nnx.update(model, state)
+    def run(self) -> TrainingState:
+        model_and_state = nnx.merge(self.model, self.model_state)
 
-    def run(self) -> None:
-        pass
+        # ...
+
+        return TrainingState(
+            step=self.step,
+            model_state=nnx.state(model_and_state),
+            opt_state=self.opt_state,
+        )
 
 
-def main(argv: list[str]) -> None:
-    del argv  # Unused.
+def train(config_filename: str) -> None:
+    print("A")
     config = RootConfig()
     logger.info("Reading configuration from proto file")
-    with open(
-        "/home/crem/tmp/2025-08/lc0_training/training.textproto", "r"
-    ) as f:
+    with open(config_filename, "r") as f:
         text_format.Parse(f.read(), config)
 
-    logger.info("Creating model from configuration")
-    rngs = nnx.Rngs(params=42)
-    model = LczeroModel(config=config.model, rngs=rngs)
+    if config.training.checkpoint.path is None:
+        logger.error("Checkpoint path must be set in the configuration.")
+        sys.exit(1)
 
-    logger.info("Creating dataloader from configuration")
-    datagen = make_dataloader(config.data_loader)
+    checkpoint_mgr = ocp.CheckpointManager(
+        config.training.checkpoint.path,
+        options=ocp.CheckpointManagerOptions(
+            create=True,
+        ),
+    )
 
-    logger.info("Creating training instance")
-    training = Training(config.training, model, from_dataloader(datagen))
+    logger.info("Creating state from configuration")
+    empty_state = TrainingState.new_from_config(
+        model_config=config.model,
+        training_config=config.training,
+    )
+    logger.info("Restoring checkpoint")
+    training_state = checkpoint_mgr.restore(
+        0, args=ocp.args.StandardRestore(empty_state)
+    )
+    logger.info("Restored checkpoint")
+
+    model, _ = nnx.split(
+        LczeroModel(config=config.model, rngs=nnx.Rngs(params=42))
+    )
+
+    assert isinstance(training_state, TrainingState)
+    training = Training(
+        config=config.training,
+        model=model,
+        training_state=training_state,
+        datagen=from_dataloader(make_dataloader(config.data_loader)),
+    )
     training.run()
-
-
-if __name__ == "__main__":
-    absl_logging.set_verbosity(absl_logging.INFO)
-    app.run(main)
