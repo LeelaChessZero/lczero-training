@@ -13,7 +13,7 @@ std::string GunzipBuffer(std::string_view buffer) {
   z_stream strm = {};
   int ret = inflateInit2(&strm, 16 + MAX_WBITS);
   if (ret != Z_OK) {
-    throw std::runtime_error("Failed to initialize zlib inflate");
+    throw GunzipError("Failed to initialize zlib inflate");
   }
 
   strm.avail_in = buffer.size();
@@ -31,7 +31,7 @@ std::string GunzipBuffer(std::string_view buffer) {
     if (ret == Z_STREAM_ERROR || ret == Z_NEED_DICT || ret == Z_DATA_ERROR ||
         ret == Z_MEM_ERROR) {
       inflateEnd(&strm);
-      throw std::runtime_error("zlib inflate error");
+      throw GunzipError("zlib inflate error");
     }
 
     size_t bytes_written = kChunkSize - strm.avail_out;
@@ -41,7 +41,7 @@ std::string GunzipBuffer(std::string_view buffer) {
   inflateEnd(&strm);
 
   if (ret != Z_STREAM_END) {
-    throw std::runtime_error("Incomplete gzip decompression");
+    throw GunzipError("Incomplete gzip decompression");
   }
 
   return output;

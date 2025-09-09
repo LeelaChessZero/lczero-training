@@ -197,8 +197,9 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   try {
     while (true) {
       auto chunk_data = GetNextChunkData();
+      if (!chunk_data) continue;
       LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(chunk_data));
+      producer.Put(std::move(*chunk_data));
     }
   } catch (const QueueClosedException&) {
     LOG(INFO) << "ShufflingChunkPool output worker stopping, queue closed.";
@@ -208,7 +209,7 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   }
 }
 
-std::string ShufflingChunkPool::GetNextChunkData() {
+std::optional<std::string> ShufflingChunkPool::GetNextChunkData() {
   absl::MutexLock lock(&chunk_sources_mutex_);
   std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
 

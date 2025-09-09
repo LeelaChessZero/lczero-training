@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
 namespace lczero {
@@ -26,8 +27,8 @@ class ChunkSource {
   virtual size_t GetChunkCount() const = 0;
 
   // Returns the data for the chunk at the given index. Only called after
-  // Index().
-  virtual std::string GetChunkData(size_t index) = 0;
+  // Index(). Returns std::nullopt if the chunk could not be read.
+  virtual std::optional<std::string> GetChunkData(size_t index) = 0;
 };
 
 }  // namespace training

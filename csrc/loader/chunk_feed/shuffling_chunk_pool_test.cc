@@ -37,7 +37,7 @@ class MockChunkSource : public ChunkSource {
     return chunk_count_;
   }
 
-  std::string GetChunkData(size_t index) override {
+  std::optional<std::string> GetChunkData(size_t index) override {
     if (!indexed_) {
       throw std::runtime_error("Index() must be called before GetChunkData()");
     }

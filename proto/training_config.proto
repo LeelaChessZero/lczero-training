@@ -44,6 +44,11 @@ message LossWeightsConfig {
 message PolicyLossWeightsConfig {
   string name = 1;
   float weight = 2;
+  enum IllegalMoveHandling {
+    TRAIN_TO_ZERO = 0;
+    MASK = 1;
+  }
+  IllegalMoveHandling illegal_moves = 3;
 }
 
 message ValueLossWeightsConfig {

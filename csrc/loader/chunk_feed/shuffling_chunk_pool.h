@@ -53,7 +53,8 @@ class ShufflingChunkPool {
   void OutputWorker(ChunkLoadingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  std::string GetNextChunkData() ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
+  std::optional<std::string> GetNextChunkData()
+      ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
 
   const size_t chunk_pool_size_;
   ThreadPool indexing_pool_;

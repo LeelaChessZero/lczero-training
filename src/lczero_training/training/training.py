@@ -1,14 +1,19 @@
 import logging
 import sys
-from typing import Generator, Tuple
+from functools import partial
+from typing import Callable, Dict, Generator, Tuple, cast
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
+from jax import tree_util
 
 from lczero_training.dataloader import DataLoader, make_dataloader
+from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import TrainingState
@@ -27,40 +32,121 @@ def from_dataloader(
 
 class Training:
     config: TrainingConfig
-    model: nnx.GraphDef
     datagen: Generator[Tuple[np.ndarray, ...], None, None]
-    optimizer: optax.GradientTransformation
-    step: int
-    model_state: nnx.State
-    opt_state: optax.OptState
+    optimizer_tx: optax.GradientTransformation
+    training_state: TrainingState
+    train_step: Callable[
+        [optax.GradientTransformation, TrainingState, dict],
+        Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+    ]
 
     def __init__(
         self,
         config: TrainingConfig,
-        model: nnx.GraphDef,
+        graphdef: nnx.GraphDef,
         training_state: TrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        loss_fn: LczeroLoss,
     ):
         self.config = config
-        self.model = model
-        self.step = training_state.step
-        self.model_state = training_state.model_state
-        assert training_state.opt_state is not None
-        self.opt_state = training_state.opt_state
+        self.training_state = training_state
+        assert self.training_state.opt_state is not None
 
         self.datagen = datagen
-        self.optimizer = make_gradient_transformation(config.optimizer)
+        self.optimizer_tx = make_gradient_transformation(config.optimizer)
 
-    def run(self) -> TrainingState:
-        model_and_state = nnx.merge(self.model, self.model_state)
+        @partial(nnx.jit, static_argnames=("optimizer_tx"))
+        def _step(
+            optimizer_tx: optax.GradientTransformation,
+            state: TrainingState,
+            batch: dict,
+        ) -> Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]]:
+            model = nnx.merge(graphdef, state.model_state)
 
-        # ...
+            def loss_for_grad(
+                model_arg: LczeroModel, batch_arg: dict
+            ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
+                return loss_fn(
+                    model_arg,
+                    inputs=batch_arg["inputs"],
+                    value_targets=batch_arg["value_targets"],
+                    policy_targets=batch_arg["policy_targets"],
+                    movesleft_targets=batch_arg["movesleft_targets"],
+                )
 
-        return TrainingState(
-            step=self.step,
-            model_state=nnx.state(model_and_state),
-            opt_state=self.opt_state,
+            loss_vfn = jax.vmap(
+                loss_for_grad,
+                in_axes=(None, 0),  # (model_arg, batch_arg)
+                out_axes=0,
+            )
+
+            def mean_loss_for_grad(
+                model_arg: LczeroModel, batch_arg: dict
+            ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
+                per_sample_data_loss, unweighted_losses = loss_vfn(
+                    model_arg, batch_arg
+                )
+                mean_data_loss = jnp.mean(per_sample_data_loss)
+
+                mean_unweighted = tree_util.tree_map(
+                    jnp.mean, unweighted_losses
+                )
+                total_l2_loss = mean_unweighted["l2"]
+
+                batch_size = batch_arg["inputs"].shape[0]
+                mean_l2_loss = total_l2_loss / batch_size
+
+                mean_loss = mean_data_loss + loss_fn.l2_weight * mean_l2_loss
+
+                return mean_loss, unweighted_losses
+
+            grad_fn = nnx.value_and_grad(mean_loss_for_grad, has_aux=True)
+            (mean_loss, unweighted_losses), mean_grads = grad_fn(model, batch)
+
+            assert state.opt_state is not None
+            updates, new_opt_state = optimizer_tx.update(
+                mean_grads, state.opt_state, state.model_state
+            )
+            new_model_state = optax.apply_updates(state.model_state, updates)
+
+            new_train_state = state.replace(
+                step=state.step + 1,
+                model_state=new_model_state,
+                opt_state=new_opt_state,
+            )
+
+            mean_unweighted = tree_util.tree_map(jnp.mean, unweighted_losses)
+            return new_train_state, (mean_loss, mean_unweighted)
+
+        self.train_step = cast(
+            Callable[
+                [optax.GradientTransformation, TrainingState, dict],
+                Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+            ],
+            _step,
         )
+
+    def run(self) -> None:
+        for _ in range(30):
+            logger.info(f"Starting step {self.training_state.step}")
+            batch = next(self.datagen)
+            print(len(batch))
+            b_inputs, b_policy, b_values, _, b_movesleft = batch
+            logger.info("Fetched batch from dataloader")
+            self.training_state, (loss, unweighted_losses) = self.train_step(
+                self.optimizer_tx,
+                self.training_state,
+                {
+                    "inputs": b_inputs,
+                    "value_targets": b_values,
+                    "policy_targets": b_policy,
+                    "movesleft_targets": b_movesleft,
+                },
+            )
+            logger.info(
+                f"Step {self.training_state.step}, Loss: {loss}, Unweighted losses:"
+                f" {unweighted_losses}"
+            )
 
 
 def train(config_filename: str) -> None:
@@ -99,8 +185,9 @@ def train(config_filename: str) -> None:
     assert isinstance(training_state, TrainingState)
     training = Training(
         config=config.training,
-        model=model,
+        graphdef=model,
         training_state=training_state,
         datagen=from_dataloader(make_dataloader(config.data_loader)),
+        loss_fn=LczeroLoss(config=config.training.losses),
     )
     training.run()

@@ -67,7 +67,7 @@ training {
   }
   losses {
     l2_weight: 1.0
-    policy { name: "main" weight: 1.0 }
+    policy { name: "main" weight: 1.0 illegal_moves: MASK}
     value { name: "winner" weight: 1.0 }
     movesleft { name: "main" weight: 1.0 }
   }

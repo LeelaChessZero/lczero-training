@@ -22,10 +22,8 @@ std::string RawFileChunkSource::GetChunkSortKey() const { return filename_; }
 
 size_t RawFileChunkSource::GetChunkCount() const { return 1; }
 
-std::string RawFileChunkSource::GetChunkData(size_t index) {
-  if (index != 0) {
-    throw std::out_of_range("RawFileChunkSource only has one chunk (index 0)");
-  }
+std::optional<std::string> RawFileChunkSource::GetChunkData(size_t index) {
+  if (index != 0) return std::nullopt;
   return ReadFileToString(filename_);
 }
 

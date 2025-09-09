@@ -95,7 +95,7 @@ std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
 
 size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 
-std::string TarChunkSource::GetChunkData(size_t index) {
+std::optional<std::string> TarChunkSource::GetChunkData(size_t index) {
   if (index >= files_.size()) {
     throw std::out_of_range("File index out of range");
   }
@@ -103,7 +103,13 @@ std::string TarChunkSource::GetChunkData(size_t index) {
   std::string content(file_entry.size, '\0');
   fseek(file_, file_entry.offset, SEEK_SET);
   fread(content.data(), 1, file_entry.size, file_);
-  if (file_entry.is_gzip) return GunzipBuffer(content);
+  if (file_entry.is_gzip) {
+    try {
+      return GunzipBuffer(content);
+    } catch (const GunzipError& e) {
+      return std::nullopt;
+    }
+  }
   return content;
 }
 

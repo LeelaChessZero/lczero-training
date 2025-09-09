@@ -27,7 +27,7 @@ class TarChunkSource : public ChunkSource {
   std::string GetChunkSortKey() const override;
   void Index() override;
   size_t GetChunkCount() const override;
-  std::string GetChunkData(size_t index) override;
+  std::optional<std::string> GetChunkData(size_t index) override;
 
   FILE* file_ = nullptr;
   std::vector<FileEntry> files_;

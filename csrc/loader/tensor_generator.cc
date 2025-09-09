@@ -85,9 +85,9 @@ void TensorGenerator::ConvertFramesToTensors(
   tensors.clear();
   tensors.reserve(5);
 
-  // 1. Planes tensor: (batch_size, 112, 64)
+  // 1. Planes tensor: (batch_size, 112, 8, 8)
   auto planes_tensor = std::make_unique<TypedTensor<float>>(
-      std::initializer_list<size_t>{batch_size, kNumPlanes, 64});
+      std::initializer_list<size_t>{batch_size, kNumPlanes, 8, 8});
   ProcessPlanes(frames, *planes_tensor);
   tensors.push_back(std::move(planes_tensor));
 

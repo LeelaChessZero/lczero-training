@@ -66,14 +66,15 @@ class TensorGeneratorTest : public ::testing::Test {
     ASSERT_EQ(tensors.size(), 5);
     const size_t batch_size = frames.size();
 
-    // 1. Verify planes tensor: (batch_size, 112, 64)
+    // 1. Verify planes tensor: (batch_size, 112, 8, 8)
     const auto* planes_tensor =
         dynamic_cast<const TypedTensor<float>*>(tensors[0].get());
     ASSERT_NE(planes_tensor, nullptr);
-    EXPECT_EQ(planes_tensor->shape().size(), 3);
+    EXPECT_EQ(planes_tensor->shape().size(), 4);
     EXPECT_EQ(planes_tensor->shape()[0], batch_size);
     EXPECT_EQ(planes_tensor->shape()[1], 112);
-    EXPECT_EQ(planes_tensor->shape()[2], 64);
+    EXPECT_EQ(planes_tensor->shape()[2], 8);
+    EXPECT_EQ(planes_tensor->shape()[3], 8);
 
     // 2. Verify probabilities tensor: (batch_size, 1858)
     const auto* probs_tensor =
