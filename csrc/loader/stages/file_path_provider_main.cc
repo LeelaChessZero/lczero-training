@@ -8,7 +8,7 @@
 #include <string>
 #include <thread>
 
-#include "loader/chunk_feed/file_path_provider.h"
+#include "loader/stages/file_path_provider.h"
 
 ABSL_FLAG(std::string, directory, "", "Directory to monitor for files");
 

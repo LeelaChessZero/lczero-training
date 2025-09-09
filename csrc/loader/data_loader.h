@@ -4,12 +4,12 @@
 #include <string>
 #include <thread>
 
-#include "loader/chunk_feed/chunk_source_loader.h"
-#include "loader/chunk_feed/chunk_unpacker.h"
-#include "loader/chunk_feed/file_path_provider.h"
-#include "loader/chunk_feed/shuffling_chunk_pool.h"
-#include "loader/shuffling_frame_sampler.h"
-#include "loader/tensor_generator.h"
+#include "loader/stages/chunk_source_loader.h"
+#include "loader/stages/chunk_unpacker.h"
+#include "loader/stages/file_path_provider.h"
+#include "loader/stages/shuffling_chunk_pool.h"
+#include "loader/stages/shuffling_frame_sampler.h"
+#include "loader/stages/tensor_generator.h"
 #include "proto/data_loader_config.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
 #include "utils/tensor.h"

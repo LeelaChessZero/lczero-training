@@ -1,7 +1,7 @@
 // ABOUTME: Comprehensive unit tests for the ShufflingChunkPool class
 // ABOUTME: Tests chunk source management, output workers, and dynamic windowing
 
-#include "loader/chunk_feed/shuffling_chunk_pool.h"
+#include "loader/stages/shuffling_chunk_pool.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/log/log.h>

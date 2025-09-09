@@ -1,7 +1,7 @@
 // ABOUTME: Unit tests for TensorGenerator stage in training pipeline.
 // ABOUTME: Tests tensor conversion, batching, and data format correctness.
 
-#include "loader/tensor_generator.h"
+#include "loader/stages/tensor_generator.h"
 
 #include <cstring>
 #include <memory>

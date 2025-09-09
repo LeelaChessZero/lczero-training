@@ -1,10 +1,10 @@
-#include "loader/chunk_feed/chunk_source_loader.h"
+#include "loader/stages/chunk_source_loader.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 
-#include "loader/chunk_feed/file_path_provider.h"
+#include "loader/stages/file_path_provider.h"
 #include "utils/queue.h"
 
 namespace lczero {

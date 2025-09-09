@@ -2,7 +2,7 @@
 // ABOUTME: Tests initial directory scanning, file monitoring, and Queue-based
 // output
 
-#include "loader/chunk_feed/file_path_provider.h"
+#include "loader/stages/file_path_provider.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/log/log.h>

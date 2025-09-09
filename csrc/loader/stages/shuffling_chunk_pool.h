@@ -7,9 +7,9 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/synchronization/mutex.h"
-#include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/chunk_source_loader.h"
+#include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/stages/chunk_source_loader.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"

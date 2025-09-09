@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/tar_chunk_source.h"
+#include "loader/chunk_source/tar_chunk_source.h"
 
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>

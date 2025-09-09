@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/rawfile_chunk_source.h"
+#include "loader/chunk_source/rawfile_chunk_source.h"
 
 #include <absl/log/log.h>
 

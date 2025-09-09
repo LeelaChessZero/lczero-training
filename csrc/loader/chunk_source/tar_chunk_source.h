@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "loader/chunk_feed/chunk_source.h"
+#include "loader/chunk_source/chunk_source.h"
 
 namespace lczero {
 namespace training {

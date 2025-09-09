@@ -1,7 +1,7 @@
 // ABOUTME: Implementation of TensorGenerator stage for training pipeline.
 // ABOUTME: Converts V6TrainingData frames to batched tensors for training.
 
-#include "loader/tensor_generator.h"
+#include "loader/stages/tensor_generator.h"
 
 #include <cstring>
 #include <memory>

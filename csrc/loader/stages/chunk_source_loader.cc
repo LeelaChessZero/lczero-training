@@ -1,10 +1,10 @@
-#include "loader/chunk_feed/chunk_source_loader.h"
+#include "loader/stages/chunk_source_loader.h"
 
 #include <filesystem>
 
 #include "absl/log/log.h"
-#include "loader/chunk_feed/rawfile_chunk_source.h"
-#include "loader/chunk_feed/tar_chunk_source.h"
+#include "loader/chunk_source/rawfile_chunk_source.h"
+#include "loader/chunk_source/tar_chunk_source.h"
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
 

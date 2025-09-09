@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/chunk_unpacker.h"
+#include "loader/stages/chunk_unpacker.h"
 
 #include <cstring>
 #include <string>

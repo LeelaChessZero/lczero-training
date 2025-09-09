@@ -1,4 +1,4 @@
-#include "loader/shuffling_frame_sampler.h"
+#include "loader/stages/shuffling_frame_sampler.h"
 
 #include <set>
 #include <vector>

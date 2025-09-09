@@ -69,14 +69,14 @@ proto_gen = generator(compile_proto, output: ['@BASENAME@.pb.h'],
 includes = include_directories('csrc', 'libs/lc0/src')
 
 files = [
-  'csrc/loader/chunk_feed/shuffling_chunk_pool.cc',
-  'csrc/loader/chunk_feed/chunk_source_loader.cc',
-  'csrc/loader/chunk_feed/chunk_unpacker.cc',
-  'csrc/loader/chunk_feed/file_path_provider.cc',
-  'csrc/loader/chunk_feed/rawfile_chunk_source.cc',
-  'csrc/loader/chunk_feed/tar_chunk_source.cc',
-  'csrc/loader/shuffling_frame_sampler.cc',
-  'csrc/loader/tensor_generator.cc',
+  'csrc/loader/stages/shuffling_chunk_pool.cc',
+  'csrc/loader/stages/chunk_source_loader.cc',
+  'csrc/loader/stages/chunk_unpacker.cc',
+  'csrc/loader/stages/file_path_provider.cc',
+  'csrc/loader/chunk_source/rawfile_chunk_source.cc',
+  'csrc/loader/chunk_source/tar_chunk_source.cc',
+  'csrc/loader/stages/shuffling_frame_sampler.cc',
+  'csrc/loader/stages/tensor_generator.cc',
   'csrc/loader/data_loader.cc',
   'csrc/loader/data_loader_metrics.cc',
   'csrc/utils/gz.cc',
@@ -133,7 +133,7 @@ queue_test = executable(
 
 file_path_provider_test = executable(
   'file_path_provider_test',
-  'csrc/loader/chunk_feed/file_path_provider_test.cc',
+  'csrc/loader/stages/file_path_provider_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
@@ -141,7 +141,7 @@ file_path_provider_test = executable(
 
 chunk_source_loader_test = executable(
   'chunk_source_loader_test',
-  'csrc/loader/chunk_feed/chunk_source_loader_test.cc',
+  'csrc/loader/stages/chunk_source_loader_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
   link_with : loader_lib,
@@ -149,7 +149,7 @@ chunk_source_loader_test = executable(
 
 shuffling_chunk_pool_test = executable(
   'shuffling_chunk_pool_test',
-  'csrc/loader/chunk_feed/shuffling_chunk_pool_test.cc',
+  'csrc/loader/stages/shuffling_chunk_pool_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
@@ -157,7 +157,7 @@ shuffling_chunk_pool_test = executable(
 
 chunk_unpacker_test = executable(
   'chunk_unpacker_test',
-  'csrc/loader/chunk_feed/chunk_unpacker_test.cc',
+  'csrc/loader/stages/chunk_unpacker_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
@@ -165,7 +165,7 @@ chunk_unpacker_test = executable(
 
 shuffling_frame_sampler_test = executable(
   'shuffling_frame_sampler_test',
-  'csrc/loader/shuffling_frame_sampler_test.cc',
+  'csrc/loader/stages/shuffling_frame_sampler_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['random_random']],
   link_with : loader_lib,
@@ -180,7 +180,7 @@ tensor_test = executable(
 
 tensor_generator_test = executable(
   'tensor_generator_test',
-  'csrc/loader/tensor_generator_test.cc',
+  'csrc/loader/stages/tensor_generator_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization']],
   link_with : loader_lib,
@@ -217,7 +217,7 @@ test('load_metric_test', load_metric_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',
-  'csrc/loader/chunk_feed/file_path_provider_main.cc',
+  'csrc/loader/stages/file_path_provider_main.cc',
   include_directories : includes,
   dependencies : cli_deps + [proto_dep],
   link_with : loader_lib,

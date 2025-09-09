@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-#include "loader/chunk_feed/chunk_source.h"
+#include "loader/chunk_source/chunk_source.h"
 
 namespace lczero {
 namespace training {

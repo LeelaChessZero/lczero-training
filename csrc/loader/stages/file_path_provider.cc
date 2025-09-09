@@ -1,4 +1,4 @@
-#include "loader/chunk_feed/file_path_provider.h"
+#include "loader/stages/file_path_provider.h"
 
 #include <absl/cleanup/cleanup.h>
 #include <absl/container/flat_hash_set.h>

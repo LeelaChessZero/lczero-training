@@ -3,8 +3,8 @@
 #include <filesystem>
 #include <memory>
 
-#include "loader/chunk_feed/chunk_source.h"
-#include "loader/chunk_feed/file_path_provider.h"
+#include "loader/chunk_source/chunk_source.h"
+#include "loader/stages/file_path_provider.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"

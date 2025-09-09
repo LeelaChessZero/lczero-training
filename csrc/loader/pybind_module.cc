@@ -10,13 +10,13 @@
 #include <pybind11/stl/filesystem.h>
 #include <pybind11/stl_bind.h>
 
-#include "loader/chunk_feed/chunk_source_loader.h"
-#include "loader/chunk_feed/chunk_unpacker.h"
-#include "loader/chunk_feed/file_path_provider.h"
-#include "loader/chunk_feed/shuffling_chunk_pool.h"
 #include "loader/data_loader.h"
-#include "loader/shuffling_frame_sampler.h"
-#include "loader/tensor_generator.h"
+#include "loader/stages/chunk_source_loader.h"
+#include "loader/stages/chunk_unpacker.h"
+#include "loader/stages/file_path_provider.h"
+#include "loader/stages/shuffling_chunk_pool.h"
+#include "loader/stages/shuffling_frame_sampler.h"
+#include "loader/stages/tensor_generator.h"
 #include "utils/tensor.h"
 
 namespace py = pybind11;
