@@ -93,8 +93,9 @@ PYBIND11_MODULE(_lczero_training, m) {
           },
           "Get serialized metrics for aggregate duration and actual duration "
           "as (bytes, float)")
-      .def("close", &DataLoader::Close, py::arg("graceful_drain") = false,
-           "Close the data loader");
+      .def("start", &DataLoader::Start, "Start the data loader processing")
+      .def("stop", &DataLoader::Stop, py::arg("graceful_drain") = false,
+           "Stop the data loader");
 
   // Expose TensorBase for potential advanced usage.
   py::class_<TensorBase>(m, "TensorBase")

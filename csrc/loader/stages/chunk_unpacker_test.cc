@@ -45,6 +45,7 @@ class ChunkUnpackerTest : public ::testing::Test {
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   V6TrainingData test_frame = CreateTestFrame(6);
   std::string chunk = PackFrames({test_frame});
@@ -61,6 +62,7 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   std::vector<V6TrainingData> test_frames = {
       CreateTestFrame(6), CreateTestFrame(7), CreateTestFrame(8)};
@@ -80,6 +82,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
 
@@ -104,6 +107,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
   producer.Put(std::string());  // Empty chunk
@@ -115,6 +119,7 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
 
 TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
   // Create chunk with invalid size (not multiple of sizeof(V6TrainingData))
@@ -128,6 +133,7 @@ TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
   ChunkUnpacker unpacker(input_queue_.get(), config_);
+  unpacker.Start();
 
   // Close input queue without sending data
   input_queue_->Close();

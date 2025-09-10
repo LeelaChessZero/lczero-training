@@ -15,14 +15,13 @@ ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
     : input_queue_(input_queue),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ChunkUnpacker with " << config.threads()
+  LOG(INFO) << "Initializing ChunkUnpacker with " << config.threads()
             << " worker threads";
 
-  // Initialize thread contexts and start worker threads.
+  // Initialize thread contexts but don't start worker threads yet.
   thread_contexts_.reserve(config.threads());
   for (size_t i = 0; i < config.threads(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -30,6 +29,13 @@ ChunkUnpacker::~ChunkUnpacker() { LOG(INFO) << "ChunkUnpacker shutting down."; }
 
 Queue<ChunkUnpacker::OutputType>* ChunkUnpacker::output() {
   return &output_queue_;
+}
+
+void ChunkUnpacker::Start() {
+  LOG(INFO) << "Starting ChunkUnpacker worker threads.";
+  for (size_t i = 0; i < thread_contexts_.size(); ++i) {
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+  }
 }
 
 void ChunkUnpacker::Worker(ThreadContext* context) {

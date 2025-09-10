@@ -198,6 +198,7 @@ class TensorGeneratorTest : public ::testing::Test {
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
@@ -213,6 +214,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
@@ -229,6 +231,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
 
@@ -263,6 +266,7 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   config_.set_batch_size(2);
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
   std::vector<V6TrainingData> frames;
@@ -278,6 +282,7 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   // Close input queue without sending data.
   input_queue_->Close();
@@ -289,6 +294,7 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   config_.set_batch_size(1);
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
 
@@ -325,6 +331,7 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   config_.set_batch_size(1);
   TensorGenerator generator(input_queue_.get(), config_);
+  generator.Start();
 
   auto producer = input_queue_->CreateProducer();
 

@@ -31,6 +31,7 @@ class ChunkUnpacker {
   ~ChunkUnpacker();
 
   Queue<OutputType>* output();
+  void Start();
   ChunkUnpackerMetricsProto FlushMetrics();
 
  private:

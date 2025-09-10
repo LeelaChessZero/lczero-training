@@ -28,14 +28,13 @@ ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
     : input_queue_(input_queue),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ChunkSourceLoader with " << config.threads()
+  LOG(INFO) << "Initializing ChunkSourceLoader with " << config.threads()
             << " worker threads";
 
-  // Initialize thread contexts and start worker threads.
+  // Initialize thread contexts but don't start worker threads yet.
   thread_contexts_.reserve(config.threads());
   for (size_t i = 0; i < config.threads(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -45,6 +44,13 @@ ChunkSourceLoader::~ChunkSourceLoader() {
 
 Queue<ChunkSourceLoader::OutputType>* ChunkSourceLoader::output() {
   return &output_queue_;
+}
+
+void ChunkSourceLoader::Start() {
+  LOG(INFO) << "Starting ChunkSourceLoader worker threads.";
+  for (size_t i = 0; i < thread_contexts_.size(); ++i) {
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+  }
 }
 
 void ChunkSourceLoader::Worker(ThreadContext* context) {

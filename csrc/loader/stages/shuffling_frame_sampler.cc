@@ -16,15 +16,14 @@ ShufflingFrameSampler::ShufflingFrameSampler(
       output_queue_(config.queue_capacity()),
       reservoir_size_per_thread_(config.reservoir_size_per_thread()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting ShufflingFrameSampler with " << config.threads()
+  LOG(INFO) << "Initializing ShufflingFrameSampler with " << config.threads()
             << " threads, reservoir size "
             << config.reservoir_size_per_thread();
 
-  // Initialize thread contexts and start worker threads.
+  // Initialize thread contexts but don't start worker threads yet.
   thread_contexts_.reserve(config.threads());
   for (size_t i = 0; i < config.threads(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -34,6 +33,13 @@ ShufflingFrameSampler::~ShufflingFrameSampler() {
 
 Queue<ShufflingFrameSampler::OutputType>* ShufflingFrameSampler::output() {
   return &output_queue_;
+}
+
+void ShufflingFrameSampler::Start() {
+  LOG(INFO) << "Starting ShufflingFrameSampler worker threads.";
+  for (size_t i = 0; i < thread_contexts_.size(); ++i) {
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+  }
 }
 
 void ShufflingFrameSampler::Worker(ThreadContext* context) {

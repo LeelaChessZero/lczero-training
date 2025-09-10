@@ -32,15 +32,27 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
           [](DataLoaderMetricsProto& m) { m.Clear(); },
           [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
             UpdateFrom(dest, src);
-          }),
-      metrics_thread_(
-          [this](std::stop_token stop_token) { MetricsThread(stop_token); }) {
+          }) {
+  LOG(INFO) << "DataLoader initialized (not started).";
+}
+
+void DataLoader::Start() {
+  LOG(INFO) << "Starting DataLoader...";
+  file_path_provider_.Start();
+  chunk_source_loader_.Start();
+  shuffling_chunk_pool_.Start();
+  chunk_unpacker_.Start();
+  shuffling_frame_sampler_.Start();
+  tensor_generator_.Start();
+
+  metrics_thread_ = std::jthread(
+      [this](std::stop_token stop_token) { MetricsThread(stop_token); });
   LOG(INFO) << "DataLoader started.";
 }
 
-DataLoader::~DataLoader() { Close(true); }
+DataLoader::~DataLoader() { Stop(true); }
 
-void DataLoader::Close(bool graceful_drain) {
+void DataLoader::Stop(bool graceful_drain) {
   LOG(INFO) << "Shutting down FilePathProvider.";
   file_path_provider_.Close();
   LOG(INFO) << "Shutting down ShufflingChunkPool.";

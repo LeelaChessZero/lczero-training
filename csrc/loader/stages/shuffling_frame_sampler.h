@@ -33,6 +33,7 @@ class ShufflingFrameSampler {
   ~ShufflingFrameSampler();
 
   Queue<OutputType>* output();
+  void Start();
   ShufflingFrameSamplerMetricsProto FlushMetrics();
 
  private:

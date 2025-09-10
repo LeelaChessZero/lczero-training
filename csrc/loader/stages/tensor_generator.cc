@@ -22,14 +22,13 @@ TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
       output_queue_(config.queue_capacity()),
       batch_size_(config.batch_size()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
-  LOG(INFO) << "Starting TensorGenerator with " << config.threads()
+  LOG(INFO) << "Initializing TensorGenerator with " << config.threads()
             << " threads, batch size " << config.batch_size();
 
-  // Initialize thread contexts and start worker threads.
+  // Initialize thread contexts but don't start worker threads yet.
   thread_contexts_.reserve(config.threads());
   for (size_t i = 0; i < config.threads(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
 }
 
@@ -39,6 +38,13 @@ TensorGenerator::~TensorGenerator() {
 
 Queue<TensorGenerator::OutputType>* TensorGenerator::output() {
   return &output_queue_;
+}
+
+void TensorGenerator::Start() {
+  LOG(INFO) << "Starting TensorGenerator worker threads.";
+  for (size_t i = 0; i < thread_contexts_.size(); ++i) {
+    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+  }
 }
 
 void TensorGenerator::Worker(ThreadContext* context) {

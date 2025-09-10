@@ -37,6 +37,7 @@ class ChunkSourceLoader {
   ~ChunkSourceLoader();
 
   Queue<OutputType>* output();
+  void Start();
 
   ChunkSourceLoaderMetricsProto FlushMetrics();
 

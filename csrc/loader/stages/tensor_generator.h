@@ -32,6 +32,7 @@ class TensorGenerator {
   ~TensorGenerator();
 
   Queue<OutputType>* output();
+  void Start();
   TensorGeneratorMetricsProto FlushMetrics();
 
  private:

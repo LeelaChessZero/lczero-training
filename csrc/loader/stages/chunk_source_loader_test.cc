@@ -16,6 +16,7 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
+  feed.Start();
 
   {
     auto producer = input_queue.CreateProducer();
@@ -48,6 +49,7 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
+  feed.Start();
 
   {
     auto producer = input_queue.CreateProducer();
@@ -78,6 +80,7 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   ChunkSourceLoader feed(&input_queue, config);
+  feed.Start();
 
   {
     auto producer = input_queue.CreateProducer();

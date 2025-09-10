@@ -65,7 +65,7 @@ class TrainingDaemon:
     def _shutdown(self, signum: int) -> None:
         logging.info(f"Received signal {signum}, shutting down...")
         if self._data_loader is not None:
-            self._data_loader.close()
+            self._data_loader.stop()
 
     async def _metrics_main(self) -> None:
         async with anyio.create_task_group() as tg:
@@ -124,3 +124,4 @@ class TrainingDaemon:
 
         data_loader_config_bytes = root_config.data_loader.SerializeToString()
         self._data_loader = DataLoader(data_loader_config_bytes)
+        self._data_loader.start()

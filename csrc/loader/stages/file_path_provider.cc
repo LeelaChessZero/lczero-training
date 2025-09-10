@@ -25,12 +25,11 @@ FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
       directory_(config.directory()),
       producer_(output_queue_.CreateProducer()),
       load_metric_updater_() {
-  LOG(INFO) << "Starting FilePathProvider for directory: "
+  LOG(INFO) << "Initializing FilePathProvider for directory: "
             << config.directory();
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   CHECK_NE(inotify_fd_, -1)
       << "Failed to initialize inotify: " << strerror(errno);
-  monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
 }
 
 FilePathProvider::~FilePathProvider() {
@@ -42,6 +41,11 @@ FilePathProvider::~FilePathProvider() {
 
 Queue<FilePathProvider::File>* FilePathProvider::output() {
   return &output_queue_;
+}
+
+void FilePathProvider::Start() {
+  LOG(INFO) << "Starting FilePathProvider monitoring thread.";
+  monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
 }
 
 void FilePathProvider::Close() {

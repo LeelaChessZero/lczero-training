@@ -47,6 +47,9 @@ class FilePathProvider {
   // Returns the output queue for this stage
   Queue<File>* output();
 
+  // Starts monitoring the directory
+  void Start();
+
   // Closes the output queue, signaling completion
   void Close();
 

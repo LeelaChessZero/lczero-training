@@ -27,6 +27,7 @@ class ShufflingChunkPool {
   ~ShufflingChunkPool();
 
   Queue<std::string>* output();
+  void Start();
   void Close();
 
   ShufflingChunkPoolMetricsProto FlushMetrics();
@@ -57,6 +58,7 @@ class ShufflingChunkPool {
       ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
 
   const size_t chunk_pool_size_;
+  const ShufflingChunkPoolConfig config_;
   ThreadPool indexing_pool_;
   ThreadPool chunk_loading_pool_;
   Queue<ChunkSourceWithPhase>* input_queue_;
