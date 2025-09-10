@@ -57,6 +57,8 @@ message ShufflingChunkPoolMetricsProto {
   optional StatisticsProtoInt64 chunk_sources_count = 4;
   optional uint64 current_chunks = 5 [default = 0];
   optional uint64 pool_capacity = 6 [default = 0];
+  optional int32 chunks_since_anchor = 7 [default = 0];
+  optional string anchor = 8;
 }
 
 // Metrics for ChunkUnpacker performance monitoring.

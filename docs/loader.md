@@ -155,3 +155,55 @@ The sampler uses reservoir sampling:
   queue is closed.
 * `using FrameType = V6TrainingData;`, use `absl::FixedArray<FrameType>` for
   the reservoir.
+
+## Anchors in ShufflingChunkPool
+
+The training pipeline aims to start training new epoch when a certain number
+of new chunks are available.
+To do that, we reset the running counter of chunks in the ShufflingChunkPool
+when we start waiting for new chunks, and then wait until the counter reaches
+the desired number.
+However, when the script restarts, we also want to approximately know how many
+new chunks to wait for before starting the training.
+
+To do that, we use the concept of "anchors". Anchor is just a GetChunkSortKey()
+of a given chunk that we remember.
+
+More specifically, we add the following functions to ShufflingChunkPool:
+
+* `std::string ResetAnchor()` — resets the anchor to the latest chunk seen so
+  far, and returns its sort key. Also resets the internal counter of chunks seen
+  since the anchor.
+* `int ChunksSinceAnchor()` — returns the number of chunks seen since the anchor.
+* `std::string CurrentAnchor()` — returns the current anchor sort key.
+* `void SetAnchor(std::string_view)` — is usually called BEFORE starting processing
+  chunks. Does not reset the counter, but sets the anchor to the given value.
+  When the read chunk has the same key as the anchor, the counter is reset to zero.
+
+The anchor functionality works differently during initial load vs. ongoing processing:
+
+**Initial Load (backward processing):**
+
+* Chunks are processed in newest-first order during initial scan
+* If no anchor is set: count all chunks
+* If anchor is set: only count chunks newer than the anchor; reset counter to 0
+  when anchor is encountered
+
+**Ongoing Processing (after initial load):**
+
+* New chunks are processed as they arrive
+* Counter increments by GetChunkCount() for each new chunk source
+* Counter resets to 0 when a chunk source matching the anchor is encountered
+
+Metrics:
+In [ShufflingChunkPoolMetricsProto](../proto/training_metrics.proto) we add:
+
+* `int32 chunks_since_anchor` — number of chunks seen since the anchor. Simple
+  numerical field.
+* `string anchor` — current anchor sort key.
+
+In [UI](../src/lczero_training/tui/stage_widgets.py) we:
+
+* Update the last_chunk_key display to have a label "Last:"
+* Add a new row "⚓:" for the anchor key.
+* Add a new row "Since ⚓:" for chunks_since_anchor.

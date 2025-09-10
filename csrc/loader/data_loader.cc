@@ -117,5 +117,21 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   LOG(INFO) << "Metrics thread stopping.";
 }
 
+std::string DataLoader::ResetChunkAnchor() {
+  return shuffling_chunk_pool_.ResetAnchor();
+}
+
+int DataLoader::ChunksSinceAnchor() {
+  return shuffling_chunk_pool_.ChunksSinceAnchor();
+}
+
+std::string DataLoader::CurrentChunkAnchor() {
+  return shuffling_chunk_pool_.CurrentAnchor();
+}
+
+void DataLoader::SetChunkAnchor(std::string_view anchor) {
+  shuffling_chunk_pool_.SetAnchor(anchor);
+}
+
 }  // namespace training
 }  // namespace lczero

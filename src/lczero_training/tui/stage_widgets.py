@@ -295,7 +295,11 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         self.item_name = item_name
         self.load_widget = LoadWidget()
         self.skipped_files_display = Static("skipped: --")
-        self.last_chunk_display = Static("--", id="last-chunk-display")
+        self.last_chunk_display = Static("Last: --", id="last-chunk-display")
+        self.anchor_display = Static("⚓: --", id="anchor-display")
+        self.chunks_since_anchor_display = Static(
+            "Since ⚓: --", id="chunks-since-anchor-display"
+        )
         self._skipped_total = 0
         self._skipped_rate = 0
 
@@ -303,6 +307,8 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         yield self.load_widget
         yield self.skipped_files_display
         yield self.last_chunk_display
+        yield self.anchor_display
+        yield self.chunks_since_anchor_display
 
     def update_metrics(
         self,
@@ -313,7 +319,9 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         if not dataloader_1_second or not dataloader_total:
             self.load_widget.update_load_metrics(None)
             self.skipped_files_display.update("skipped: --")
-            self.last_chunk_display.update("--")
+            self.last_chunk_display.update("Last: --")
+            self.anchor_display.update("⚓: --")
+            self.chunks_since_anchor_display.update("Since ⚓: --")
             return
 
         try:
@@ -338,13 +346,37 @@ class ChunkSourceLoaderStageWidget(StageWidget):
                 hasattr(stage_1sec, "last_chunk_key")
                 and stage_1sec.last_chunk_key
             ):
-                self.last_chunk_display.update(stage_1sec.last_chunk_key)
+                self.last_chunk_display.update(
+                    f"Last: {stage_1sec.last_chunk_key}"
+                )
             else:
-                self.last_chunk_display.update("--")
+                self.last_chunk_display.update("Last: --")
+
+            # Get anchor metrics from shuffling_chunk_pool instead
+            pool_1sec = getattr(
+                dataloader_1_second, "shuffling_chunk_pool", None
+            )
+
+            # Update anchor display.
+            if pool_1sec and hasattr(pool_1sec, "anchor") and pool_1sec.anchor:
+                self.anchor_display.update(f"⚓: {pool_1sec.anchor}")
+            else:
+                self.anchor_display.update("⚓: --")
+
+            # Update chunks since anchor display.
+            if pool_1sec and hasattr(pool_1sec, "chunks_since_anchor"):
+                chunks_count = pool_1sec.chunks_since_anchor
+                self.chunks_since_anchor_display.update(
+                    f"Since ⚓: {format_full_number(chunks_count)}"
+                )
+            else:
+                self.chunks_since_anchor_display.update("Since ⚓: --")
         except AttributeError:
             self.load_widget.update_load_metrics(None)
             self.skipped_files_display.update("skipped: --")
-            self.last_chunk_display.update("--")
+            self.last_chunk_display.update("Last: --")
+            self.anchor_display.update("⚓: --")
+            self.chunks_since_anchor_display.update("Since ⚓: --")
 
 
 class ShufflingChunkPoolStageWidget(StageWidget):

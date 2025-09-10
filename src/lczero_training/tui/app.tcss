@@ -51,6 +51,10 @@ ShufflingChunkPoolStageWidget {
     padding: 0;
 }
 
+ChunkSourceLoaderStageWidget {
+    padding: 0;
+}
+
 .chunks-progress {
     height: 1;
     layout: horizontal;
@@ -153,6 +157,25 @@ LoadWidget {
     text-align: right;
     padding: 0;
     width: 1fr;
+    height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#anchor-display {
+    text-align: right;
+    padding: 0;
+    width: 1fr;
+    height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#chunks-since-anchor-display {
+    text-align: right;
+    padding: 0;
+    width: 1fr;
+    height: 1;
     overflow: hidden;
     text-overflow: ellipsis;
 }

@@ -116,6 +116,13 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
 
   // Index sources ≈sequentially until we have enough chunks. It's fine to
   // overshoot a bit due to multiple threads.
+  std::atomic<bool> anchor_encountered{false};
+  std::string current_anchor;
+  {
+    absl::MutexLock lock(&anchor_mutex_);
+    current_anchor = anchor_;
+  }
+
   for (auto& source : uninitialized_sources) {
     indexing_pool.WaitForAvailableThread();
     if (output_queue_.IsClosed()) {
@@ -123,11 +130,32 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
       break;
     }
     if (total_chunks >= chunk_pool_size_) break;
-    indexing_pool.Enqueue([&source, &total_chunks]() {
-      source->Index();
-      total_chunks += source->GetChunkCount();
-      LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load();
-    });
+
+    indexing_pool.Enqueue(
+        [&source, &total_chunks, &anchor_encountered, &current_anchor, this]() {
+          source->Index();
+          size_t chunk_count = source->GetChunkCount();
+          total_chunks += chunk_count;
+
+          // Handle anchor counting during initial load
+          if (current_anchor.empty()) {
+            // No anchor set - count all chunks
+            chunks_since_anchor_ += chunk_count;
+          } else {
+            // Anchor is set - special logic for backward processing
+            std::string chunk_key = source->GetChunkSortKey();
+            if (chunk_key == current_anchor) {
+              // Reset counter when we encounter the anchor
+              anchor_encountered = true;
+              chunks_since_anchor_ = 0;
+            } else if (!anchor_encountered) {
+              // Only count chunks for sources newer than the anchor
+              chunks_since_anchor_ += chunk_count;
+            }
+          }
+
+          LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load();
+        });
     ++sources_to_keep;
   }
   indexing_pool.WaitAll();
@@ -184,6 +212,20 @@ void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
         // Index the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
         source->Index();
+
+        // Handle anchor counting for new chunk sources
+        std::string chunk_key = source->GetChunkSortKey();
+        size_t chunk_count = source->GetChunkCount();
+        {
+          absl::MutexLock anchor_lock(&anchor_mutex_);
+          if (!anchor_.empty() && chunk_key == anchor_) {
+            // Reset counter when we encounter the anchor
+            chunks_since_anchor_ = 0;
+          } else {
+            // Increment counter by the number of chunks in this source
+            chunks_since_anchor_ += chunk_count;
+          }
+        }
 
         absl::MutexLock lock(&chunk_sources_mutex_);
         AddNewChunkSource(std::move(source));
@@ -319,7 +361,41 @@ ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
     result.set_pool_capacity(chunk_pool_size_);
   }
 
+  // Get anchor-related metrics.
+  {
+    absl::MutexLock lock(&anchor_mutex_);
+    result.set_chunks_since_anchor(chunks_since_anchor_);
+    result.set_anchor(anchor_);
+  }
+
   return result;
+}
+
+std::string ShufflingChunkPool::ResetAnchor() {
+  absl::MutexLock lock(&anchor_mutex_);
+  // For ShufflingChunkPool, we'll use the latest chunk source's sort key
+  std::string latest_chunk_key;
+  {
+    absl::MutexLock sources_lock(&chunk_sources_mutex_);
+    if (!chunk_sources_.empty()) {
+      latest_chunk_key = chunk_sources_.back().source->GetChunkSortKey();
+    }
+  }
+  anchor_ = latest_chunk_key;
+  chunks_since_anchor_ = 0;
+  return anchor_;
+}
+
+int ShufflingChunkPool::ChunksSinceAnchor() { return chunks_since_anchor_; }
+
+std::string ShufflingChunkPool::CurrentAnchor() {
+  absl::MutexLock lock(&anchor_mutex_);
+  return anchor_;
+}
+
+void ShufflingChunkPool::SetAnchor(std::string_view anchor) {
+  absl::MutexLock lock(&anchor_mutex_);
+  anchor_ = anchor;
 }
 
 void ShufflingChunkPool::Close() { output_queue_.Close(); }

@@ -38,6 +38,9 @@ void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
   UpdateFrom(*dest.mutable_chunk_sources_count(), src.chunk_sources_count());
   if (src.has_current_chunks()) dest.set_current_chunks(src.current_chunks());
   if (src.has_pool_capacity()) dest.set_pool_capacity(src.pool_capacity());
+  if (src.has_chunks_since_anchor())
+    dest.set_chunks_since_anchor(src.chunks_since_anchor());
+  if (src.has_anchor()) dest.set_anchor(src.anchor());
 }
 
 void UpdateFrom(ChunkUnpackerMetricsProto& dest,

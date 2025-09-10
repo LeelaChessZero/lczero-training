@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "loader/stages/chunk_source_loader.h"
@@ -32,6 +33,12 @@ class DataLoader {
                                                  bool include_pending) const;
   std::pair<std::string, float> GetAggregateEndingNow(
       float duration_seconds, bool include_pending) const;
+
+  // Chunk anchor management methods.
+  std::string ResetChunkAnchor();
+  int ChunksSinceAnchor();
+  std::string CurrentChunkAnchor();
+  void SetChunkAnchor(std::string_view anchor);
 
  private:
   static DataLoaderConfig ParseConfig(

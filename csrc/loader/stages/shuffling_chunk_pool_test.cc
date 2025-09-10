@@ -568,5 +568,130 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   shuffling_chunk_pool.Close();
 }
 
+TEST_F(ShufflingChunkPoolTest, BasicAnchorFunctionality) {
+  AddMockChunkSourceToQueue("source1", 20);
+  MarkInitialScanComplete();
+
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(20);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
+
+  ShufflingChunkPool pool(input_queue_.get(), config);
+
+  // Test initial state
+  EXPECT_EQ(pool.ChunksSinceAnchor(), 0);
+  EXPECT_EQ(pool.CurrentAnchor(), "");
+
+  // Test SetAnchor and CurrentAnchor
+  pool.SetAnchor("test_anchor_key");
+  EXPECT_EQ(pool.CurrentAnchor(), "test_anchor_key");
+  EXPECT_EQ(pool.ChunksSinceAnchor(), 0);  // Should still be 0
+
+  // Test setting different anchor
+  pool.SetAnchor("another_key");
+  EXPECT_EQ(pool.CurrentAnchor(), "another_key");
+
+  CloseInputQueue();
+}
+
+TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
+  AddMockChunkSourceToQueue("source1", 20);
+  MarkInitialScanComplete();
+
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(20);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
+
+  ShufflingChunkPool pool(input_queue_.get(), config);
+
+  // Wait for initialization to complete
+  pool.output()->WaitForSizeAtLeast(1);
+
+  // Now test ResetAnchor
+  std::string anchor = pool.ResetAnchor();
+  EXPECT_FALSE(anchor.empty());  // Should have the chunk key
+  EXPECT_EQ(pool.CurrentAnchor(), anchor);
+  EXPECT_EQ(pool.ChunksSinceAnchor(), 0);  // Should be reset to 0
+
+  CloseInputQueue();
+}
+
+TEST_F(ShufflingChunkPoolTest, AnchorCounterIncrement) {
+  // Don't mark initial scan complete yet - we'll add sources one by one
+
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
+
+  // Start with some initial sources and complete scan
+  AddMockChunkSourceToQueue("source1", 20);
+  MarkInitialScanComplete();
+
+  ShufflingChunkPool pool(input_queue_.get(), config);
+
+  // Set anchor to a key that won't match our new sources
+  pool.SetAnchor("non_matching_key");
+
+  // Wait for initial load to complete
+  pool.output()->WaitForSizeAtLeast(1);
+
+  // Now add new sources (these should increment the counter)
+  // Note: We can't add more sources after initial scan complete in the current
+  // setup So we'll test the counter after the initial load
+
+  int final_count = pool.ChunksSinceAnchor();
+
+  // Counter should have incremented during initial load since anchor doesn't
+  // match
+  EXPECT_GT(final_count, 0);
+  EXPECT_EQ(pool.CurrentAnchor(), "non_matching_key");  // Anchor unchanged
+
+  CloseInputQueue();
+}
+
+TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
+  // Test the special case where anchor is encountered during initial backward
+  // processing
+  AddMockChunkSourceToQueue("source_c", 10);  // newest
+  AddMockChunkSourceToQueue("source_b", 15);  // middle
+  AddMockChunkSourceToQueue("source_a", 20);  // oldest
+
+  ShufflingChunkPoolConfig config;
+  config.set_chunk_pool_size(100);
+  config.set_startup_indexing_threads(1);
+  config.set_indexing_threads(1);
+  config.set_chunk_loading_threads(1);
+  config.set_queue_capacity(100);
+
+  ShufflingChunkPool pool(input_queue_.get(), config);
+
+  // Set anchor to middle source before marking scan complete
+  pool.SetAnchor("source_b");
+
+  // Mark scan complete to trigger initial processing
+  MarkInitialScanComplete();
+
+  // Wait for initial load to complete
+  pool.output()->WaitForSizeAtLeast(1);
+
+  int final_count = pool.ChunksSinceAnchor();
+
+  // Should only count chunks from source_c (10 chunks) since it's newer than
+  // anchor When source_b (anchor) is encountered, counter should reset to 0
+  EXPECT_EQ(final_count, 0);  // Counter reset when anchor encountered
+  EXPECT_EQ(pool.CurrentAnchor(), "source_b");
+
+  CloseInputQueue();
+}
+
 }  // namespace training
 }  // namespace lczero

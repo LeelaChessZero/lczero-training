@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "absl/base/thread_annotations.h"
@@ -31,6 +32,12 @@ class ShufflingChunkPool {
   void Close();
 
   ShufflingChunkPoolMetricsProto FlushMetrics();
+
+  // Anchor management methods for tracking chunks since a specific point.
+  std::string ResetAnchor();
+  int ChunksSinceAnchor();
+  std::string CurrentAnchor();
+  void SetAnchor(std::string_view anchor);
 
  private:
   struct ChunkSourceItem {
@@ -72,6 +79,11 @@ class ShufflingChunkPool {
   std::vector<std::unique_ptr<IndexingThreadContext>> indexing_thread_contexts_;
   std::vector<std::unique_ptr<ChunkLoadingThreadContext>>
       chunk_loading_thread_contexts_;
+
+  // Anchor-related members for tracking chunks since a specific point.
+  absl::Mutex anchor_mutex_;
+  std::string anchor_ ABSL_GUARDED_BY(anchor_mutex_);
+  std::atomic<int> chunks_since_anchor_{0};
 };
 
 }  // namespace training
