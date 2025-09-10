@@ -43,7 +43,8 @@ uint64_t ParseOctal(const std::array<uint8_t, 12>& octal) {
 }  // namespace
 
 TarChunkSource::TarChunkSource(const std::filesystem::path& filename)
-    : file_(fopen(filename.string().c_str(), "rb")), filename_(filename) {
+    : file_(fopen(filename.string().c_str(), "rb")),
+      filename_(filename.filename().string()) {
   if (!file_) throw std::runtime_error("Failed to open tar file");
 }
 

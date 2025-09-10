@@ -67,6 +67,11 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
       // Create ChunkSource from the file.
       auto source = CreateChunkSourceFromFile(file.filepath);
       if (source) {
+        // Track the last chunk key.
+        {
+          absl::MutexLock lock(&last_chunk_key_mutex_);
+          last_chunk_key_ = source->GetChunkSortKey();
+        }
         // Output the ChunkSource with its phase.
         ChunkSourceWithPhase output{.source = std::move(source),
                                     .message_type = file.message_type};
@@ -95,6 +100,14 @@ ChunkSourceLoaderMetricsProto ChunkSourceLoader::FlushMetrics() {
 
   // Atomically get and reset skipped files count.
   result.set_skipped_files_count(skipped_files_count_.exchange(0));
+
+  // Get the last chunk key.
+  {
+    absl::MutexLock lock(&last_chunk_key_mutex_);
+    if (!last_chunk_key_.empty()) {
+      result.set_last_chunk_key(last_chunk_key_);
+    }
+  }
 
   return result;
 }

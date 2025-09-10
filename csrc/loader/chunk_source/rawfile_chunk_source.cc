@@ -18,7 +18,9 @@ RawFileChunkSource::~RawFileChunkSource() = default;
 
 void RawFileChunkSource::Index() {}
 
-std::string RawFileChunkSource::GetChunkSortKey() const { return filename_; }
+std::string RawFileChunkSource::GetChunkSortKey() const {
+  return std::filesystem::path(filename_).filename().string();
+}
 
 size_t RawFileChunkSource::GetChunkCount() const { return 1; }
 

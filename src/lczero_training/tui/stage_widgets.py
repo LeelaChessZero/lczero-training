@@ -295,12 +295,14 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         self.item_name = item_name
         self.load_widget = LoadWidget()
         self.skipped_files_display = Static("skipped: --")
+        self.last_chunk_display = Static("--", id="last-chunk-display")
         self._skipped_total = 0
         self._skipped_rate = 0
 
     def compose(self) -> ComposeResult:
         yield self.load_widget
         yield self.skipped_files_display
+        yield self.last_chunk_display
 
     def update_metrics(
         self,
@@ -311,6 +313,7 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         if not dataloader_1_second or not dataloader_total:
             self.load_widget.update_load_metrics(None)
             self.skipped_files_display.update("skipped: --")
+            self.last_chunk_display.update("--")
             return
 
         try:
@@ -329,9 +332,19 @@ class ChunkSourceLoaderStageWidget(StageWidget):
                 skipped_text += " (0/s)"
 
             self.skipped_files_display.update(skipped_text)
+
+            # Update last chunk key display.
+            if (
+                hasattr(stage_1sec, "last_chunk_key")
+                and stage_1sec.last_chunk_key
+            ):
+                self.last_chunk_display.update(stage_1sec.last_chunk_key)
+            else:
+                self.last_chunk_display.update("--")
         except AttributeError:
             self.load_widget.update_load_metrics(None)
             self.skipped_files_display.update("skipped: --")
+            self.last_chunk_display.update("--")
 
 
 class ShufflingChunkPoolStageWidget(StageWidget):

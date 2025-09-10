@@ -149,6 +149,14 @@ LoadWidget {
     padding: 0;
 }
 
+#last-chunk-display {
+    text-align: right;
+    padding: 0;
+    width: 1fr;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .stage-content, .queue-content {
     text-align: left;
 }

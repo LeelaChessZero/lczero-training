@@ -27,6 +27,7 @@ void UpdateFrom(ChunkSourceLoaderMetricsProto& dest,
                 const ChunkSourceLoaderMetricsProto& src) {
   UpdateFrom(*dest.mutable_load(), src.load());
   UpdateFrom(*dest.mutable_queue(), src.queue());
+  if (src.has_last_chunk_key()) dest.set_last_chunk_key(src.last_chunk_key());
 }
 
 void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
