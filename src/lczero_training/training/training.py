@@ -32,7 +32,6 @@ def from_dataloader(
 
 class Training:
     config: TrainingConfig
-    datagen: Generator[Tuple[np.ndarray, ...], None, None]
     optimizer_tx: optax.GradientTransformation
     training_state: TrainingState
     train_step: Callable[
@@ -45,14 +44,11 @@ class Training:
         config: TrainingConfig,
         graphdef: nnx.GraphDef,
         training_state: TrainingState,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
         loss_fn: LczeroLoss,
     ):
         self.config = config
         self.training_state = training_state
         assert self.training_state.opt_state is not None
-
-        self.datagen = datagen
         self.optimizer_tx = make_gradient_transformation(config.optimizer)
 
         @partial(nnx.jit, static_argnames=("optimizer_tx"))
@@ -126,10 +122,12 @@ class Training:
             _step,
         )
 
-    def run(self) -> None:
+    def run(
+        self, datagen: Generator[Tuple[np.ndarray, ...], None, None]
+    ) -> None:
         for _ in range(30):
             logger.info(f"Starting step {self.training_state.step}")
-            batch = next(self.datagen)
+            batch = next(datagen)
             print(len(batch))
             b_inputs, b_policy, b_values, _, b_movesleft = batch
             logger.info("Fetched batch from dataloader")
@@ -187,7 +185,6 @@ def train(config_filename: str) -> None:
         config=config.training,
         graphdef=model,
         training_state=training_state,
-        datagen=from_dataloader(make_dataloader(config.data_loader)),
         loss_fn=LczeroLoss(config=config.training.losses),
     )
-    training.run()
+    training.run(from_dataloader(make_dataloader(config.data_loader)))
