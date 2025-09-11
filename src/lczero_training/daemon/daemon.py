@@ -1,26 +1,21 @@
-# ABOUTME: TrainingDaemon class that acts as subprocess for training operations.
-# ABOUTME: Handles IPC communication via Communicator and implements message handlers.
-
 import logging
 import signal
 import sys
 import threading
 import time
-from pathlib import Path
 
 import anyio
-from google.protobuf import text_format
 
-import proto.root_config_pb2 as config_pb2
 import proto.training_metrics_pb2 as training_metrics_pb2
-from lczero_training._lczero_training import DataLoader
 
+from .pipeline import TrainingPipeline
 from .protocol.communicator import Communicator
 from .protocol.messages import StartTrainingPayload, TrainingStatusPayload
 
 
 class TrainingDaemon:
-    _data_loader: DataLoader | None = None
+    _training_pipeline: TrainingPipeline | None = None
+    _config_filepath: str | None = None
 
     def __init__(self) -> None:
         self._setup_logging()
@@ -64,8 +59,8 @@ class TrainingDaemon:
 
     def _shutdown(self, signum: int) -> None:
         logging.info(f"Received signal {signum}, shutting down...")
-        if self._data_loader is not None:
-            self._data_loader.stop()
+        if self._training_pipeline:
+            self._training_pipeline.stop()
 
     async def _metrics_main(self) -> None:
         async with anyio.create_task_group() as tg:
@@ -79,14 +74,16 @@ class TrainingDaemon:
             dataloader_total = None
             dataloader_update_secs = None
 
-            if self._data_loader is not None:
-                stats_1_second_bytes, _ = self._data_loader.get_bucket_metrics(
+            data_loader = None
+            if self._training_pipeline:
+                data_loader = self._training_pipeline.get_data_loader()
+
+            if data_loader is not None:
+                stats_1_second_bytes, _ = data_loader.get_bucket_metrics(
                     0, False
                 )  # k1Second = 0
                 stats_total_bytes, dataloader_update_secs = (
-                    self._data_loader.get_aggregate_ending_now(
-                        float("inf"), False
-                    )
+                    data_loader.get_aggregate_ending_now(float("inf"), False)
                 )
 
                 dataloader_1_second = (
@@ -105,23 +102,13 @@ class TrainingDaemon:
             self._communicator.send(payload)
 
     def run(self) -> None:
-        while self._data_loader is None:
-            logging.info("DataLoader is not ready")
+        while self._config_filepath is None:
+            logging.info("Waiting for training config...")
             time.sleep(1)
-        logging.info("DataLoader is ready")
-        while True:
-            self._data_loader.get_next()
-            logging.info("DataLoader processed a batch")
+
+        logging.info("Config received. Starting training pipeline.")
+        self._training_pipeline = TrainingPipeline(self._config_filepath)
+        self._training_pipeline.run()
 
     def on_start_training(self, payload: StartTrainingPayload) -> None:
-        assert self._data_loader is None, "DataLoader already exists"
-
-        config_path = Path(payload.config_filepath)
-        config_text = config_path.read_text()
-
-        root_config = config_pb2.RootConfig()
-        text_format.Parse(config_text, root_config)
-
-        data_loader_config_bytes = root_config.data_loader.SerializeToString()
-        self._data_loader = DataLoader(data_loader_config_bytes)
-        self._data_loader.start()
+        self._config_filepath = payload.config_filepath
