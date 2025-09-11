@@ -123,9 +123,11 @@ class Training:
         )
 
     def run(
-        self, datagen: Generator[Tuple[np.ndarray, ...], None, None]
+        self,
+        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        num_steps: int,
     ) -> None:
-        for _ in range(30):
+        for _ in range(num_steps):
             logger.info(f"Starting step {self.training_state.step}")
             batch = next(datagen)
             print(len(batch))
@@ -148,7 +150,6 @@ class Training:
 
 
 def train(config_filename: str) -> None:
-    print("A")
     config = RootConfig()
     logger.info("Reading configuration from proto file")
     with open(config_filename, "r") as f:
@@ -187,4 +188,4 @@ def train(config_filename: str) -> None:
         training_state=training_state,
         loss_fn=LczeroLoss(config=config.training.losses),
     )
-    training.run(from_dataloader(make_dataloader(config.data_loader)))
+    training.run(from_dataloader(make_dataloader(config.data_loader)), 30)
