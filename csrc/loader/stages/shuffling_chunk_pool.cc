@@ -116,7 +116,6 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
 
   // Index sources ≈sequentially until we have enough chunks. It's fine to
   // overshoot a bit due to multiple threads.
-  std::atomic<bool> anchor_encountered{false};
   std::string current_anchor;
   {
     absl::MutexLock lock(&anchor_mutex_);
@@ -131,31 +130,19 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
     }
     if (total_chunks >= chunk_pool_size_) break;
 
-    indexing_pool.Enqueue(
-        [&source, &total_chunks, &anchor_encountered, &current_anchor, this]() {
-          source->Index();
-          size_t chunk_count = source->GetChunkCount();
-          total_chunks += chunk_count;
+    indexing_pool.Enqueue([&source, &total_chunks, &current_anchor, this]() {
+      source->Index();
+      const size_t chunk_count = source->GetChunkCount();
+      total_chunks += chunk_count;
 
-          // Handle anchor counting during initial load
-          if (current_anchor.empty()) {
-            // No anchor set - count all chunks
-            chunks_since_anchor_ += chunk_count;
-          } else {
-            // Anchor is set - special logic for backward processing
-            std::string chunk_key = source->GetChunkSortKey();
-            if (chunk_key == current_anchor) {
-              // Reset counter when we encounter the anchor
-              anchor_encountered = true;
-              chunks_since_anchor_ = 0;
-            } else if (!anchor_encountered) {
-              // Only count chunks for sources newer than the anchor
-              chunks_since_anchor_ += chunk_count;
-            }
-          }
+      // Count chunks since anchor during initial load.
+      if (source->GetChunkSortKey() > current_anchor) {
+        chunks_since_anchor_ += chunk_count;
+      }
 
-          LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load();
-        });
+      LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load()
+                               << "; new: " << chunks_since_anchor_;
+    });
     ++sources_to_keep;
   }
   indexing_pool.WaitAll();
