@@ -199,21 +199,8 @@ void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
         // Index the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
         source->Index();
-
-        // Handle anchor counting for new chunk sources
-        std::string chunk_key = source->GetChunkSortKey();
         size_t chunk_count = source->GetChunkCount();
-        {
-          absl::MutexLock anchor_lock(&anchor_mutex_);
-          if (!anchor_.empty() && chunk_key == anchor_) {
-            // Reset counter when we encounter the anchor
-            chunks_since_anchor_ = 0;
-          } else {
-            // Increment counter by the number of chunks in this source
-            chunks_since_anchor_ += chunk_count;
-          }
-        }
-
+        chunks_since_anchor_ += chunk_count;
         absl::MutexLock lock(&chunk_sources_mutex_);
         AddNewChunkSource(std::move(source));
       }
@@ -364,16 +351,19 @@ std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
   std::string latest_chunk_key;
   {
     absl::MutexLock sources_lock(&chunk_sources_mutex_);
-    if (!chunk_sources_.empty()) {
-      latest_chunk_key = chunk_sources_.back().source->GetChunkSortKey();
-    }
+    if (chunk_sources_.empty()) return {"", 0};
+    latest_chunk_key = chunk_sources_.back().source->GetChunkSortKey();
   }
   anchor_ = latest_chunk_key;
   int previous_count = chunks_since_anchor_.exchange(0);
   return {anchor_, previous_count};
 }
 
-int ShufflingChunkPool::ChunksSinceAnchor() { return chunks_since_anchor_; }
+int ShufflingChunkPool::ChunksSinceAnchor() {
+  absl::MutexLock lock(&chunk_sources_mutex_);
+  if (chunk_sources_.empty()) return 0;
+  return chunks_since_anchor_;
+}
 
 std::string ShufflingChunkPool::CurrentAnchor() {
   absl::MutexLock lock(&anchor_mutex_);

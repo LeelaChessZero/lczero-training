@@ -107,8 +107,8 @@ class TrainingPipeline:
             self._training_state = self._training_state.replace(
                 last_chunk_source=new_anchor
             )
-            self._chunks_to_wait += max(
-                self._chunks_per_network - used_chunks,
+            self._chunks_to_wait = max(
+                self._chunks_to_wait + self._chunks_per_network - used_chunks,
                 self._chunks_per_network // 2,
             )
             self._train_one_network()
