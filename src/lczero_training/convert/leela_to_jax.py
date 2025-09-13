@@ -9,7 +9,7 @@ from flax import nnx, serialization
 
 import hlo_pb2
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import JitTrainingState, TrainingState
 from proto import net_pb2
 
 from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
@@ -134,10 +134,13 @@ def leela_to_jax(
             f.write(serialization.to_bytes(state))
 
     if output_orbax_checkpoint:
-        training_state = TrainingState(
+        jit_state = JitTrainingState(
             step=lc0_weights.training_params.training_steps,
             model_state=state,
             opt_state=None,
+        )
+        training_state = TrainingState(
+            jit_state=jit_state,
         )
         checkpointer = ocp.StandardCheckpointer()
         checkpointer.save(output_orbax_checkpoint, training_state)

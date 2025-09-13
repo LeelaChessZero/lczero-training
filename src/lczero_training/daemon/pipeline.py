@@ -11,7 +11,7 @@ from lczero_training._lczero_training import DataLoader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import JitTrainingState, TrainingState
 from lczero_training.training.training import Training, from_dataloader
 from proto.data_loader_config_pb2 import DataLoaderConfig
 from proto.root_config_pb2 import RootConfig
@@ -60,20 +60,23 @@ class TrainingPipeline:
                 max_to_keep=config.training.checkpoint.max_to_keep or None,
             ),
         )
-        logger.info("Creating empty optimizer")
-        optimizer_tx = make_gradient_transformation(config.training.optimizer)
 
         logger.info("Restoring checkpoint")
+        optimizer_tx = make_gradient_transformation(config.training.optimizer)
+        jit_state = JitTrainingState(
+            step=0,
+            model_state=nnx.state(self._model),
+            opt_state=optimizer_tx.init(nnx.state(self._model)),
+        )
+        empty_state = TrainingState(
+            jit_state=jit_state,
+        )
         self._training_state = cast(
             TrainingState,
             self._checkpoint_mgr.restore(
                 step=None,
                 args=ocp.args.PyTreeRestore(
-                    item=TrainingState(
-                        step=0,
-                        model_state=nnx.state(self._model),
-                        opt_state=optimizer_tx.init(nnx.state(self._model)),
-                    ),
+                    item=empty_state,
                 ),
             ),
         )
@@ -100,6 +103,7 @@ class TrainingPipeline:
         while True:
             self._wait_for_chunks()
             new_anchor, used_chunks = self._data_loader.reset_chunk_anchor()
+            logging.info(f"{new_anchor=} {used_chunks=}")
             self._training_state = self._training_state.replace(
                 last_chunk_source=new_anchor
             )
@@ -111,10 +115,13 @@ class TrainingPipeline:
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
-        self._training_state = self._training.run(
-            training_state=self._training_state,
+        new_jit_state = self._training.run(
+            jit_state=self._training_state.jit_state,
             datagen=from_dataloader(self._data_loader),
             num_steps=self._schedule.steps_per_network,
+        )
+        self._training_state = self._training_state.replace(
+            jit_state=new_jit_state
         )
         logging.info("Done training")
 

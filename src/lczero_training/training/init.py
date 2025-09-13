@@ -58,7 +58,9 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         logger.info(f"Using existing lczero model: {lczero_model}")
         lc0_weights = net_pb2.Net()
         training_state = training_state.replace(
-            step=lc0_weights.training_params.training_steps
+            jit_state=training_state.jit_state.replace(
+                step=lc0_weights.training_params.training_steps
+            )
         )
         with gzip.open(lczero_model, "rb") as f:
             contents = f.read()
@@ -83,7 +85,9 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         logger.info("Loading leela weights into JAX model")
         visitor = LeelaToJax(model_state, lc0_weights)
         visitor.run()
-        training_state = training_state.replace(model_state=model_state)
+        training_state = training_state.replace(
+            jit_state=training_state.jit_state.replace(model_state=model_state)
+        )
 
     checkpoint_mgr = ocp.CheckpointManager(
         config.training.checkpoint.path,
@@ -96,7 +100,8 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         f"Saving initial checkpoint to {config.training.checkpoint.path}"
     )
     checkpoint_mgr.save(
-        step=training_state.step, args=ocp.args.PyTreeSave(training_state)
+        step=training_state.jit_state.step,
+        args=ocp.args.PyTreeSave(training_state),
     )
     checkpoint_mgr.wait_until_finished()
     logger.info("Initialization complete.")

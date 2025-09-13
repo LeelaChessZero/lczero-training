@@ -16,7 +16,7 @@ from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import JitTrainingState, TrainingState
 from proto.root_config_pb2 import RootConfig
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ def from_dataloader(
 class Training:
     optimizer_tx: optax.GradientTransformation
     train_step: Callable[
-        [optax.GradientTransformation, TrainingState, dict],
-        Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+        [optax.GradientTransformation, JitTrainingState, dict],
+        Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
     ]
 
     def __init__(
@@ -47,10 +47,10 @@ class Training:
         @partial(nnx.jit, static_argnames=("optimizer_tx"))
         def _step(
             optimizer_tx: optax.GradientTransformation,
-            state: TrainingState,
+            jit_state: JitTrainingState,
             batch: dict,
-        ) -> Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]]:
-            model = nnx.merge(graphdef, state.model_state)
+        ) -> Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]]:
+            model = nnx.merge(graphdef, jit_state.model_state)
 
             def loss_for_grad(
                 model_arg: LczeroModel, batch_arg: dict
@@ -92,44 +92,46 @@ class Training:
             grad_fn = nnx.value_and_grad(mean_loss_for_grad, has_aux=True)
             (mean_loss, unweighted_losses), mean_grads = grad_fn(model, batch)
 
-            assert state.opt_state is not None
+            assert jit_state.opt_state is not None
             updates, new_opt_state = optimizer_tx.update(
-                mean_grads, state.opt_state, state.model_state
+                mean_grads, jit_state.opt_state, jit_state.model_state
             )
-            new_model_state = optax.apply_updates(state.model_state, updates)
+            new_model_state = optax.apply_updates(
+                jit_state.model_state, updates
+            )
 
-            new_train_state = state.replace(
-                step=state.step + 1,
+            new_jit_state = jit_state.replace(
+                step=jit_state.step + 1,
                 model_state=new_model_state,
                 opt_state=new_opt_state,
             )
 
             mean_unweighted = tree_util.tree_map(jnp.mean, unweighted_losses)
-            return new_train_state, (mean_loss, mean_unweighted)
+            return new_jit_state, (mean_loss, mean_unweighted)
 
         self.train_step = cast(
             Callable[
-                [optax.GradientTransformation, TrainingState, dict],
-                Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+                [optax.GradientTransformation, JitTrainingState, dict],
+                Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
             ],
             _step,
         )
 
     def run(
         self,
-        training_state: TrainingState,
+        jit_state: JitTrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
         num_steps: int,
-    ) -> TrainingState:
-        assert training_state.opt_state is not None
+    ) -> JitTrainingState:
+        assert jit_state.opt_state is not None
         for _ in range(num_steps):
-            logger.info(f"Starting step {training_state.step}")
+            logger.info(f"Starting step {jit_state.step}")
             batch = next(datagen)
             b_inputs, b_policy, b_values, _, b_movesleft = batch
             logger.info("Fetched batch from dataloader")
-            training_state, (loss, unweighted_losses) = self.train_step(
+            jit_state, (loss, unweighted_losses) = self.train_step(
                 self.optimizer_tx,
-                training_state,
+                jit_state,
                 {
                     "inputs": b_inputs,
                     "value_targets": b_values,
@@ -138,10 +140,10 @@ class Training:
                 },
             )
             logger.info(
-                f"Step {training_state.step}, Loss: {loss}, Unweighted losses:"
+                f"Step {jit_state.step}, Loss: {loss}, Unweighted losses:"
                 f" {unweighted_losses}"
             )
-        return training_state
+        return jit_state
 
 
 def train(config_filename: str) -> None:
@@ -184,5 +186,7 @@ def train(config_filename: str) -> None:
         loss_fn=LczeroLoss(config=config.training.losses),
     )
     training.run(
-        training_state, from_dataloader(make_dataloader(config.data_loader)), 30
+        training_state.jit_state,
+        from_dataloader(make_dataloader(config.data_loader)),
+        30,
     )

@@ -15,10 +15,19 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TrainingState:
+class JitTrainingState:
     step: int
     model_state: nnx.State
     opt_state: Optional[optax.OptState]
+
+    def replace(self, **changes: Any) -> "JitTrainingState":
+        """Returns a new instance of the class with the specified changes."""
+        return dataclasses.replace(self, **changes)
+
+
+@dataclass
+class TrainingState:
+    jit_state: JitTrainingState
     # Last chunk source that was available when the last epoch started training.
     last_chunk_source: str = ""
 
@@ -35,8 +44,11 @@ class TrainingState:
         opt_state = make_gradient_transformation(
             training_config.optimizer
         ).init(model_state)
-        return TrainingState(
+        jit_state = JitTrainingState(
             step=0,
             model_state=model_state,
             opt_state=opt_state,
+        )
+        return TrainingState(
+            jit_state=jit_state,
         )
