@@ -35,7 +35,7 @@ class DataLoader {
       float duration_seconds, bool include_pending) const;
 
   // Chunk anchor management methods.
-  std::string ResetChunkAnchor();
+  std::pair<std::string, int> ResetChunkAnchor();
   int ChunksSinceAnchor();
   std::string CurrentChunkAnchor();
   void SetChunkAnchor(std::string_view anchor);

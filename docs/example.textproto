@@ -5,10 +5,9 @@
 name: "little-teapot"
 data_loader {
   file_path_provider {
-    directory: "/home/crem/tmp/2025-07/lczero-training/data"  # Directory with
-                                                              # training data
-                                                              # files
-    queue_capacity: 16                                        # Internal file queue size
+    # Directory with training data files.
+    directory: "/home/crem/tmp/2025-07/lczero-training/data" 
+    queue_capacity: 16 # Internal file queue size
   }
   chunk_source_loader {
     threads: 1          # Threads for loading chunks
@@ -60,7 +59,14 @@ model {
   movesleft_head { num_channels: 32 }
 }
 training {
-  checkpoint { path: "/home/crem/tmp/2025-08/lc0_training/checkpoint" }
+  schedule {
+   steps_per_network: 250
+   chunks_per_network: 50000
+  }
+  checkpoint {
+    path: "/home/crem/tmp/2025-08/lc0_training/checkpoint"
+    max_to_keep: 5
+  }
   optimizer {
     nadam { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 }
     constant_lr { lr: 0.001 }

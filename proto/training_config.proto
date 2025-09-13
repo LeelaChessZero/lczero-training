@@ -4,9 +4,15 @@ package lczero.training;
 
 // Configuration for training algorithm and parameters.
 message TrainingConfig {
-  CheckpointConfig checkpoint = 1;
+  ScheduleConfig schedule = 1;
+  CheckpointConfig checkpoint = 2;
   OptimizerConfig optimizer = 3;
-  LossWeightsConfig losses = 2;
+  LossWeightsConfig losses = 4;
+}
+
+message ScheduleConfig {
+  int32 steps_per_network = 1;
+  int32 chunks_per_network = 2;
 }
 
 message OptimizerConfig {

@@ -117,7 +117,7 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   LOG(INFO) << "Metrics thread stopping.";
 }
 
-std::string DataLoader::ResetChunkAnchor() {
+std::pair<std::string, int> DataLoader::ResetChunkAnchor() {
   return shuffling_chunk_pool_.ResetAnchor();
 }
 

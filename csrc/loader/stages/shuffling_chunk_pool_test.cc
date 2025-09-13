@@ -614,7 +614,7 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
   pool.output()->WaitForSizeAtLeast(1);
 
   // Now test ResetAnchor
-  std::string anchor = pool.ResetAnchor();
+  auto [anchor, count_before] = pool.ResetAnchor();
   EXPECT_FALSE(anchor.empty());  // Should have the chunk key
   EXPECT_EQ(pool.CurrentAnchor(), anchor);
   EXPECT_EQ(pool.ChunksSinceAnchor(), 0);  // Should be reset to 0

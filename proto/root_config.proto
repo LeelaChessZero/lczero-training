@@ -3,8 +3,8 @@ syntax = "proto2";
 package lczero.training;
 
 import "proto/data_loader_config.proto";
-import "proto/training_config.proto";
 import "proto/model_config.proto";
+import "proto/training_config.proto";
 
 // Root configuration message containing all subsystem configurations.
 message RootConfig {

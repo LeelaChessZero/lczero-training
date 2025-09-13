@@ -358,7 +358,7 @@ ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
   return result;
 }
 
-std::string ShufflingChunkPool::ResetAnchor() {
+std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
   absl::MutexLock lock(&anchor_mutex_);
   // For ShufflingChunkPool, we'll use the latest chunk source's sort key
   std::string latest_chunk_key;
@@ -369,8 +369,8 @@ std::string ShufflingChunkPool::ResetAnchor() {
     }
   }
   anchor_ = latest_chunk_key;
-  chunks_since_anchor_ = 0;
-  return anchor_;
+  int previous_count = chunks_since_anchor_.exchange(0);
+  return {anchor_, previous_count};
 }
 
 int ShufflingChunkPool::ChunksSinceAnchor() { return chunks_since_anchor_; }

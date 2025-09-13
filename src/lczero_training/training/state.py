@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from typing import Any, Optional
 
 import optax
@@ -10,24 +11,20 @@ from lczero_training.training.optimizer import make_gradient_transformation
 from proto.model_config_pb2 import ModelConfig
 from proto.training_config_pb2 import TrainingConfig
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TrainingState:
     step: int
     model_state: nnx.State
     opt_state: Optional[optax.OptState]
+    # Last chunk source that was available when the last epoch started training.
+    last_chunk_source: str = ""
 
     def replace(self, **changes: Any) -> "TrainingState":
         """Returns a new instance of the class with the specified changes."""
         return dataclasses.replace(self, **changes)
-
-    @staticmethod
-    def from_model_state(step: int, model_state: nnx.State) -> "TrainingState":
-        return TrainingState(
-            step=step,
-            model_state=model_state,
-            opt_state=None,
-        )
 
     @staticmethod
     def new_from_config(

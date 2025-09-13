@@ -34,7 +34,7 @@ class ShufflingChunkPool {
   ShufflingChunkPoolMetricsProto FlushMetrics();
 
   // Anchor management methods for tracking chunks since a specific point.
-  std::string ResetAnchor();
+  std::pair<std::string, int> ResetAnchor();
   int ChunksSinceAnchor();
   std::string CurrentAnchor();
   void SetAnchor(std::string_view anchor);

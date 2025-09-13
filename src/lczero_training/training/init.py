@@ -96,7 +96,7 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         f"Saving initial checkpoint to {config.training.checkpoint.path}"
     )
     checkpoint_mgr.save(
-        step=training_state.step, args=ocp.args.StandardSave(training_state)
+        step=training_state.step, args=ocp.args.PyTreeSave(training_state)
     )
     checkpoint_mgr.wait_until_finished()
     logger.info("Initialization complete.")

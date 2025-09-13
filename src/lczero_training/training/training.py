@@ -18,7 +18,6 @@ from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import TrainingState
 from proto.root_config_pb2 import RootConfig
-from proto.training_config_pb2 import TrainingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +30,7 @@ def from_dataloader(
 
 
 class Training:
-    config: TrainingConfig
     optimizer_tx: optax.GradientTransformation
-    training_state: TrainingState
     train_step: Callable[
         [optax.GradientTransformation, TrainingState, dict],
         Tuple[TrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
@@ -41,15 +38,11 @@ class Training:
 
     def __init__(
         self,
-        config: TrainingConfig,
+        optimizer_tx: optax.GradientTransformation,
         graphdef: nnx.GraphDef,
-        training_state: TrainingState,
         loss_fn: LczeroLoss,
     ):
-        self.config = config
-        self.training_state = training_state
-        assert self.training_state.opt_state is not None
-        self.optimizer_tx = make_gradient_transformation(config.optimizer)
+        self.optimizer_tx = optimizer_tx
 
         @partial(nnx.jit, static_argnames=("optimizer_tx"))
         def _step(
@@ -124,18 +117,19 @@ class Training:
 
     def run(
         self,
+        training_state: TrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
         num_steps: int,
-    ) -> None:
+    ) -> TrainingState:
+        assert training_state.opt_state is not None
         for _ in range(num_steps):
-            logger.info(f"Starting step {self.training_state.step}")
+            logger.info(f"Starting step {training_state.step}")
             batch = next(datagen)
-            print(len(batch))
             b_inputs, b_policy, b_values, _, b_movesleft = batch
             logger.info("Fetched batch from dataloader")
-            self.training_state, (loss, unweighted_losses) = self.train_step(
+            training_state, (loss, unweighted_losses) = self.train_step(
                 self.optimizer_tx,
-                self.training_state,
+                training_state,
                 {
                     "inputs": b_inputs,
                     "value_targets": b_values,
@@ -144,9 +138,10 @@ class Training:
                 },
             )
             logger.info(
-                f"Step {self.training_state.step}, Loss: {loss}, Unweighted losses:"
+                f"Step {training_state.step}, Loss: {loss}, Unweighted losses:"
                 f" {unweighted_losses}"
             )
+        return training_state
 
 
 def train(config_filename: str) -> None:
@@ -182,10 +177,12 @@ def train(config_filename: str) -> None:
     )
 
     assert isinstance(training_state, TrainingState)
+    optimizer_tx = make_gradient_transformation(config.training.optimizer)
     training = Training(
-        config=config.training,
+        optimizer_tx=optimizer_tx,
         graphdef=model,
-        training_state=training_state,
         loss_fn=LczeroLoss(config=config.training.losses),
     )
-    training.run(from_dataloader(make_dataloader(config.data_loader)), 30)
+    training.run(
+        training_state, from_dataloader(make_dataloader(config.data_loader)), 30
+    )

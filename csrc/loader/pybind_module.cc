@@ -96,8 +96,14 @@ PYBIND11_MODULE(_lczero_training, m) {
       .def("start", &DataLoader::Start, "Start the data loader processing")
       .def("stop", &DataLoader::Stop, py::arg("graceful_drain") = false,
            "Stop the data loader")
-      .def("reset_chunk_anchor", &DataLoader::ResetChunkAnchor,
-           "Reset chunk anchor to current position and return anchor key")
+      .def(
+          "reset_chunk_anchor",
+          [](DataLoader& self) {
+            auto [anchor, count] = self.ResetChunkAnchor();
+            return py::make_tuple(anchor, count);
+          },
+          "Reset chunk anchor to current position and return (anchor_key, "
+          "counter_before_reset) tuple")
       .def("chunks_since_anchor", &DataLoader::ChunksSinceAnchor,
            "Get number of chunks processed since anchor")
       .def("current_chunk_anchor", &DataLoader::CurrentChunkAnchor,
