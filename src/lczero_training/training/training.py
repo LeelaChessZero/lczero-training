@@ -170,7 +170,7 @@ def train(config_filename: str) -> None:
     )
     logger.info("Restoring checkpoint")
     training_state = checkpoint_mgr.restore(
-        0, args=ocp.args.StandardRestore(empty_state)
+        None, args=ocp.args.PyTreeRestore(empty_state)
     )
     logger.info("Restored checkpoint")
 

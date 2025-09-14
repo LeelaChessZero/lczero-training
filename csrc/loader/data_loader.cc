@@ -50,7 +50,7 @@ void DataLoader::Start() {
   LOG(INFO) << "DataLoader started.";
 }
 
-DataLoader::~DataLoader() { Stop(true); }
+DataLoader::~DataLoader() { Stop(false); }
 
 void DataLoader::Stop(bool graceful_drain) {
   LOG(INFO) << "Shutting down FilePathProvider.";
