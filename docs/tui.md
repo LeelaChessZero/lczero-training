@@ -49,7 +49,47 @@ This pane visualizes the flow of data through the C++ pipeline. It will use a re
     at a time (defaulting to 'Training'). to show the stats for the 'Training',
     'Validation', or 'Test' streams.
 
-### 4. JAX Training Status Pane
+### 4. Training schedule/pipeline pane
+
+The area below the Data Pipeline Pane is split horizontally into two
+sections: Training Schedule (left) and JAX Training Status (right).
+
+The Training Schedule pane shows:
+
+- **Combined uptime and stage line**: "Uptime: 2d 14:30:45   Stage: TRAINING"
+  - Uptime includes days when >24 hours (format: "2d 14:30:45")
+  - Stage shows current training state (WAITING_FOR_DATA, TRAINING, EXPORTING, ERROR)
+- **Completed epochs**: Simple counter of epochs completed since daemon start
+- **New chunks progress bar**: Shows chunks collected since training start vs. target
+  - Indeterminate state when target is unknown (0)
+- **Training time progress bar**: Current training time vs. previous training duration
+  - Indeterminate state when no previous duration exists
+- **Cycle time progress bar**: Current cycle time vs. previous cycle duration
+  - Indeterminate state when no previous duration exists
+
+**Implementation details:**
+
+- **Header bar**: Completely empty (no content)
+- **Data structure**: `TrainingScheduleData` dataclass with all timing fields:
+  - `current_stage: TrainingStage` (enum)
+  - `completed_epochs_since_start: int`
+  - `new_chunks_since_training_start: int`
+  - `chunks_to_wait: int`
+  - `total_uptime_seconds: float`
+  - `current_training_time_seconds: float`
+  - `previous_training_time_seconds: float`
+  - `current_cycle_time_seconds: float`
+  - `previous_cycle_time_seconds: float`
+- **Timing computation**: All timing values computed in daemon, not TUI
+- **Progress bars**: Show indeterminate state when maximum values ≤ 0
+- **Layout**: Compact single-line widgets with no extra padding/margins
+- **Files**:
+  - `training_widgets.py`: Widget implementations
+  - `pipeline.py`: Training state tracking and data collection
+  - `daemon.py`: Metrics collection and transmission
+  - `messages.py`: Protocol definitions with enum serialization support
+
+### 5. JAX Training Status Pane
 
 This pane is dedicated to the live status of an active JAX training run. It
 remains blank or shows summary info when the system is not actively training.
@@ -65,7 +105,7 @@ remains blank or shows summary info when the system is not actively training.
   - A compact 2-column grid displaying the individual values for the **7 Head
     Losses**.
 
-### 5. Log Pane
+### 6. Log Pane
 
 A pane across the bottom of the screen.
 

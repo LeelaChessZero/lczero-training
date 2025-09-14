@@ -4,6 +4,7 @@
 import json
 import types
 from dataclasses import is_dataclass
+from enum import Enum
 from typing import Any, TextIO, Union, get_args, get_origin
 
 import anyio
@@ -20,6 +21,8 @@ def _to_serializable(obj: Any) -> Any:
         return MessageToDict(
             obj, preserving_proto_field_name=True, use_integers_for_enums=True
         )
+    elif isinstance(obj, Enum):
+        return obj.value
     elif is_dataclass(obj):
         return {
             f.name: _to_serializable(getattr(obj, f.name))
@@ -74,6 +77,9 @@ def _from_serializable(cls: type, data: Any) -> Any:
                 value = [_from_serializable(item_type, item) for item in value]
         elif is_dataclass(field_type) or _is_protobuf(field_type):
             value = _from_serializable(field_type, value)
+        elif isinstance(field_type, type) and issubclass(field_type, Enum):
+            # Convert string value back to enum
+            value = field_type(value)
 
         args[field.name] = value
 

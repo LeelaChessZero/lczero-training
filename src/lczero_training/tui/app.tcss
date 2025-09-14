@@ -21,12 +21,25 @@ DataPipelinePane {
     height: 18;
 }
 
-TrainingStatusPane {
+#training-status-container {
+    height: 12;
+    layout: horizontal;
+}
+
+TrainingScheduleWidget {
     background: $surface;
     color: $text;
     border: solid $primary;
     margin: 1;
-    height: auto;
+    width: 1fr;
+}
+
+JAXTrainingPane {
+    background: $surface;
+    color: $text;
+    border: solid $primary;
+    margin: 1;
+    width: 1fr;
 }
 
 RichLog {
@@ -184,8 +197,49 @@ LoadWidget {
     text-align: left;
 }
 
-.training-content {
+.jax-training-content {
     padding: 1;
+}
+
+/* Training widgets styles */
+.time-label {
+    width: auto;
+    padding: 0;
+    margin-right: 1;
+    text-align: left;
+}
+
+.time-progress-bar {
+    width: 1fr;
+    height: 1;
+}
+
+.time-progress-bar .bar--indeterminate {
+    background: $panel;
+}
+
+.time-progress-bar .bar--bar {
+    background: $panel;
+}
+
+.time-ratio {
+    width: auto;
+    padding: 0;
+    text-align: right;
+}
+
+TimeProgressWidget {
+    height: 1;
+    layout: horizontal;
+}
+
+ChunksProgressWidget {
+    height: 1;
+    layout: horizontal;
+}
+
+#uptime-stage-display, #epochs-display {
+    height: 1;
 }
 
 .log-content {
