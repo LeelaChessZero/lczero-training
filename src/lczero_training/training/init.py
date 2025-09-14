@@ -10,8 +10,9 @@ from google.protobuf import text_format
 
 import hlo_pb2
 from lczero_training.convert.leela_to_jax import (
-    LeelaToJax,
+    LeelaImportOptions,
     fix_older_weights_file,
+    leela_to_jax,
 )
 from lczero_training.convert.leela_to_modelconfig import leela_to_modelconfig
 from lczero_training.model.model import LczeroModel
@@ -57,16 +58,12 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         print(f"Type of training_state at start of if: {type(training_state)}")
         logger.info(f"Using existing lczero model: {lczero_model}")
         lc0_weights = net_pb2.Net()
-        training_state = training_state.replace(
-            jit_state=training_state.jit_state.replace(
-                step=lc0_weights.training_params.training_steps
-            )
-        )
         with gzip.open(lczero_model, "rb") as f:
             contents = f.read()
             assert isinstance(contents, bytes)
             lc0_weights.ParseFromString(contents)
         fix_older_weights_file(lc0_weights)
+
         logger.info("Converting leela weights to model configuration")
         leela_config = leela_to_modelconfig(
             lc0_weights,
@@ -83,10 +80,17 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
             sys.exit(1)
 
         logger.info("Loading leela weights into JAX model")
-        visitor = LeelaToJax(model_state, lc0_weights)
-        visitor.run()
+        import_options = LeelaImportOptions(
+            weights_dtype=hlo_pb2.XlaShapeProto.F32,
+            compute_dtype=config.model.defaults.compute_dtype,
+        )
+        model_state = leela_to_jax(lc0_weights, import_options)
+
         training_state = training_state.replace(
-            jit_state=training_state.jit_state.replace(model_state=model_state)
+            jit_state=training_state.jit_state.replace(
+                step=lc0_weights.training_params.training_steps,
+                model_state=model_state,
+            )
         )
 
     checkpoint_mgr = ocp.CheckpointManager(

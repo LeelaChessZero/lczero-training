@@ -1,3 +1,4 @@
+import dataclasses
 import gzip
 import logging
 import math
@@ -16,6 +17,12 @@ from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
 from .leela_to_modelconfig import leela_to_modelconfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class LeelaImportOptions:
+    weights_dtype: hlo_pb2.XlaShapeProto.Type
+    compute_dtype: hlo_pb2.XlaShapeProto.Type
 
 
 def fix_older_weights_file(file: net_pb2.Net) -> None:
@@ -92,6 +99,23 @@ class LeelaToJax(LeelaPytreeWeightsVisitor):
 
 
 def leela_to_jax(
+    leela_net: net_pb2.Net, import_options: LeelaImportOptions
+) -> nnx.State:
+    config = leela_to_modelconfig(
+        leela_net,
+        import_options.weights_dtype,
+        import_options.compute_dtype,
+    )
+
+    model = LczeroModel(config=config, rngs=nnx.Rngs(params=42))
+    state = nnx.state(model)
+    visitor = LeelaToJax(state, leela_net)
+    visitor.run()
+
+    return state
+
+
+def leela_to_jax_files(
     input_path: str,
     weights_dtype: str,
     compute_dtype: str,
@@ -108,10 +132,15 @@ def leela_to_jax(
 
     fix_older_weights_file(lc0_weights)
 
+    import_options = LeelaImportOptions(
+        weights_dtype=getattr(hlo_pb2.XlaShapeProto, weights_dtype),
+        compute_dtype=getattr(hlo_pb2.XlaShapeProto, compute_dtype),
+    )
+
     config = leela_to_modelconfig(
         lc0_weights,
-        getattr(hlo_pb2.XlaShapeProto, weights_dtype),
-        getattr(hlo_pb2.XlaShapeProto, compute_dtype),
+        import_options.weights_dtype,
+        import_options.compute_dtype,
     )
 
     if print_modelconfig:
@@ -124,10 +153,7 @@ def leela_to_jax(
     if output_serialized_jax is None and output_orbax_checkpoint is None:
         return
 
-    model = LczeroModel(config=config, rngs=nnx.Rngs(params=42))
-    state = nnx.state(model)
-    visitor = LeelaToJax(state, lc0_weights)
-    visitor.run()
+    state = leela_to_jax(lc0_weights, import_options)
 
     if output_serialized_jax:
         with open(output_serialized_jax, "wb") as f:
@@ -145,5 +171,3 @@ def leela_to_jax(
         checkpointer = ocp.StandardCheckpointer()
         checkpointer.save(output_orbax_checkpoint, training_state)
         checkpointer.wait_until_finished()
-
-    # nnx.update(model, state)

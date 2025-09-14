@@ -1,6 +1,6 @@
 import argparse
 
-from .leela_to_jax import leela_to_jax
+from .leela_to_jax import leela_to_jax_files
 
 
 def configure_parser(parser: argparse.ArgumentParser) -> None:
@@ -53,7 +53,7 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> None:
     if args.subcommand == "leela2jax":
-        leela_to_jax(
+        leela_to_jax_files(
             input_path=args.input,
             weights_dtype=args.weights_dtype,
             compute_dtype=args.compute_dtype,
