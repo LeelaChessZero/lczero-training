@@ -5,12 +5,14 @@ from typing import Callable, Dict, Generator, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+import jax.sharding as jshard
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
 from jax import tree_util
+from jax.sharding import PartitionSpec as P
 
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
@@ -44,7 +46,25 @@ class Training:
     ):
         self.optimizer_tx = optimizer_tx
 
-        @partial(nnx.jit, static_argnames=("optimizer_tx"))
+        jit_kwargs: Dict[str, object] = {"static_argnames": ("optimizer_tx",)}
+        if jax.device_count() > 1:
+            mesh = jshard.Mesh(jax.devices(), axis_names=("batch",))
+            replicated = jshard.NamedSharding(mesh, P())
+            dp_sharding = jshard.NamedSharding(mesh, P("batch"))
+
+            batch_sharding = {
+                "inputs": dp_sharding,
+                "value_targets": dp_sharding,
+                "policy_targets": dp_sharding,
+                "movesleft_targets": dp_sharding,
+            }
+            in_shardings = (replicated, batch_sharding)
+            out_shardings = replicated
+
+            jit_kwargs["in_shardings"] = in_shardings
+            jit_kwargs["out_shardings"] = out_shardings
+
+        @partial(nnx.jit, **jit_kwargs)
         def _step(
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
@@ -179,6 +199,13 @@ def train(config_filename: str) -> None:
     )
 
     assert isinstance(training_state, TrainingState)
+
+    jit_state = training_state.jit_state
+    if jax.device_count() > 1:
+        mesh = jshard.Mesh(jax.devices(), axis_names=("batch",))
+        replicated_sharding = jshard.NamedSharding(mesh, P())
+        jit_state = jax.device_put(jit_state, replicated_sharding)
+
     optimizer_tx = make_gradient_transformation(config.training.optimizer)
     training = Training(
         optimizer_tx=optimizer_tx,
@@ -186,7 +213,7 @@ def train(config_filename: str) -> None:
         loss_fn=LczeroLoss(config=config.training.losses),
     )
     training.run(
-        training_state.jit_state,
+        jit_state,
         from_dataloader(make_dataloader(config.data_loader)),
         30,
     )
