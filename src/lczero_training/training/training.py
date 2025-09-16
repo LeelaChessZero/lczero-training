@@ -95,18 +95,7 @@ class Training:
                 per_sample_data_loss, unweighted_losses = loss_vfn(
                     model_arg, batch_arg
                 )
-                mean_data_loss = jnp.mean(per_sample_data_loss)
-
-                mean_unweighted = tree_util.tree_map(
-                    jnp.mean, unweighted_losses
-                )
-                total_l2_loss = mean_unweighted["l2"]
-
-                batch_size = batch_arg["inputs"].shape[0]
-                mean_l2_loss = total_l2_loss / batch_size
-
-                mean_loss = mean_data_loss + loss_fn.l2_weight * mean_l2_loss
-
+                mean_loss = jnp.mean(per_sample_data_loss)
                 return mean_loss, unweighted_losses
 
             grad_fn = nnx.value_and_grad(mean_loss_for_grad, has_aux=True)

@@ -36,6 +36,9 @@ class ValueHead(nnx.Module):
         x = get_activation(self.activation)(x)
         x = self.dense1(x)
         x = get_activation(self.activation)(x)
-        x = nnx.softmax(self.wdl(x))
+        x = self.wdl(x)
 
         return x
+
+    def predict(self, x: jax.Array) -> jax.Array:
+        return nnx.softmax(self(x))

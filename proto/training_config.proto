@@ -17,7 +17,7 @@ message ScheduleConfig {
 
 message OptimizerConfig {
   oneof optimizer_type {
-    NadamOptimizerConfig nadam = 1;
+    NadamwOptimizerConfig nadamw = 1;
   }
   oneof lr_schedule {
     ConstantLRSchedule constant_lr = 2;
@@ -29,10 +29,11 @@ message ConstantLRSchedule {
   float lr = 1;
 }
 
-message NadamOptimizerConfig {
+message NadamwOptimizerConfig {
   float beta_1 = 1;
   float beta_2 = 2;
   float epsilon = 3;
+  float weight_decay = 4;
 }
 
 message CheckpointConfig {
@@ -41,10 +42,9 @@ message CheckpointConfig {
 }
 
 message LossWeightsConfig {
-  float l2_weight = 1;
-  repeated PolicyLossWeightsConfig policy = 2;
-  repeated ValueLossWeightsConfig value = 3;
-  repeated MovesLeftLossWeightsConfig movesleft = 4;
+  repeated PolicyLossWeightsConfig policy = 1;
+  repeated ValueLossWeightsConfig value = 2;
+  repeated MovesLeftLossWeightsConfig movesleft = 3;
 }
 
 message PolicyLossWeightsConfig {

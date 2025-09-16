@@ -58,7 +58,7 @@ def jax_to_leela(
         lc0_weights.min_version.minor,
         lc0_weights.min_version.patch,
     ) = _split_version(export_options.min_version)
-    lc0_weights.format = _make_format()
+    lc0_weights.format.CopyFrom(_make_format())
 
     visitor = JaxToLeela(jax_weights, lc0_weights)
     visitor.run()

@@ -1,5 +1,7 @@
 import dataclasses
+import gzip
 import logging
+import os
 import time
 from pathlib import Path
 from typing import cast
@@ -9,6 +11,10 @@ from flax import nnx
 from google.protobuf import text_format
 
 from lczero_training._lczero_training import DataLoader
+from lczero_training.convert.jax_to_leela import (
+    LeelaExportOptions,
+    jax_to_leela,
+)
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
@@ -134,6 +140,30 @@ class TrainingPipeline:
                 self._chunks_per_network // 2,
             )
             self._train_one_network()
+            self._export_model()
+
+    def _export_model(self) -> None:
+        if not self._config.export.HasField("path"):
+            return
+        export_filename = os.path.join(
+            self._config.export.path,
+            f"lc0-{self._training_state.jit_state.step:08d}.pb.gz",
+        )
+
+        logging.info(f"Exporting model to {export_filename}")
+
+        options = LeelaExportOptions(
+            min_version="0.28",
+            license=None,
+        )
+        net = jax_to_leela(
+            jax_weights=nnx.state(self._model),
+            export_options=options,
+        )
+        os.makedirs(self._config.export.path, exist_ok=True)
+        with gzip.open(export_filename, "wb") as f:
+            f.write(net.SerializeToString())
+        logging.info(f"Exported model to {export_filename}")
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")

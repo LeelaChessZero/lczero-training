@@ -1,0 +1,9 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Configuration for model export settings.
+message ExportConfig {
+  // Directory path where exported models will be saved.
+  optional string path = 1;
+}

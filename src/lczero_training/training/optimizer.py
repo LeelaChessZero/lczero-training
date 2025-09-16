@@ -18,10 +18,14 @@ def make_gradient_transformation(
     config: OptimizerConfig,
 ) -> optax.GradientTransformation:
     lr_schedule = make_lr_schedule(config)
-    if config.HasField("nadam"):
-        conf = config.nadam
-        return optax.adamw(
-            lr_schedule, b1=conf.beta_1, b2=conf.beta_2, eps=conf.epsilon
+    if config.HasField("nadamw"):
+        conf = config.nadamw
+        return optax.nadamw(
+            lr_schedule,
+            b1=conf.beta_1,
+            b2=conf.beta_2,
+            eps=conf.epsilon,
+            weight_decay=conf.weight_decay,
         )
     else:
         raise ValueError(

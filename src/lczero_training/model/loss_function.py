@@ -3,7 +3,6 @@ from typing import Dict, Protocol, Sequence, Tuple, TypeVar
 import jax
 import jax.numpy as jnp
 import optax
-from flax import nnx
 from jax import tree_util
 
 from proto.training_config_pb2 import (
@@ -37,8 +36,6 @@ class LczeroLoss:
             "value": winner_value_config.weight,
             "movesleft": main_movesleft_config.weight,
         }
-        self.l2_weight = config.l2_weight
-
         self.policy_loss = PolicyLoss(main_policy_config)
         self.value_loss = ValueLoss()
         self.movesleft_loss = MovesLeftLoss()
@@ -53,32 +50,15 @@ class LczeroLoss:
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
         value_pred, policy_pred, movesleft_pred = model(inputs)
 
-        # L2 loss
-        params = nnx.state(model, nnx.Param)
-        # We only want to regularize kernels, not biases or batch norm parameters.
-        kernels = [
-            p
-            for path, p in tree_util.tree_flatten_with_path(params)[0]
-            if "kernel" in tree_util.keystr(path)
-        ]
-        l2_loss_val = 0.00005 * sum(jnp.sum(jnp.square(p)) for p in kernels)
-
         unweighted_losses = {
             "value": self.value_loss(value_pred, value_targets),
             "policy": self.policy_loss(policy_pred, policy_targets),
             "movesleft": self.movesleft_loss(movesleft_pred, movesleft_targets),
-            "l2": jnp.asarray(l2_loss_val),
-        }
-
-        unweighted_data_losses = {
-            k: v for k, v in unweighted_losses.items() if k != "l2"
         }
 
         data_loss = tree_util.tree_reduce(
             jnp.add,
-            tree_util.tree_map(
-                jnp.multiply, self.weights, unweighted_data_losses
-            ),
+            tree_util.tree_map(jnp.multiply, self.weights, unweighted_losses),
         )
 
         return data_loss, unweighted_losses
@@ -108,17 +88,17 @@ class PolicyLoss:
         policy_targets: jax.Array,
     ) -> jax.Array:
         if self.config.illegal_moves == PolicyLossWeightsConfig.MASK:
-            move_is_legal = policy_targets >= 0
-            illegal_filler = jnp.full_like(policy_pred, -1e10)
-            policy_pred = jnp.where(move_is_legal, policy_pred, illegal_filler)
+            policy_pred = jnp.where(policy_targets >= 0, policy_pred, -jnp.inf)
 
-        # The cross-entropy between the predicted policy and the target policy.
+        # Zero out negative targets for illegal moves.
         policy_targets = jax.nn.relu(policy_targets)
-        policy_cross_entropy = optax.softmax_cross_entropy(
+
+        # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
+        loss = optax.safe_softmax_cross_entropy(
             logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
         )
-        assert isinstance(policy_cross_entropy, jax.Array)
-        return policy_cross_entropy
+        assert isinstance(loss, jax.Array)
+        return loss
 
 
 class MovesLeftLoss:

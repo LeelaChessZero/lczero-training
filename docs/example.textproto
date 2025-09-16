@@ -6,7 +6,7 @@ name: "little-teapot"
 data_loader {
   file_path_provider {
     # Directory with training data files.
-    directory: "/home/crem/tmp/2025-07/lczero-training/data" 
+    directory: "/home/crem/tmp/2025-07/lczero-training/data2" 
     queue_capacity: 16 # Internal file queue size
   }
   chunk_source_loader {
@@ -14,7 +14,7 @@ data_loader {
     queue_capacity: 16  # Output queue for chunk sources
   }
   shuffling_chunk_pool {
-    chunk_pool_size: 5000000     # Shuffle buffer size (chunks in memory)
+    chunk_pool_size: 50000 # 00     # Shuffle buffer size (chunks in memory)
     startup_indexing_threads: 4  # Threads for startup indexing
     indexing_threads: 4          # Threads for ongoing indexing
     chunk_loading_threads: 4     # Threads for loading chunk data
@@ -60,7 +60,7 @@ model {
 }
 training {
   schedule {
-   steps_per_network: 250
+   steps_per_network: 1  # 250
    chunks_per_network: 50000
   }
   checkpoint {
@@ -68,13 +68,15 @@ training {
     max_to_keep: 5
   }
   optimizer {
-    nadam { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 }
+    nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
     constant_lr { lr: 0.001 }
   }
   losses {
-    l2_weight: 1.0
-    policy { name: "main" weight: 1.0 illegal_moves: MASK}
+    policy { name: "main" weight: 1.0 illegal_moves: MASK }
     value { name: "winner" weight: 1.0 }
     movesleft { name: "main" weight: 1.0 }
   }
+}
+export {
+  path: "/home/crem/tmp/2025-08/lc0_training/exported_models/"
 }

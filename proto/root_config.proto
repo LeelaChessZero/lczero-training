@@ -5,6 +5,7 @@ package lczero.training;
 import "proto/data_loader_config.proto";
 import "proto/model_config.proto";
 import "proto/training_config.proto";
+import "proto/export_config.proto";
 
 // Root configuration message containing all subsystem configurations.
 message RootConfig {
@@ -16,4 +17,6 @@ message RootConfig {
   optional TrainingConfig training = 3;
   // Model configuration
   optional ModelConfig model = 4;
+  // Export configuration
+  optional ExportConfig export = 5;
 }
