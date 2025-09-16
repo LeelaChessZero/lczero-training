@@ -54,7 +54,6 @@ class LeelaPytreeWeightsVisitor:
     def encoder_tower(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights
     ) -> None:
-        assert weights.HasField("smolgen_w")
         # Shared layer is stored at the point of the first usage.
         self.matmul(
             nnx_dict["encoders"]["layers"][0]["mha"]["smolgen"][

@@ -39,6 +39,13 @@ class JaxToLeela(LeelaPytreeWeightsVisitor):
 
         assert len(leela.params) // 2 == weights.size
 
+    def encoder_tower(
+        self, nnx_dict: nnx.State, weights: net_pb2.Weights
+    ) -> None:
+        for i in range(len(nnx_dict["encoders"]["layers"])):
+            weights.encoder.append(weights.EncoderLayer())
+        return super().encoder_tower(nnx_dict=nnx_dict, weights=weights)
+
 
 @dataclasses.dataclass
 class LeelaExportOptions:
