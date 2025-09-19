@@ -51,6 +51,7 @@ class JaxToLeela(LeelaPytreeWeightsVisitor):
 class LeelaExportOptions:
     min_version: str
     license: Optional[str]
+    training_steps: Optional[int] = None
 
 
 def jax_to_leela(
@@ -66,6 +67,10 @@ def jax_to_leela(
         lc0_weights.min_version.patch,
     ) = _split_version(export_options.min_version)
     lc0_weights.format.CopyFrom(_make_format())
+    if export_options.training_steps is not None:
+        lc0_weights.training_params.training_steps = (
+            export_options.training_steps
+        )
 
     visitor = JaxToLeela(jax_weights, lc0_weights)
     visitor.run()

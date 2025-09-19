@@ -47,6 +47,11 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Path to save the output Orbax checkpoint.",
     )
+    leela2jax.add_argument(
+        "--output-leela-verification",
+        type=str,
+        help="Path to save the round-trip converted Leela network (.pb.gz) for verification.",
+    )
 
     parser.set_defaults(func=run)
 
@@ -60,6 +65,7 @@ def run(args: argparse.Namespace) -> None:
             output_modelconfig=args.output_model_config,
             output_serialized_jax=args.output_serialized_jax,
             output_orbax_checkpoint=args.output_orbax_checkpoint,
+            output_leela_verification=args.output_leela_verification,
             print_modelconfig=args.print_model_config,
         )
 

@@ -13,6 +13,7 @@ from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import JitTrainingState, TrainingState
 from proto import net_pb2
 
+from .jax_to_leela import LeelaExportOptions, jax_to_leela
 from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
 from .leela_to_modelconfig import leela_to_modelconfig
 
@@ -90,9 +91,8 @@ class LeelaToJax(LeelaPytreeWeightsVisitor):
 
         values = jnp.frombuffer(leela.params, dtype=jnp.uint16)
         values = values.astype(jnp.float32)
-        values /= 65535.0
-        values *= leela.max_val - leela.min_val
-        values += leela.min_val
+        alpha = values / 65535.0
+        values = alpha * leela.max_val + (1.0 - alpha) * leela.min_val
         values = values.astype(param.dtype)
         values = values.reshape(param.shape[::-1]).transpose()
         param.value = values
@@ -122,6 +122,7 @@ def leela_to_jax_files(
     output_modelconfig: Optional[str],
     output_serialized_jax: Optional[str],
     output_orbax_checkpoint: Optional[str],
+    output_leela_verification: Optional[str],
     print_modelconfig: bool = False,
 ) -> None:
     lc0_weights = net_pb2.Net()
@@ -150,7 +151,11 @@ def leela_to_jax_files(
         with open(output_modelconfig, "w") as f:
             f.write(str(config))
 
-    if output_serialized_jax is None and output_orbax_checkpoint is None:
+    if (
+        output_serialized_jax is None
+        and output_orbax_checkpoint is None
+        and output_leela_verification is None
+    ):
         return
 
     state = leela_to_jax(lc0_weights, import_options)
@@ -171,3 +176,21 @@ def leela_to_jax_files(
         checkpointer = ocp.StandardCheckpointer()
         checkpointer.save(output_orbax_checkpoint, training_state)
         checkpointer.wait_until_finished()
+
+    if output_leela_verification:
+        min_version = (
+            f"v{lc0_weights.min_version.major}."
+            f"{lc0_weights.min_version.minor}."
+            f"{lc0_weights.min_version.patch}"
+        )
+        license_str = (
+            lc0_weights.license if lc0_weights.HasField("license") else None
+        )
+        export_options = LeelaExportOptions(
+            min_version=min_version,
+            license=license_str,
+            training_steps=lc0_weights.training_params.training_steps,
+        )
+        verification_net = jax_to_leela(state, export_options)
+        with gzip.open(output_leela_verification, "wb") as f:
+            f.write(verification_net.SerializeToString())
