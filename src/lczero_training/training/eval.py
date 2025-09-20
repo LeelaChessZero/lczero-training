@@ -144,9 +144,9 @@ class Evaluation:
         prefix: str,
     ) -> None:
         output_lines = []
-        output_lines.append(f"=== {prefix} TENSORS ===")
+        output_lines.append(f"# === {prefix} TENSORS ===")
         for name, tensor in tensors.items():
-            output_lines.append(f"{name}: {str(tensor)}")
+            output_lines.append(f"{name} = {str(tensor.tolist())}")
         output_lines.append("")
 
         output_text = "\n".join(output_lines)

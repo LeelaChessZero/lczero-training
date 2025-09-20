@@ -60,7 +60,7 @@ model {
 }
 training {
   schedule {
-   steps_per_network: 1  # 250
+   steps_per_network: 250
    chunks_per_network: 50000
   }
   checkpoint {

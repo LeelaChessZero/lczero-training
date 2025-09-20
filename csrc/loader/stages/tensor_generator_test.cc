@@ -160,7 +160,8 @@ class TensorGeneratorTest : public ::testing::Test {
       // Check first plane (plane 0).
       uint64_t expected_plane_0 = 0x0F0F0F0F0F0F0F0FULL;
       for (ssize_t square = 0; square < 64; ++square) {
-        float expected = static_cast<float>((expected_plane_0 >> square) & 1);
+        float expected =
+            static_cast<float>((expected_plane_0 >> (63 - square)) & 1);
         EXPECT_FLOAT_EQ(planes_slice[square], expected);
       }
 
@@ -317,7 +318,8 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 
   // Verify plane 0 bit conversion.
   for (ssize_t square = 0; square < 64; ++square) {
-    float expected = static_cast<float>((0xAAAAAAAAAAAAAAAAULL >> square) & 1);
+    float expected =
+        static_cast<float>((0xAAAAAAAAAAAAAAAAULL >> (63 - square)) & 1);
     EXPECT_FLOAT_EQ(planes_slice[square], expected)
         << "Mismatch at square " << square;
   }

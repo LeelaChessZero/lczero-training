@@ -164,7 +164,8 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
       uint64_t plane_bits = frame.planes[plane];
 
       for (ssize_t square = 0; square < 64; ++square) {
-        plane_slice[square] = static_cast<float>((plane_bits >> square) & 1);
+        plane_slice[square] =
+            static_cast<float>((plane_bits >> (63 - square)) & 1);
       }
     }
 

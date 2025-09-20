@@ -98,6 +98,7 @@ class TrainingPipeline:
         )
         empty_state = TrainingState(
             jit_state=jit_state,
+            num_heads=self._config.model.encoder.heads,
         )
         self._training_state = cast(
             TrainingState,
@@ -154,16 +155,18 @@ class TrainingPipeline:
 
         options = LeelaExportOptions(
             min_version="0.28",
+            num_heads=self._training_state.num_heads,
             license=None,
         )
         net = jax_to_leela(
             jax_weights=nnx.state(self._model),
             export_options=options,
         )
+        logging.info(f"Writing model to {export_filename}")
         os.makedirs(self._config.export.path, exist_ok=True)
         with gzip.open(export_filename, "wb") as f:
             f.write(net.SerializeToString())
-        logging.info(f"Exported model to {export_filename}")
+        logging.info(f"Finished writing model to {export_filename}")
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")

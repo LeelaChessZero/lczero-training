@@ -29,6 +29,7 @@ class JitTrainingState:
 class TrainingState:
     jit_state: JitTrainingState
     # Last chunk source that was available when the last epoch started training.
+    num_heads: int
     last_chunk_source: str = ""
 
     def replace(self, **changes: Any) -> "TrainingState":
@@ -51,4 +52,5 @@ class TrainingState:
         )
         return TrainingState(
             jit_state=jit_state,
+            num_heads=model_config.encoder.heads,
         )

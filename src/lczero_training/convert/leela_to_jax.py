@@ -168,6 +168,7 @@ def leela_to_jax_files(
         )
         export_options = LeelaExportOptions(
             min_version=min_version,
+            num_heads=lc0_weights.weights.headcount,
             license=license_str,
             training_steps=lc0_weights.training_params.training_steps,
         )

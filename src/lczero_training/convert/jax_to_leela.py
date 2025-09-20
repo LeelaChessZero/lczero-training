@@ -50,6 +50,7 @@ class JaxToLeela(LeelaPytreeWeightsVisitor):
 @dataclasses.dataclass
 class LeelaExportOptions:
     min_version: str
+    num_heads: int
     license: Optional[str]
     training_steps: Optional[int] = None
 
@@ -73,12 +74,7 @@ def jax_to_leela(
         )
 
     visitor = JaxToLeela(jax_weights, lc0_weights)
-    lc0_weights.weights.headcount = cast(
-        int,
-        jax_weights["encoders"]["encoders"]["layers"][0]["mha"][
-            "num_heads"
-        ].value,
-    )
+    lc0_weights.weights.headcount = export_options.num_heads
     visitor.run()
 
     return lc0_weights
