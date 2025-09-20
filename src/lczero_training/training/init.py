@@ -48,14 +48,11 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         model_config=config.model,
         training_config=config.training,
     )
-    print(f"Type of training_state after creation: {type(training_state)}")
-
     logger.info("Creating JAX FLAX/NNX model from configuration")
     model = LczeroModel(config=config.model, rngs=nnx.Rngs(params=42))
     model_state = nnx.state(model)
 
     if lczero_model is not None:
-        print(f"Type of training_state at start of if: {type(training_state)}")
         logger.info(f"Using existing lczero model: {lczero_model}")
         lc0_weights = net_pb2.Net()
         with gzip.open(lczero_model, "rb") as f:

@@ -73,6 +73,12 @@ def jax_to_leela(
         )
 
     visitor = JaxToLeela(jax_weights, lc0_weights)
+    lc0_weights.weights.headcount = cast(
+        int,
+        jax_weights["encoders"]["encoders"]["layers"][0]["mha"][
+            "num_heads"
+        ].value,
+    )
     visitor.run()
 
     return lc0_weights

@@ -64,7 +64,7 @@ training {
    chunks_per_network: 50000
   }
   checkpoint {
-    path: "/home/crem/tmp/2025-08/lc0_training/checkpoint"
+    path: "/home/crem/tmp/2025-09/lc0_training/checkpoint"
     max_to_keep: 5
   }
   optimizer {

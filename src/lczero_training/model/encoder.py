@@ -86,6 +86,10 @@ class EncoderBlock(nnx.Module):
         return self.ln2(out1 + ffn_out * self.alpha)
 
 
+class Hyperparameter(nnx.Variable):
+    pass
+
+
 class MultiHeadAttention(nnx.Module):
     """Multi-head attention module."""
 
@@ -104,7 +108,7 @@ class MultiHeadAttention(nnx.Module):
         )
         self.activation = defaults.activation
         self.depth = depth
-        self.num_heads = config.heads
+        self.num_heads = Hyperparameter(config.heads)
         self.q = nnx.Linear(
             in_features=in_features, out_features=depth, rngs=rngs
         )
@@ -141,10 +145,12 @@ class MultiHeadAttention(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         q, k, v = self.q(x), self.k(x), self.v(x)
 
-        head_depth = self.depth // self.num_heads
+        head_depth = self.depth // self.num_heads.value
         # Reshape for multi-head attention.
         q, k, v = (
-            t.reshape((-1, self.num_heads, head_depth)).transpose((1, 0, 2))
+            t.reshape((-1, self.num_heads.value, head_depth)).transpose(
+                (1, 0, 2)
+            )
             for t in (q, k, v)
         )
 

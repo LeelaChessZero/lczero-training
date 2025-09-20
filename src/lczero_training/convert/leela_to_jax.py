@@ -5,12 +5,10 @@ import math
 from typing import Optional
 
 import jax.numpy as jnp
-import orbax.checkpoint as ocp
 from flax import nnx, serialization
 
 import hlo_pb2
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import JitTrainingState, TrainingState
 from proto import net_pb2
 
 from .jax_to_leela import LeelaExportOptions, jax_to_leela
@@ -121,7 +119,6 @@ def leela_to_jax_files(
     compute_dtype: str,
     output_modelconfig: Optional[str],
     output_serialized_jax: Optional[str],
-    output_orbax_checkpoint: Optional[str],
     output_leela_verification: Optional[str],
     print_modelconfig: bool = False,
 ) -> None:
@@ -151,11 +148,7 @@ def leela_to_jax_files(
         with open(output_modelconfig, "w") as f:
             f.write(str(config))
 
-    if (
-        output_serialized_jax is None
-        and output_orbax_checkpoint is None
-        and output_leela_verification is None
-    ):
+    if output_serialized_jax is None and output_leela_verification is None:
         return
 
     state = leela_to_jax(lc0_weights, import_options)
@@ -163,19 +156,6 @@ def leela_to_jax_files(
     if output_serialized_jax:
         with open(output_serialized_jax, "wb") as f:
             f.write(serialization.to_bytes(state))
-
-    if output_orbax_checkpoint:
-        jit_state = JitTrainingState(
-            step=lc0_weights.training_params.training_steps,
-            model_state=state,
-            opt_state=None,
-        )
-        training_state = TrainingState(
-            jit_state=jit_state,
-        )
-        checkpointer = ocp.StandardCheckpointer()
-        checkpointer.save(output_orbax_checkpoint, training_state)
-        checkpointer.wait_until_finished()
 
     if output_leela_verification:
         min_version = (
