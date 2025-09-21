@@ -164,8 +164,9 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
       uint64_t plane_bits = frame.planes[plane];
 
       for (ssize_t square = 0; square < 64; ++square) {
+        // XOR with 7 remaps the index within each byte from 0..7 to 7..0.
         plane_slice[square] =
-            static_cast<float>((plane_bits >> (63 - square)) & 1);
+            static_cast<float>((plane_bits >> (square ^ 7)) & 1);
       }
     }
 
