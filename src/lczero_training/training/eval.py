@@ -1,6 +1,9 @@
+import json
 import logging
+import shelve
 import sys
-from typing import Dict, Generator, Optional, TextIO, Tuple
+from datetime import datetime
+from typing import Any, Dict, Generator, Optional, TextIO, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -36,6 +39,8 @@ class Evaluation:
         num_samples: int,
         dump_to_stdout: bool = False,
         dump_to_file: Optional[str] = None,
+        dump_to_shelve: Optional[str] = None,
+        dump_to_json: Optional[str] = None,
     ) -> None:
         dump_file: Optional[TextIO] = None
         if dump_to_file:
@@ -128,6 +133,20 @@ class Evaluation:
                         losses_dict, dump_to_stdout, dump_file, "LOSSES"
                     )
 
+                if dump_to_shelve:
+                    logger.info(
+                        f"Dumping to shelve database at {dump_to_shelve}"
+                    )
+                    self._dump_to_shelve(
+                        dump_to_shelve, batch_dict, outputs, losses_dict
+                    )
+
+                if dump_to_json:
+                    logger.info(f"Dumping to JSON file at {dump_to_json}")
+                    self._dump_to_json(
+                        dump_to_json, batch_dict, outputs, losses_dict
+                    )
+
                 logger.info(f"Sample {sample_idx + 1} complete")
 
         finally:
@@ -135,6 +154,78 @@ class Evaluation:
                 dump_file.close()
 
         logger.info("Evaluation complete")
+
+    def _tensor_to_list(self, obj: Any) -> Any:
+        """Recursively convert tensors to Python lists."""
+        if hasattr(obj, "tolist"):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {
+                key: self._tensor_to_list(value) for key, value in obj.items()
+            }
+        else:
+            return obj
+
+    def _dump_to_shelve(
+        self,
+        shelve_path: str,
+        batch_dict: dict,
+        outputs: dict,
+        losses_dict: dict,
+    ) -> None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        key = f"sample-{timestamp}"
+
+        # Combine all data into a single dictionary
+        all_data = {}
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in batch_dict.items()}
+        )
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in outputs.items()}
+        )
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in losses_dict.items()}
+        )
+
+        with shelve.open(shelve_path) as db:
+            db[key] = all_data
+        logger.info(f"Dumped data to shelve with key: {key}")
+
+    def _dump_to_json(
+        self,
+        json_path: str,
+        batch_dict: dict,
+        outputs: dict,
+        losses_dict: dict,
+    ) -> None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        key = f"sample-{timestamp}"
+
+        # Combine all data into a single dictionary
+        all_data = {}
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in batch_dict.items()}
+        )
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in outputs.items()}
+        )
+        all_data.update(
+            {k: self._tensor_to_list(v) for k, v in losses_dict.items()}
+        )
+
+        # Load existing data or create new structure
+        try:
+            with open(json_path, "r") as f:
+                json_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            json_data = {}
+
+        json_data[key] = all_data
+
+        with open(json_path, "w") as f:
+            json.dump(json_data, f, indent=2)
+        logger.info(f"Dumped data to JSON with key: {key}")
 
     def _dump_tensors(
         self,
@@ -146,7 +237,7 @@ class Evaluation:
         output_lines = []
         output_lines.append(f"# === {prefix} TENSORS ===")
         for name, tensor in tensors.items():
-            output_lines.append(f"{name} = {str(tensor.tolist())}")
+            output_lines.append(f"{name} = {str(self._tensor_to_list(tensor))}")
         output_lines.append("")
 
         output_text = "\n".join(output_lines)
@@ -165,6 +256,8 @@ def eval(
     batch_size_override: Optional[int] = None,
     dump_to_stdout: bool = False,
     dump_to_file: Optional[str] = None,
+    dump_to_shelve: Optional[str] = None,
+    dump_to_json: Optional[str] = None,
 ) -> None:
     # Set JAX numpy print options to show full tensors
     jnp.set_printoptions(threshold=sys.maxsize, suppress=False)
@@ -218,4 +311,6 @@ def eval(
         num_samples=samples_to_process,
         dump_to_stdout=dump_to_stdout,
         dump_to_file=dump_to_file,
+        dump_to_shelve=dump_to_shelve,
+        dump_to_json=dump_to_json,
     )

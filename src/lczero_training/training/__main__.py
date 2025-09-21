@@ -66,6 +66,16 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Dump input/output tensors to specified file.",
     )
+    eval_parser.add_argument(
+        "--dump-shelve",
+        type=str,
+        help="Dump input/output tensors to specified shelve database.",
+    )
+    eval_parser.add_argument(
+        "--dump-json",
+        type=str,
+        help="Dump input/output tensors to specified JSON file.",
+    )
     eval_parser.set_defaults(func=run)
 
     # Describe command
@@ -98,6 +108,8 @@ def run(args: argparse.Namespace) -> None:
             batch_size_override=getattr(args, "batch_size", None),
             dump_to_stdout=getattr(args, "dump_stdout", False),
             dump_to_file=getattr(args, "dump_file", None),
+            dump_to_shelve=getattr(args, "dump_shelve", None),
+            dump_to_json=getattr(args, "dump_json", None),
         )
     elif args.subcommand == "describe":
         describe(
