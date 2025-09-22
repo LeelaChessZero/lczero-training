@@ -6,4 +6,6 @@ package lczero.training;
 message ExportConfig {
   // Directory path where exported models will be saved.
   optional string path = 1;
+  // Training run ID for uploading to training website. Only uploads when set.
+  optional int32 upload_training_run = 2;
 }

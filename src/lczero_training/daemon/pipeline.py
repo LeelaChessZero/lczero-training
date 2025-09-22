@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import cast
 
 import orbax.checkpoint as ocp
+import requests
+from dotenv import load_dotenv
 from flax import nnx
 from google.protobuf import text_format
 
@@ -142,11 +144,13 @@ class TrainingPipeline:
             )
             self._train_one_network()
             self._save_checkpoint()
-            self._export_model()
+            exported_filepath = self._export_model()
+            if exported_filepath:
+                self._upload_network(exported_filepath)
 
-    def _export_model(self) -> None:
+    def _export_model(self) -> str | None:
         if not self._config.export.HasField("path"):
-            return
+            return None
         export_filename = os.path.join(
             self._config.export.path,
             f"lc0-{self._training_state.jit_state.step:08d}.pb.gz",
@@ -168,6 +172,50 @@ class TrainingPipeline:
         with gzip.open(export_filename, "wb") as f:
             f.write(net.SerializeToString())
         logging.info(f"Finished writing model to {export_filename}")
+        return export_filename
+
+    def _upload_network(self, filepath: str) -> None:
+        if not self._config.export.HasField("upload_training_run"):
+            return
+
+        load_dotenv()
+        upload_pwd = os.getenv("UPLOAD_PWD")
+        if not upload_pwd:
+            logging.error(
+                "UPLOAD_PWD not found in environment variables, skipping upload."
+            )
+            return
+
+        try:
+            state = cast(nnx.State, nnx.state(self._model))
+            layers = len(state["encoders"]["encoders"]["layers"])
+            filters = state["embedding"]["embedding"]["bias"].shape[0]
+            training_id = self._config.export.upload_training_run
+
+            logging.info(
+                f"Uploading {filepath} to training website (ID: {training_id}, "
+                f"layers: {layers}, filters: {filters})"
+            )
+
+            with open(filepath, "rb") as f:
+                data = {
+                    "pwd": upload_pwd,
+                    "training_id": training_id,
+                    "layers": layers,
+                    "filters": filters,
+                }
+                response = requests.post(
+                    "http://api.lczero.org/upload_network",
+                    files={"file": f},
+                    data=data,
+                )
+                response.raise_for_status()
+
+            logging.info(f"Successfully uploaded network: {response.text}")
+        except (IOError, requests.exceptions.RequestException) as e:
+            logging.error(f"Failed to upload network: {e}")
+        except (KeyError, AttributeError, IndexError) as e:
+            logging.error(f"Failed to extract model metadata for upload: {e}")
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
