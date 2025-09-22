@@ -141,6 +141,7 @@ class TrainingPipeline:
                 self._chunks_per_network // 2,
             )
             self._train_one_network()
+            self._save_checkpoint()
             self._export_model()
 
     def _export_model(self) -> None:
@@ -202,6 +203,14 @@ class TrainingPipeline:
         self._cycle_state.current_cycle_start_time = current_time
 
         logging.info("Done training")
+
+    def _save_checkpoint(self) -> None:
+        logging.info("Saving checkpoint")
+        self._checkpoint_mgr.save(
+            step=self._training_state.jit_state.step,
+            args=ocp.args.PyTreeSave(item=self._training_state),
+        )
+        logging.info("Checkpoint saved")
 
     def stop(self) -> None:
         self._data_loader.stop()
