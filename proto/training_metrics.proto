@@ -29,9 +29,11 @@ message StatisticsProtoDouble {
 
 // Metrics for queue performance monitoring.
 message QueueMetricProto {
-  optional uint64 message_count = 1 [default = 0];
-  optional StatisticsProtoInt64 queue_fullness = 2;
-  optional uint64 queue_capacity = 3 [default = 0];
+  optional uint64 put_count = 1 [default = 0];
+  optional uint64 get_count = 2 [default = 0];
+  optional uint64 drop_count = 3 [default = 0];
+  optional StatisticsProtoInt64 queue_fullness = 4;
+  optional uint64 queue_capacity = 5 [default = 0];
 }
 
 // Metrics for FilePathProvider performance monitoring.

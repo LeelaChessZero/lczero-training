@@ -12,7 +12,9 @@ namespace lczero {
 namespace training {
 
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
-  dest.set_message_count(dest.message_count() + src.message_count());
+  dest.set_put_count(dest.put_count() + src.put_count());
+  dest.set_get_count(dest.get_count() + src.get_count());
+  dest.set_drop_count(dest.drop_count() + src.drop_count());
   UpdateFrom(*dest.mutable_queue_fullness(), src.queue_fullness());
   if (src.has_queue_capacity()) dest.set_queue_capacity(src.queue_capacity());
 }

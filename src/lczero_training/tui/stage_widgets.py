@@ -52,7 +52,7 @@ def format_si(value: int, precision: int = 1) -> str:
 
 
 def format_full_number(value: int) -> str:
-    """Formats an integer with apostrophe separators for thousands, for numbers with 5+ digits."""
+    """Formats an integer with apostrophe separators for thousands."""
     if value < 10000:
         return str(value)
     return f"{value:_}".replace("_", "'")
@@ -220,8 +220,8 @@ class QueueWidget(Container):
                 queue_1sec = stage_1sec.queue
                 queue_total = stage_total.queue
 
-                current_rate = queue_1sec.message_count
-                self.total_transferred = queue_total.message_count
+                current_rate = queue_1sec.get_count
+                self.total_transferred = queue_total.get_count
                 self.capacity = queue_1sec.queue_capacity
 
                 if queue_1sec.queue_fullness.count > 0:
