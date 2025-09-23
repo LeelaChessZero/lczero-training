@@ -1175,4 +1175,261 @@ TEST_F(QueueTest, GetTotalPutCountEmptyBatch) {
   EXPECT_EQ(queue.GetTotalPutCount(), 1);
 }
 
+// Tests for DROP_NEW overflow behavior
+
+TEST_F(QueueTest, DropNewBasicBehavior) {
+  Queue<int> queue(3, Queue<int>::OverflowBehavior::DROP_NEW);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue to capacity
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+
+  // Additional puts should be dropped
+  producer.Put(4);
+  producer.Put(5);
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 5);
+  EXPECT_EQ(queue.GetTotalDropCount(), 2);
+
+  // Verify original items are still there
+  EXPECT_EQ(queue.Get(), 1);
+  EXPECT_EQ(queue.Get(), 2);
+  EXPECT_EQ(queue.Get(), 3);
+}
+
+TEST_F(QueueTest, DropNewBatchBehavior) {
+  Queue<int> queue(3, Queue<int>::OverflowBehavior::DROP_NEW);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue partially
+  producer.Put(1);
+  EXPECT_EQ(queue.Size(), 1);
+
+  // Try to put more than capacity allows
+  std::vector<int> large_batch = {2, 3, 4, 5, 6};
+  producer.Put(absl::Span<const int>(large_batch));
+
+  // Only first 2 should fit
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 6);   // 1 + 5 attempted
+  EXPECT_EQ(queue.GetTotalDropCount(), 3);  // 4, 5, 6 were dropped
+
+  // Verify what's in the queue
+  EXPECT_EQ(queue.Get(), 1);
+  EXPECT_EQ(queue.Get(), 2);
+  EXPECT_EQ(queue.Get(), 3);
+}
+
+TEST_F(QueueTest, DropNewThreadSafety) {
+  Queue<int> queue(5, Queue<int>::OverflowBehavior::DROP_NEW);
+  constexpr int num_threads = 3;
+  constexpr int items_per_thread = 10;
+
+  std::vector<std::thread> threads;
+  std::vector<Queue<int>::Producer> producers;
+
+  for (int t = 0; t < num_threads; ++t) {
+    producers.push_back(queue.CreateProducer());
+  }
+
+  for (int t = 0; t < num_threads; ++t) {
+    threads.emplace_back([&producers, t]() {
+      for (int i = 0; i < items_per_thread; ++i) {
+        producers[t].Put(t * items_per_thread + i);
+      }
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  // Queue should have at most capacity items
+  EXPECT_LE(queue.Size(), 5);
+  // All puts should be counted
+  EXPECT_EQ(queue.GetTotalPutCount(), num_threads * items_per_thread);
+  // Some items should have been dropped
+  EXPECT_GT(queue.GetTotalDropCount(), 0);
+  // Put count = successful puts + drops
+  EXPECT_EQ(queue.GetTotalPutCount(), queue.Size() + queue.GetTotalDropCount());
+}
+
+// Tests for KEEP_NEWEST overflow behavior
+
+TEST_F(QueueTest, KeepNewestBasicBehavior) {
+  Queue<int> queue(3, Queue<int>::OverflowBehavior::KEEP_NEWEST);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue to capacity
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 3);
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+
+  // Additional puts should replace oldest items
+  producer.Put(4);
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 4);
+  EXPECT_EQ(queue.GetTotalDropCount(), 1);
+
+  producer.Put(5);
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 5);
+  EXPECT_EQ(queue.GetTotalDropCount(), 2);
+
+  // Verify newest items are kept (3, 4, 5)
+  EXPECT_EQ(queue.Get(), 3);
+  EXPECT_EQ(queue.Get(), 4);
+  EXPECT_EQ(queue.Get(), 5);
+}
+
+TEST_F(QueueTest, KeepNewestBatchBehavior) {
+  Queue<int> queue(3, Queue<int>::OverflowBehavior::KEEP_NEWEST);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+
+  // Put large batch that exceeds capacity
+  std::vector<int> large_batch = {4, 5, 6, 7, 8};
+  producer.Put(absl::Span<const int>(large_batch));
+
+  // Queue should still have capacity items
+  EXPECT_EQ(queue.Size(), 3);
+  EXPECT_EQ(queue.GetTotalPutCount(), 8);
+  EXPECT_EQ(queue.GetTotalDropCount(), 5);  // 1, 2, 3, 4, 5 dropped
+
+  // Should have the newest 3 items (6, 7, 8)
+  EXPECT_EQ(queue.Get(), 6);
+  EXPECT_EQ(queue.Get(), 7);
+  EXPECT_EQ(queue.Get(), 8);
+}
+
+TEST_F(QueueTest, KeepNewestLargeBatch) {
+  Queue<int> queue(2, Queue<int>::OverflowBehavior::KEEP_NEWEST);
+  auto producer = queue.CreateProducer();
+
+  // Put batch larger than capacity
+  std::vector<int> large_batch = {1, 2, 3, 4, 5};
+  producer.Put(absl::Span<const int>(large_batch));
+
+  // Should keep only the last 2 items
+  EXPECT_EQ(queue.Size(), 2);
+  EXPECT_EQ(queue.GetTotalPutCount(), 5);
+  EXPECT_EQ(queue.GetTotalDropCount(), 3);
+
+  EXPECT_EQ(queue.Get(), 4);
+  EXPECT_EQ(queue.Get(), 5);
+}
+
+// Tests for counter functionality
+
+TEST_F(QueueTest, GetTotalGetCountBasic) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  EXPECT_EQ(queue.GetTotalGetCount(), 0);
+
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  EXPECT_EQ(queue.GetTotalGetCount(), 0);
+
+  queue.Get();
+  EXPECT_EQ(queue.GetTotalGetCount(), 1);
+
+  queue.Get();
+  queue.Get();
+  EXPECT_EQ(queue.GetTotalGetCount(), 3);
+}
+
+TEST_F(QueueTest, GetTotalGetCountBatch) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+  producer.Put(4);
+  producer.Put(5);
+
+  queue.Get(3);
+  EXPECT_EQ(queue.GetTotalGetCount(), 3);
+
+  queue.Get();
+  EXPECT_EQ(queue.GetTotalGetCount(), 4);
+
+  queue.Get(1);
+  EXPECT_EQ(queue.GetTotalGetCount(), 5);
+}
+
+TEST_F(QueueTest, GetTotalGetCountReset) {
+  Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+
+  queue.Get();
+  queue.Get();
+  EXPECT_EQ(queue.GetTotalGetCount(), 2);
+
+  EXPECT_EQ(queue.GetTotalGetCount(true), 2);
+  EXPECT_EQ(queue.GetTotalGetCount(), 0);
+}
+
+TEST_F(QueueTest, GetTotalDropCountBasic) {
+  Queue<int> queue(2, Queue<int>::OverflowBehavior::DROP_NEW);
+  auto producer = queue.CreateProducer();
+
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+
+  producer.Put(1);
+  producer.Put(2);
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+
+  producer.Put(3);  // Should be dropped
+  EXPECT_EQ(queue.GetTotalDropCount(), 1);
+
+  producer.Put(4);  // Should be dropped
+  EXPECT_EQ(queue.GetTotalDropCount(), 2);
+}
+
+TEST_F(QueueTest, GetTotalDropCountKeepNewest) {
+  Queue<int> queue(2, Queue<int>::OverflowBehavior::KEEP_NEWEST);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+
+  producer.Put(3);  // Should drop 1
+  EXPECT_EQ(queue.GetTotalDropCount(), 1);
+
+  producer.Put(4);  // Should drop 2
+  EXPECT_EQ(queue.GetTotalDropCount(), 2);
+}
+
+TEST_F(QueueTest, GetTotalDropCountReset) {
+  Queue<int> queue(1, Queue<int>::OverflowBehavior::DROP_NEW);
+  auto producer = queue.CreateProducer();
+
+  producer.Put(1);
+  producer.Put(2);  // Dropped
+  producer.Put(3);  // Dropped
+  EXPECT_EQ(queue.GetTotalDropCount(), 2);
+
+  EXPECT_EQ(queue.GetTotalDropCount(true), 2);
+  EXPECT_EQ(queue.GetTotalDropCount(), 0);
+}
+
 }  // namespace lczero

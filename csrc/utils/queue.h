@@ -24,7 +24,10 @@ class QueueClosedException : public std::runtime_error {
 template <typename T>
 class Queue {
  public:
-  explicit Queue(size_t capacity);
+  enum class OverflowBehavior { BLOCK, DROP_NEW, KEEP_NEWEST };
+
+  explicit Queue(size_t capacity,
+                 OverflowBehavior overflow_behavior = OverflowBehavior::BLOCK);
 
   // RAII token for producers. Queue automatically closes when all producers
   // are destroyed. All Put operations must go through this class.
@@ -94,10 +97,19 @@ class Queue {
   // If reset is true, resets the counter to 0 after returning the value.
   size_t GetTotalPutCount(bool reset = false);
 
+  // Returns the total number of elements that have been retrieved from the
+  // queue. If reset is true, resets the counter to 0 after returning the value.
+  size_t GetTotalGetCount(bool reset = false);
+
+  // Returns the total number of elements that have been dropped from the queue.
+  // If reset is true, resets the counter to 0 after returning the value.
+  size_t GetTotalDropCount(bool reset = false);
+
  private:
   friend class Producer;
 
   const size_t capacity_;
+  const OverflowBehavior overflow_behavior_;
   absl::FixedArray<T> buffer_ ABSL_GUARDED_BY(mutex_);
   size_t head_ ABSL_GUARDED_BY(mutex_) = 0;
   size_t tail_ ABSL_GUARDED_BY(mutex_) = 0;
@@ -105,6 +117,8 @@ class Queue {
   size_t producer_count_ ABSL_GUARDED_BY(mutex_) = 0;
   bool closed_ ABSL_GUARDED_BY(mutex_) = false;
   size_t total_put_count_ ABSL_GUARDED_BY(mutex_) = 0;
+  size_t total_get_count_ ABSL_GUARDED_BY(mutex_) = 0;
+  size_t total_drop_count_ ABSL_GUARDED_BY(mutex_) = 0;
 
   mutable absl::Mutex mutex_;
 
@@ -131,7 +145,10 @@ class Queue {
 // Implementation
 
 template <typename T>
-Queue<T>::Queue(size_t capacity) : capacity_(capacity), buffer_(capacity) {}
+Queue<T>::Queue(size_t capacity, OverflowBehavior overflow_behavior)
+    : capacity_(capacity),
+      overflow_behavior_(overflow_behavior),
+      buffer_(capacity) {}
 
 // Producer implementation
 template <typename T>
@@ -211,23 +228,69 @@ void Queue<T>::RemoveProducer() {
 template <typename T>
 void Queue<T>::PutInternal(const T& item) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
   if (closed_) throw QueueClosedException();
+  ++total_put_count_;
+
+  switch (overflow_behavior_) {
+    case OverflowBehavior::BLOCK:
+      mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+      // Second check needed: queue might have closed while waiting.
+      if (closed_) throw QueueClosedException();
+      break;
+    case OverflowBehavior::DROP_NEW:
+      // No blocking: return immediately if full.
+      if (size_ >= capacity_) {
+        ++total_drop_count_;
+        return;
+      }
+      break;
+    case OverflowBehavior::KEEP_NEWEST:
+      // No blocking: make room by dropping oldest item.
+      if (size_ >= capacity_) {
+        head_ = (head_ + 1) % capacity_;
+        --size_;
+        ++total_drop_count_;
+      }
+      break;
+  }
+
   buffer_[tail_] = item;
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
-  ++total_put_count_;
 }
 
 template <typename T>
 void Queue<T>::PutInternal(T&& item) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
   if (closed_) throw QueueClosedException();
+  ++total_put_count_;
+
+  switch (overflow_behavior_) {
+    case OverflowBehavior::BLOCK:
+      mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+      // Second check needed: queue might have closed while waiting.
+      if (closed_) throw QueueClosedException();
+      break;
+    case OverflowBehavior::DROP_NEW:
+      // No blocking: return immediately if full.
+      if (size_ >= capacity_) {
+        ++total_drop_count_;
+        return;
+      }
+      break;
+    case OverflowBehavior::KEEP_NEWEST:
+      // No blocking: make room by dropping oldest item.
+      if (size_ >= capacity_) {
+        head_ = (head_ + 1) % capacity_;
+        --size_;
+        ++total_drop_count_;
+      }
+      break;
+  }
+
   buffer_[tail_] = std::move(item);
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
-  ++total_put_count_;
 }
 
 template <typename T>
@@ -239,12 +302,35 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
 
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
-    mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
     if (closed_) throw QueueClosedException();
 
-    // Put as many items as possible in this batch
-    size_t available_space = capacity_ - size_;
-    size_t batch_size = std::min(remaining, available_space);
+    size_t batch_size;
+    switch (overflow_behavior_) {
+      case OverflowBehavior::BLOCK:
+        mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+        // Second check needed: queue might have closed while waiting.
+        if (closed_) throw QueueClosedException();
+        batch_size = std::min(remaining, capacity_ - size_);
+        break;
+      case OverflowBehavior::DROP_NEW:
+        // No blocking: process only what fits.
+        batch_size = std::min(remaining, capacity_ - size_);
+        if (batch_size == 0) {
+          total_put_count_ += remaining;
+          total_drop_count_ += remaining;
+          return;
+        }
+        break;
+      case OverflowBehavior::KEEP_NEWEST:
+        // No blocking: make room by dropping oldest items.
+        batch_size = std::min(remaining, capacity_);
+        while (size_ + batch_size > capacity_) {
+          head_ = (head_ + 1) % capacity_;
+          --size_;
+          ++total_drop_count_;
+        }
+        break;
+    }
 
     for (size_t i = 0; i < batch_size; ++i) {
       buffer_[tail_] = items[offset + i];
@@ -267,12 +353,35 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
 
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
-    mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
     if (closed_) throw QueueClosedException();
 
-    // Put as many items as possible in this batch
-    size_t available_space = capacity_ - size_;
-    size_t batch_size = std::min(remaining, available_space);
+    size_t batch_size;
+    switch (overflow_behavior_) {
+      case OverflowBehavior::BLOCK:
+        mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
+        // Second check needed: queue might have closed while waiting.
+        if (closed_) throw QueueClosedException();
+        batch_size = std::min(remaining, capacity_ - size_);
+        break;
+      case OverflowBehavior::DROP_NEW:
+        // No blocking: process only what fits.
+        batch_size = std::min(remaining, capacity_ - size_);
+        if (batch_size == 0) {
+          total_put_count_ += remaining;
+          total_drop_count_ += remaining;
+          return;
+        }
+        break;
+      case OverflowBehavior::KEEP_NEWEST:
+        // No blocking: make room by dropping oldest items.
+        batch_size = std::min(remaining, capacity_);
+        while (size_ + batch_size > capacity_) {
+          head_ = (head_ + 1) % capacity_;
+          --size_;
+          ++total_drop_count_;
+        }
+        break;
+    }
 
     for (size_t i = 0; i < batch_size; ++i) {
       buffer_[tail_] = std::move(items[offset + i]);
@@ -295,6 +404,7 @@ T Queue<T>::Get() {
   T item = std::move(buffer_[head_]);
   head_ = (head_ + 1) % capacity_;
   --size_;
+  ++total_get_count_;
 
   return item;
 }
@@ -319,6 +429,7 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
       result[offset + i] = std::move(buffer_[head_]);
       head_ = (head_ + 1) % capacity_;
       --size_;
+      ++total_get_count_;
     }
 
     offset += batch_size;
@@ -453,9 +564,23 @@ template <typename T>
 size_t Queue<T>::GetTotalPutCount(bool reset) {
   absl::MutexLock lock(&mutex_);
   size_t count = total_put_count_;
-  if (reset) {
-    total_put_count_ = 0;
-  }
+  if (reset) total_put_count_ = 0;
+  return count;
+}
+
+template <typename T>
+size_t Queue<T>::GetTotalGetCount(bool reset) {
+  absl::MutexLock lock(&mutex_);
+  size_t count = total_get_count_;
+  if (reset) total_get_count_ = 0;
+  return count;
+}
+
+template <typename T>
+size_t Queue<T>::GetTotalDropCount(bool reset) {
+  absl::MutexLock lock(&mutex_);
+  size_t count = total_drop_count_;
+  if (reset) total_drop_count_ = 0;
   return count;
 }
 
