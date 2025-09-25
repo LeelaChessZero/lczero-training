@@ -10,6 +10,19 @@
 
 namespace lczero {
 
+// Virtual base class for type-erased handling of queues.
+class QueueBase {
+ public:
+  virtual ~QueueBase() = default;
+  virtual size_t Size() const = 0;
+  virtual size_t Capacity() const = 0;
+  virtual bool IsClosed() const = 0;
+  virtual void Close() = 0;
+  virtual size_t GetTotalPutCount(bool reset = false) = 0;
+  virtual size_t GetTotalGetCount(bool reset = false) = 0;
+  virtual size_t GetTotalDropCount(bool reset = false) = 0;
+};
+
 // Exception thrown when queue operations are attempted on a closed queue.
 class QueueClosedException : public std::runtime_error {
  public:
@@ -22,7 +35,7 @@ class QueueClosedException : public std::runtime_error {
 // When closed, Put operations throw immediately, but Get operations only throw
 // when the queue becomes empty - allowing consumption of remaining elements.
 template <typename T>
-class Queue {
+class Queue : public QueueBase {
  public:
   enum class OverflowBehavior { BLOCK, DROP_NEW, KEEP_NEWEST };
 
@@ -70,16 +83,16 @@ class Queue {
   absl::FixedArray<T> Get(size_t count);
 
   // Returns the current size of the queue.
-  size_t Size() const;
+  size_t Size() const override;
 
   // Returns the capacity of the queue.
-  size_t Capacity() const;
+  size_t Capacity() const override;
 
   // Explicitly close the queue, preventing further Put operations.
-  void Close();
+  void Close() override;
 
   // Returns true if the queue is closed.
-  bool IsClosed() const;
+  bool IsClosed() const override;
 
   // Wait until queue has at least the specified amount of free space.
   void WaitForRoomAtLeast(size_t room);
@@ -95,15 +108,15 @@ class Queue {
 
   // Returns the total number of elements that have been put into the queue.
   // If reset is true, resets the counter to 0 after returning the value.
-  size_t GetTotalPutCount(bool reset = false);
+  size_t GetTotalPutCount(bool reset = false) override;
 
   // Returns the total number of elements that have been retrieved from the
   // queue. If reset is true, resets the counter to 0 after returning the value.
-  size_t GetTotalGetCount(bool reset = false);
+  size_t GetTotalGetCount(bool reset = false) override;
 
   // Returns the total number of elements that have been dropped from the queue.
   // If reset is true, resets the counter to 0 after returning the value.
-  size_t GetTotalDropCount(bool reset = false);
+  size_t GetTotalDropCount(bool reset = false) override;
 
  private:
   friend class Producer;
