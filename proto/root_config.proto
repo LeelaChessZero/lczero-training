@@ -11,12 +11,14 @@ import "proto/export_config.proto";
 message RootConfig {
   // Name identifier for this configuration
   optional string name = 1;
+  // Optional log filename for file-based logging
+  optional string log_filename = 2;
   // Data loader configuration
-  optional DataLoaderConfig data_loader = 2;
+  optional DataLoaderConfig data_loader = 3;
   // Training configuration
-  optional TrainingConfig training = 3;
+  optional TrainingConfig training = 4;
   // Model configuration
-  optional ModelConfig model = 4;
+  optional ModelConfig model = 5;
   // Export configuration
-  optional ExportConfig export = 5;
+  optional ExportConfig export = 6;
 }

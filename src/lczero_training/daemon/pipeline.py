@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import cast
 
+import jax
 import orbax.checkpoint as ocp
 import requests
 from dotenv import load_dotenv
@@ -45,6 +46,40 @@ def _make_dataloader(config: DataLoaderConfig) -> DataLoader:
     return DataLoader(config_bytes)
 
 
+def _configure_file_logging(config: RootConfig) -> None:
+    """Configure file logging if log_filename is specified in config."""
+    if config.HasField("log_filename"):
+        file_handler = logging.FileHandler(config.log_filename)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(levelname).1s%(asctime)s.%(msecs)03d %(name)s "
+                "%(filename)s:%(lineno)d] %(message)s",
+                datefmt="%m%d %H:%M:%S",
+            )
+        )
+        logging.getLogger().addHandler(file_handler)
+        logger.info(f"Added file logging to {config.log_filename}")
+
+
+def _log_jax_system_info() -> None:
+    """Log JAX system information including devices and backend details."""
+    devices = jax.devices()
+    local_devices = jax.local_devices()
+    device_counts: dict[str, int] = {}
+    for device in devices:
+        device_type = device.device_kind
+        device_counts[device_type] = device_counts.get(device_type, 0) + 1
+
+    logger.info(f"JAX Backend: {jax.default_backend()}")
+    logger.info(
+        f"JAX Devices: {len(devices)} total, {len(local_devices)} local"
+    )
+    for device_type, count in device_counts.items():
+        logger.info(f"  {device_type}: {count}")
+    for i, device in enumerate(local_devices):
+        logger.info(f"  Local device {i}: {device}")
+
+
 @dataclasses.dataclass
 class _TrainingCycleState:
     start_time: float = dataclasses.field(default_factory=time.time)
@@ -71,6 +106,7 @@ class TrainingPipeline:
     def __init__(self, config_filepath: str) -> None:
         logger.info(f"Loading config from {config_filepath}")
         self._config = self._load_config(config_filepath)
+        _configure_file_logging(self._config)
         self._schedule = self._config.training.schedule
         self._chunks_per_network = self._schedule.chunks_per_network
         self._num_steps_per_epoch = self._schedule.steps_per_network
@@ -126,6 +162,8 @@ class TrainingPipeline:
         self._data_loader.set_chunk_anchor(
             self._training_state.last_chunk_source
         )
+
+        _log_jax_system_info()
 
     def run(self) -> None:
         logging.info("Starting DataLoader")
