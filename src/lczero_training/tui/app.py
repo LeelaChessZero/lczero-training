@@ -63,11 +63,16 @@ class TrainingTuiApp(App):
             required=True,
             help="Path to the training configuration file",
         )
+        parser.add_argument(
+            "--logfile",
+            help="Path to the log file for saving TUI output",
+        )
 
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
     _communicator: AsyncCommunicator
     _config_file: str
+    _logfile: Optional[str]
     _data_pipeline_pane: DataPipelinePane
     _training_schedule_widget: TrainingScheduleWidget
 
@@ -92,6 +97,7 @@ class TrainingTuiApp(App):
 
         # Consume configuration from the args object
         self._config_file: str = args.config
+        self._logfile: Optional[str] = args.logfile
 
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""
@@ -133,7 +139,9 @@ class TrainingTuiApp(App):
             jax_training_pane.border_title = "JAX Training Status"
             yield jax_training_pane
 
-        yield StreamingLogPane(stream=self._log_stream)
+        yield StreamingLogPane(
+            stream=self._log_stream, logfile_path=self._logfile
+        )
         yield Footer()
 
     def on_mount(self) -> None:
