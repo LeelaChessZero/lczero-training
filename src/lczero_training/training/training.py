@@ -1,4 +1,7 @@
+import datetime
+import gzip
 import logging
+import os
 import sys
 from functools import partial
 from typing import Callable, Dict, Generator, Tuple, cast
@@ -14,6 +17,10 @@ from google.protobuf import text_format
 from jax import tree_util
 from jax.sharding import PartitionSpec as P
 
+from lczero_training.convert.jax_to_leela import (
+    LeelaExportOptions,
+    jax_to_leela,
+)
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
@@ -201,8 +208,32 @@ def train(config_filename: str) -> None:
         graphdef=model,
         loss_fn=LczeroLoss(config=config.training.losses),
     )
-    training.run(
+    new_state = training.run(
         jit_state,
         from_dataloader(make_dataloader(config.data_loader)),
-        30,
+        config.training.schedule.steps_per_network,
     )
+
+    if config.export.HasField("path"):
+        date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        export_filename = os.path.join(
+            config.export.path,
+            f"lc0-{date_str}-{new_state.step:08d}.pb.gz",
+        )
+
+        logging.info(f"Exporting model to {export_filename}")
+
+        options = LeelaExportOptions(
+            min_version="0.28",
+            num_heads=training_state.num_heads,
+            license=None,
+        )
+        net = jax_to_leela(
+            jax_weights=new_state.model_state,
+            export_options=options,
+        )
+        logging.info(f"Writing model to {export_filename}")
+        os.makedirs(config.export.path, exist_ok=True)
+        with gzip.open(export_filename, "wb") as f:
+            f.write(net.SerializeToString())
+        logging.info(f"Finished writing model to {export_filename}")

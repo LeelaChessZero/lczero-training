@@ -197,7 +197,7 @@ class TrainingPipeline:
         logging.info(f"Exporting model to {export_filename}")
 
         options = LeelaExportOptions(
-            min_version="0.28",
+            min_version="0.31",
             num_heads=self._training_state.num_heads,
             license=None,
         )
