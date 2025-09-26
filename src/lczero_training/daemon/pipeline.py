@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import gzip
 import logging
 import os
@@ -189,9 +190,10 @@ class TrainingPipeline:
     def _export_model(self) -> str | None:
         if not self._config.export.HasField("path"):
             return None
+        date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         export_filename = os.path.join(
             self._config.export.path,
-            f"lc0-{self._training_state.jit_state.step:08d}.pb.gz",
+            f"lc0-{date_str}-{self._training_state.jit_state.step:08d}.pb.gz",
         )
 
         logging.info(f"Exporting model to {export_filename}")
@@ -202,7 +204,7 @@ class TrainingPipeline:
             license=None,
         )
         net = jax_to_leela(
-            jax_weights=nnx.state(self._model),
+            jax_weights=self._training_state.jit_state.model_state,
             export_options=options,
         )
         logging.info(f"Writing model to {export_filename}")
