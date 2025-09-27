@@ -168,11 +168,15 @@ Queue<T>::Queue(size_t capacity, OverflowBehavior overflow_behavior)
 template <typename T>
 Queue<T>::Producer::Producer(Queue<T>& queue) : queue_(&queue) {
   // Producer count is incremented in CreateProducer()
+  LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+            << static_cast<const void*>(this) << " constructed.";
 }
 
 template <typename T>
 Queue<T>::Producer::~Producer() {
   if (queue_) {
+    LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+              << static_cast<const void*>(this) << " destructing.";
     queue_->RemoveProducer();
   }
 }
@@ -218,6 +222,8 @@ void Queue<T>::Producer::Put(absl::Span<T> items) {
 template <typename T>
 void Queue<T>::Producer::Close() {
   if (queue_) {
+    LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+              << static_cast<const void*>(this) << " close invoked.";
     queue_->RemoveProducer();
     queue_ = nullptr;
   }
