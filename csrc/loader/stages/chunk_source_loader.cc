@@ -73,6 +73,8 @@ void ChunkSourceLoader::Stop() {
 void ChunkSourceLoader::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread
   auto producer = output_queue_.CreateProducer();
+  LOG(INFO) << "ChunkSourceLoader worker@" << static_cast<const void*>(context)
+            << " started.";
 
   try {
     while (true) {
@@ -111,11 +113,21 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
       }
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "ChunkSourceLoader worker stopping, input queue closed.";
+    LOG(INFO) << "ChunkSourceLoader worker@"
+              << static_cast<const void*>(context)
+              << " stopping, queue closed.";
     // Input queue is closed, the local producer will be destroyed when this
     // function exits which may close the output queue if this is the last
     // producer
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "ChunkSourceLoader worker@"
+               << static_cast<const void*>(context)
+               << " exiting due to exception: " << e.what();
+    throw;
   }
+
+  LOG(INFO) << "ChunkSourceLoader worker@" << static_cast<const void*>(context)
+            << " exiting loop.";
 }
 
 StageMetricProto ChunkSourceLoader::FlushMetrics() {
