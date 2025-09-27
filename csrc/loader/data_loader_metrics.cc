@@ -5,13 +5,32 @@
 #include "loader/data_loader_metrics.h"
 
 #include <algorithm>
+#include <vector>
 
+#include "absl/strings/string_view.h"
 #include "utils/metrics/statistics_metric.h"
 
 namespace lczero {
 namespace training {
+namespace {
+
+template <typename ProtoT>
+ProtoT* FindByName(std::vector<ProtoT>* entries, absl::string_view name) {
+  if (entries == nullptr || name.empty()) {
+    return nullptr;
+  }
+  for (auto& entry : *entries) {
+    if (entry.has_name() && entry.name() == name) {
+      return &entry;
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
 
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
+  if (src.has_name()) dest.set_name(src.name());
   dest.set_put_count(dest.put_count() + src.put_count());
   dest.set_get_count(dest.get_count() + src.get_count());
   dest.set_drop_count(dest.drop_count() + src.drop_count());
@@ -70,15 +89,55 @@ void UpdateFrom(TensorGeneratorMetricsProto& dest,
   UpdateFrom(*dest.mutable_queue(), src.queue());
 }
 
+void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
+  if (src.has_name()) dest.set_name(src.name());
+  if (src.has_file_path_provider()) {
+    UpdateFrom(*dest.mutable_file_path_provider(), src.file_path_provider());
+  }
+  if (src.has_chunk_source_loader()) {
+    UpdateFrom(*dest.mutable_chunk_source_loader(), src.chunk_source_loader());
+  }
+  if (src.has_shuffling_chunk_pool()) {
+    UpdateFrom(*dest.mutable_shuffling_chunk_pool(),
+               src.shuffling_chunk_pool());
+  }
+  if (src.has_chunk_unpacker()) {
+    UpdateFrom(*dest.mutable_chunk_unpacker(), src.chunk_unpacker());
+  }
+  if (src.has_shuffling_frame_sampler()) {
+    UpdateFrom(*dest.mutable_shuffling_frame_sampler(),
+               src.shuffling_frame_sampler());
+  }
+  if (src.has_tensor_generator()) {
+    UpdateFrom(*dest.mutable_tensor_generator(), src.tensor_generator());
+  }
+
+  for (const auto& queue_metrics : src.output_queue_metrics()) {
+    QueueMetricProto* dest_queue =
+        queue_metrics.has_name()
+            ? FindByName(dest.mutable_output_queue_metrics(),
+                         queue_metrics.name())
+            : nullptr;
+    if (dest_queue == nullptr) {
+      dest_queue = dest.add_output_queue_metrics();
+    }
+    UpdateFrom(*dest_queue, queue_metrics);
+  }
+}
+
 void UpdateFrom(DataLoaderMetricsProto& dest,
                 const DataLoaderMetricsProto& src) {
-  UpdateFrom(*dest.mutable_file_path_provider(), src.file_path_provider());
-  UpdateFrom(*dest.mutable_chunk_source_loader(), src.chunk_source_loader());
-  UpdateFrom(*dest.mutable_shuffling_chunk_pool(), src.shuffling_chunk_pool());
-  UpdateFrom(*dest.mutable_chunk_unpacker(), src.chunk_unpacker());
-  UpdateFrom(*dest.mutable_shuffling_frame_sampler(),
-             src.shuffling_frame_sampler());
-  UpdateFrom(*dest.mutable_tensor_generator(), src.tensor_generator());
+  for (const auto& stage_metrics : src.stage_metrics()) {
+    StageMetricProto* dest_stage =
+        stage_metrics.has_name()
+            ? FindByName(dest.mutable_stage_metrics(), stage_metrics.name())
+            : nullptr;
+    if (dest_stage == nullptr) {
+      dest_stage = dest.add_stage_metrics();
+    }
+
+    UpdateFrom(*dest_stage, stage_metrics);
+  }
 }
 
 }  // namespace training

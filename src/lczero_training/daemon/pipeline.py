@@ -26,6 +26,7 @@ from lczero_training.training.state import JitTrainingState, TrainingState
 from lczero_training.training.training import Training, from_dataloader
 from proto.data_loader_config_pb2 import DataLoaderConfig
 from proto.root_config_pb2 import RootConfig
+from proto.stage_control_pb2 import StageControlRequest, StageControlResponse
 from proto.training_config_pb2 import ScheduleConfig
 
 from .protocol.messages import TrainingScheduleData, TrainingStage
@@ -160,9 +161,7 @@ class TrainingPipeline:
 
         logger.info("Creating data loader")
         self._data_loader = _make_dataloader(self._config.data_loader)
-        self._data_loader.set_chunk_anchor(
-            self._training_state.last_chunk_source
-        )
+        self._set_chunk_anchor(self._training_state.last_chunk_source)
 
         _log_jax_system_info()
 
@@ -172,7 +171,7 @@ class TrainingPipeline:
 
         while True:
             self._wait_for_chunks()
-            new_anchor, used_chunks = self._data_loader.reset_chunk_anchor()
+            new_anchor, used_chunks = self._reset_chunk_anchor()
             logging.info(f"{new_anchor=} {used_chunks=}")
             self._training_state = self._training_state.replace(
                 last_chunk_source=new_anchor
@@ -263,9 +262,7 @@ class TrainingPipeline:
         # Record training start
         self._cycle_state.current_training_start_time = time.time()
         self._cycle_state.current_stage = TrainingStage.TRAINING
-        self._cycle_state.chunks_at_training_start = (
-            self._data_loader.chunks_since_anchor()
-        )
+        self._cycle_state.chunks_at_training_start = self._chunks_since_anchor()
 
         new_jit_state = self._training.run(
             jit_state=self._training_state.jit_state,
@@ -307,11 +304,12 @@ class TrainingPipeline:
         return self._data_loader
 
     def _wait_for_chunks(self) -> None:
+        current_chunks = self._chunks_since_anchor()
         logger.info(
             f"Waiting for {self._chunks_to_wait} chunks. "
-            f"got {self._data_loader.chunks_since_anchor()} so far"
+            f"got {current_chunks} so far"
         )
-        while self._data_loader.chunks_since_anchor() < self._chunks_to_wait:
+        while self._chunks_since_anchor() < self._chunks_to_wait:
             time.sleep(1)
         logger.info("Done waiting for enough chunks")
 
@@ -336,7 +334,7 @@ class TrainingPipeline:
         # Calculate new chunks since training start
         new_chunks_since_training_start = max(
             0,
-            self._data_loader.chunks_since_anchor()
+            self._chunks_since_anchor()
             - self._cycle_state.chunks_at_training_start,
         )
 
@@ -351,6 +349,37 @@ class TrainingPipeline:
             current_cycle_time_seconds=current_cycle_time,
             previous_cycle_time_seconds=self._cycle_state.previous_cycle_duration,
         )
+
+    def _send_chunk_pool_control(
+        self, request: StageControlRequest
+    ) -> StageControlResponse | None:
+        responses = self._data_loader.send_control_message(request)
+        for _, response in responses:
+            if response.HasField("chunk_pool_response"):
+                return response
+        return None
+
+    def _reset_chunk_anchor(self) -> tuple[str, int]:
+        request = StageControlRequest()
+        request.chunk_pool_request.reset_chunk_anchor = True
+        response = self._send_chunk_pool_control(request)
+        if not response or not response.HasField("chunk_pool_response"):
+            return "", 0
+        chunk_response = response.chunk_pool_response
+        return chunk_response.chunk_anchor, chunk_response.chunks_since_anchor
+
+    def _chunks_since_anchor(self) -> int:
+        request = StageControlRequest()
+        request.chunk_pool_request.SetInParent()
+        response = self._send_chunk_pool_control(request)
+        if not response or not response.HasField("chunk_pool_response"):
+            return 0
+        return response.chunk_pool_response.chunks_since_anchor
+
+    def _set_chunk_anchor(self, anchor: str) -> None:
+        request = StageControlRequest()
+        request.chunk_pool_request.set_chunk_anchor = anchor or ""
+        self._send_chunk_pool_control(request)
 
     def _load_config(self, config_filepath: str) -> RootConfig:
         config_path = Path(config_filepath)

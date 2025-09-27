@@ -12,12 +12,34 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+template <typename T>
+class PassthroughStage : public Stage {
+ public:
+  explicit PassthroughStage(Queue<T>* queue) : queue_(queue) {}
+
+  void Start() override {}
+  void Stop() override {}
+  StageMetricProto FlushMetrics() override { return StageMetricProto(); }
+  QueueBase* GetOutput(std::string_view name = "") override {
+    (void)name;
+    return queue_;
+  }
+
+ private:
+  Queue<T>* queue_;
+};
+
+}  // namespace
+
 class ChunkUnpackerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<std::string>>(10);
     config_.set_threads(1);
     config_.set_queue_capacity(10);
+    config_.set_input("source");
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -44,7 +66,9 @@ class ChunkUnpackerTest : public ::testing::Test {
 };
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   V6TrainingData test_frame = CreateTestFrame(6);
@@ -61,7 +85,9 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   std::vector<V6TrainingData> test_frames = {
@@ -81,7 +107,9 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -106,7 +134,9 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -118,7 +148,9 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -132,7 +164,9 @@ TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
-  ChunkUnpacker unpacker(input_queue_.get(), config_);
+  PassthroughStage<std::string> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   // Close input queue without sending data

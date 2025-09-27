@@ -23,9 +23,10 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
   return nullptr;
 }
 
-ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
-                                     const ChunkSourceLoaderConfig& config)
-    : input_queue_(input_queue),
+ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
+                                     const StageList& existing_stages)
+    : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config,
+                                                           existing_stages),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkSourceLoader with " << config.threads()
@@ -38,11 +39,14 @@ ChunkSourceLoader::ChunkSourceLoader(Queue<InputType>* input_queue,
   }
 }
 
-ChunkSourceLoader::~ChunkSourceLoader() {
-  LOG(INFO) << "ChunkSourceLoader shutting down.";
-}
+ChunkSourceLoader::~ChunkSourceLoader() { Stop(); }
 
 Queue<ChunkSourceLoader::OutputType>* ChunkSourceLoader::output() {
+  return &output_queue_;
+}
+
+QueueBase* ChunkSourceLoader::GetOutput(std::string_view name) {
+  (void)name;
   return &output_queue_;
 }
 
@@ -53,6 +57,19 @@ void ChunkSourceLoader::Start() {
   }
 }
 
+void ChunkSourceLoader::Stop() {
+  bool expected = false;
+  if (!stop_requested_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  LOG(INFO) << "Stopping ChunkSourceLoader.";
+  input_queue()->Close();
+  thread_pool_.WaitAll();
+  output_queue_.Close();
+  LOG(INFO) << "ChunkSourceLoader stopped.";
+}
+
 void ChunkSourceLoader::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread
   auto producer = output_queue_.CreateProducer();
@@ -61,7 +78,7 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
     while (true) {
       auto file = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue_->Get();
+        return input_queue()->Get();
       }();
 
       if (file.message_type ==
@@ -95,27 +112,28 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
   }
 }
 
-ChunkSourceLoaderMetricsProto ChunkSourceLoader::FlushMetrics() {
-  ChunkSourceLoaderMetricsProto result;
+StageMetricProto ChunkSourceLoader::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_chunk_source_loader();
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*result.mutable_load(),
+    UpdateFrom(*metrics->mutable_load(),
                context->load_metric_updater.FlushMetrics());
   }
-  // Get queue metrics.
-  *result.mutable_queue() = MetricsFromQueue(output_queue_);
 
   // Atomically get and reset skipped files count.
-  result.set_skipped_files_count(skipped_files_count_.exchange(0));
+  metrics->set_skipped_files_count(skipped_files_count_.exchange(0));
 
   // Get the last chunk key.
   {
     absl::MutexLock lock(&last_chunk_key_mutex_);
     if (!last_chunk_key_.empty()) {
-      result.set_last_chunk_key(last_chunk_key_);
+      metrics->set_last_chunk_key(last_chunk_key_);
     }
   }
 
-  return result;
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 }  // namespace training

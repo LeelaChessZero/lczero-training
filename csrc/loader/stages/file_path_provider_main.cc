@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
   std::cin.get();
 
   // Close the queue and wait for consumer to finish
-  file_path_provider.Close();
+  file_path_provider.Stop();
   consumer_thread.join();
 
   return 0;

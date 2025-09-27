@@ -11,8 +11,9 @@ namespace lczero {
 namespace training {
 
 ShufflingFrameSampler::ShufflingFrameSampler(
-    Queue<InputType>* input_queue, const ShufflingFrameSamplerConfig& config)
-    : input_queue_(input_queue),
+    const ShufflingFrameSamplerConfig& config, const StageList& existing_stages)
+    : SingleInputStage<ShufflingFrameSamplerConfig, InputType>(config,
+                                                               existing_stages),
       output_queue_(config.queue_capacity()),
       reservoir_size_per_thread_(config.reservoir_size_per_thread()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
@@ -27,11 +28,14 @@ ShufflingFrameSampler::ShufflingFrameSampler(
   }
 }
 
-ShufflingFrameSampler::~ShufflingFrameSampler() {
-  LOG(INFO) << "ShufflingFrameSampler shutting down.";
-}
+ShufflingFrameSampler::~ShufflingFrameSampler() { Stop(); }
 
 Queue<ShufflingFrameSampler::OutputType>* ShufflingFrameSampler::output() {
+  return &output_queue_;
+}
+
+QueueBase* ShufflingFrameSampler::GetOutput(std::string_view name) {
+  (void)name;
   return &output_queue_;
 }
 
@@ -40,6 +44,19 @@ void ShufflingFrameSampler::Start() {
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
     thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
+}
+
+void ShufflingFrameSampler::Stop() {
+  bool expected = false;
+  if (!stop_requested_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  LOG(INFO) << "Stopping ShufflingFrameSampler.";
+  input_queue()->Close();
+  thread_pool_.WaitAll();
+  output_queue_.Close();
+  LOG(INFO) << "ShufflingFrameSampler stopped.";
 }
 
 void ShufflingFrameSampler::Worker(ThreadContext* context) {
@@ -53,7 +70,7 @@ void ShufflingFrameSampler::Worker(ThreadContext* context) {
     LOG(INFO) << "ShufflingFrameSampler worker prefilling reservoir";
     absl::c_generate(reservoir, [this, context]() {
       LoadMetricPauser pauser(context->load_metric_updater);
-      return input_queue_->Get();
+      return input_queue()->Get();
     });
 
     // Phase 2: Main sampling loop
@@ -77,19 +94,21 @@ void ShufflingFrameSampler::MainSamplingLoop(
     }
     {
       LoadMetricPauser pauser(context->load_metric_updater);
-      reservoir[random_index] = input_queue_->Get();
+      reservoir[random_index] = input_queue()->Get();
     }
   }
 }
 
-ShufflingFrameSamplerMetricsProto ShufflingFrameSampler::FlushMetrics() {
-  ShufflingFrameSamplerMetricsProto result;
+StageMetricProto ShufflingFrameSampler::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_shuffling_frame_sampler();
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*result.mutable_load(),
+    UpdateFrom(*metrics->mutable_load(),
                context->load_metric_updater.FlushMetrics());
   }
-  *result.mutable_queue() = MetricsFromQueue(output_queue_);
-  return result;
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 }  // namespace training

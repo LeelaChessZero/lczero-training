@@ -6,9 +6,9 @@ package lczero.training;
 // training files. Maps to FilePathProviderOptions in
 // csrc/loader/chunk_feed/file_path_provider.h
 message FilePathProviderConfig {
-  // Size of the internal file queue
+  // Size of the internal file queue.
   optional uint64 queue_capacity = 1 [default = 16];
-  // Path to directory containing training data files
+  // Path to directory containing training data files.
   optional string directory = 2;
 }
 
@@ -16,72 +16,84 @@ message FilePathProviderConfig {
 // sources. Maps to ChunkSourceLoaderOptions in
 // csrc/loader/chunk_feed/chunk_source_loader.h
 message ChunkSourceLoaderConfig {
-  // Number of worker threads for loading
-  optional uint64 threads = 1 [default = 1];
-  // Size of the output queue
-  optional uint64 queue_capacity = 2 [default = 16];
+  // Name of the stage providing input to this loader.
+  optional string input = 1;
+  // Number of worker threads for loading.
+  optional uint64 threads = 2 [default = 1];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 3 [default = 16];
 }
 
 // Configuration for shuffling chunk pool that manages chunk shuffling and
 // loading. Maps to ShufflingChunkPoolOptions in
 // csrc/loader/chunk_feed/shuffling_chunk_pool.h
 message ShufflingChunkPoolConfig {
-  // Size of the chunk shuffle buffer
-  optional uint64 chunk_pool_size = 1 [default = 100000];
-  // Threads used during startup indexing
-  optional uint64 startup_indexing_threads = 2 [default = 4];
-  // Threads for ongoing indexing operations
-  optional uint64 indexing_threads = 3 [default = 4];
-  // Threads for loading chunk data
-  optional uint64 chunk_loading_threads = 4 [default = 4];
-  // Size of the output queue
-  optional uint64 queue_capacity = 5 [default = 16];
+  // Name of the stage providing input to this pool.
+  optional string input = 1;
+  // Size of the chunk shuffle buffer.
+  optional uint64 chunk_pool_size = 2 [default = 100000];
+  // Threads used during startup indexing.
+  optional uint64 startup_indexing_threads = 3 [default = 4];
+  // Threads for ongoing indexing operations.
+  optional uint64 indexing_threads = 4 [default = 4];
+  // Threads for loading chunk data.
+  optional uint64 chunk_loading_threads = 5 [default = 4];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 6 [default = 16];
 }
 
 // Configuration for chunk unpacker that extracts frames from packed chunks.
 // Maps to ChunkUnpackerOptions in csrc/loader/chunk_feed/chunk_unpacker.h
 message ChunkUnpackerConfig {
-  // Number of worker threads for unpacking
-  optional uint64 threads = 1 [default = 1];
-  // Size of the output queue
-  optional uint64 queue_capacity = 2 [default = 16];
+  // Name of the stage providing input to this unpacker.
+  optional string input = 1;
+  // Number of worker threads for unpacking.
+  optional uint64 threads = 2 [default = 1];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 3 [default = 16];
 }
 
 // Configuration for shuffling frame sampler using reservoir sampling.
 // Maps to ShufflingFrameSamplerOptions in csrc/loader/shuffling_frame_sampler.h
 message ShufflingFrameSamplerConfig {
-  // Number of worker threads
-  optional uint64 threads = 1 [default = 1];
-  // Size of sampling reservoir per thread
-  optional uint64 reservoir_size_per_thread = 2 [default = 1000000];
-  // Size of the output queue
-  optional uint64 queue_capacity = 3 [default = 16];
+  // Name of the stage providing input to this sampler.
+  optional string input = 1;
+  // Number of worker threads.
+  optional uint64 threads = 2 [default = 1];
+  // Size of sampling reservoir per thread.
+  optional uint64 reservoir_size_per_thread = 3 [default = 1000000];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 4 [default = 16];
 }
 
 // Configuration for tensor generator that converts frames to batched tensors.
 // Maps to TensorGeneratorOptions in csrc/loader/tensor_generator.h
 message TensorGeneratorConfig {
-  // Number of worker threads for tensor generation
-  optional uint64 threads = 1 [default = 1];
-  // Batch size for tensor generation
-  optional uint64 batch_size = 2 [default = 1024];
-  // Size of the output queue
-  optional uint64 queue_capacity = 3 [default = 4];
+  // Name of the stage providing input to this generator.
+  optional string input = 1;
+  // Number of worker threads for tensor generation.
+  optional uint64 threads = 2 [default = 1];
+  // Batch size for tensor generation.
+  optional uint64 batch_size = 3 [default = 1024];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 4 [default = 4];
+}
+
+// Stage-level configuration providing a name and stage-specific options.
+message StageConfig {
+  // Unique name used to reference the stage output.
+  optional string name = 1;
+  optional FilePathProviderConfig file_path_provider = 2;
+  optional ChunkSourceLoaderConfig chunk_source_loader = 3;
+  optional ShufflingChunkPoolConfig shuffling_chunk_pool = 4;
+  optional ChunkUnpackerConfig chunk_unpacker = 5;
+  optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 6;
+  optional TensorGeneratorConfig tensor_generator = 7;
 }
 
 // Main configuration class for the DataLoader containing all component
-// configurations. Maps to DataLoaderConfig in csrc/loader/data_loader.h
+// configurations.
 message DataLoaderConfig {
-  // File path provider configuration
-  optional FilePathProviderConfig file_path_provider = 1;
-  // Chunk source loader configuration
-  optional ChunkSourceLoaderConfig chunk_source_loader = 2;
-  // Shuffling chunk pool configuration
-  optional ShufflingChunkPoolConfig shuffling_chunk_pool = 3;
-  // Chunk unpacker configuration
-  optional ChunkUnpackerConfig chunk_unpacker = 4;
-  // Shuffling frame sampler configuration
-  optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 5;
-  // Tensor generator configuration
-  optional TensorGeneratorConfig tensor_generator = 6;
+  // Ordered list of stage configurations comprising the pipeline.
+  repeated StageConfig stage = 1;
 }

@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "loader/stages/stage.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"
@@ -28,7 +29,7 @@ namespace training {
 // registered observers when new files are either closed after writing or
 // renamed into.
 // Uses background thread to monitor the directory.
-class FilePathProvider {
+class FilePathProvider : public Stage {
  public:
   using Path = std::filesystem::path;
 
@@ -41,20 +42,23 @@ class FilePathProvider {
     Path filepath;
     MessageType message_type;
   };
-  explicit FilePathProvider(const FilePathProviderConfig& config);
+  explicit FilePathProvider(const FilePathProviderConfig& config,
+                            const StageList& existing_stages = {});
   ~FilePathProvider();
 
   // Returns the output queue for this stage
   Queue<File>* output();
 
   // Starts monitoring the directory
-  void Start();
+  void Start() override;
 
   // Closes the output queue, signaling completion
-  void Close();
+  void Stop() override;
 
   // Returns current metrics and clears them.
-  FilePathProviderMetricsProto FlushMetrics();
+  StageMetricProto FlushMetrics() override;
+
+  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   // Starts monitoring the directory.

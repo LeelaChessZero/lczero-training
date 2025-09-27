@@ -4,35 +4,58 @@
 
 name: "little-teapot"
 data_loader {
-  file_path_provider {
-    # Directory with training data files.
-    directory: "/home/crem/tmp/2025-07/lczero-training/data2" 
-    queue_capacity: 16 # Internal file queue size
+  stage {
+    name: "file_path_provider"
+    file_path_provider {
+      # Directory with training data files.
+      directory: "/home/crem/tmp/2025-07/lczero-training/data2"
+      queue_capacity: 16 # Internal file queue size
+    }
   }
-  chunk_source_loader {
-    threads: 1          # Threads for loading chunks
-    queue_capacity: 16  # Output queue for chunk sources
+  stage {
+    name: "chunk_source_loader"
+    chunk_source_loader {
+      input: "file_path_provider"
+      threads: 1          # Threads for loading chunks
+      queue_capacity: 16  # Output queue for chunk sources
+    }
   }
-  shuffling_chunk_pool {
-    chunk_pool_size: 50000 # 00     # Shuffle buffer size (chunks in memory)
-    startup_indexing_threads: 4  # Threads for startup indexing
-    indexing_threads: 4          # Threads for ongoing indexing
-    chunk_loading_threads: 4     # Threads for loading chunk data
-    queue_capacity: 16           # Output queue for shuffled chunks
+  stage {
+    name: "shuffling_chunk_pool"
+    shuffling_chunk_pool {
+      input: "chunk_source_loader"
+      chunk_pool_size: 50000     # Shuffle buffer size (chunks in memory)
+      startup_indexing_threads: 4  # Threads for startup indexing
+      indexing_threads: 4          # Threads for ongoing indexing
+      chunk_loading_threads: 4     # Threads for loading chunk data
+      queue_capacity: 16           # Output queue for shuffled chunks
+    }
   }
-  chunk_unpacker {
-    threads: 1          # Threads for unpacking chunks
-    queue_capacity: 16  # Output queue for unpacked frames
+  stage {
+    name: "chunk_unpacker"
+    chunk_unpacker {
+      input: "shuffling_chunk_pool"
+      threads: 1          # Threads for unpacking chunks
+      queue_capacity: 16  # Output queue for unpacked frames
+    }
   }
-  shuffling_frame_sampler {
-    threads: 1                          # Threads for frame sampling
-    reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
-    queue_capacity: 16                  # Output queue for sampled frames
+  stage {
+    name: "shuffling_frame_sampler"
+    shuffling_frame_sampler {
+      input: "chunk_unpacker"
+      threads: 1                          # Threads for frame sampling
+      reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
+      queue_capacity: 16                  # Output queue for sampled frames
+    }
   }
-  tensor_generator {
-    threads: 1         # Threads for tensor generation
-    batch_size: 128    # Batch size for tensors
-    queue_capacity: 8  # Output queue for batched tensors
+  stage {
+    name: "tensor_generator"
+    tensor_generator {
+      input: "shuffling_frame_sampler"
+      threads: 1         # Threads for tensor generation
+      batch_size: 128    # Batch size for tensors
+      queue_capacity: 8  # Output queue for batched tensors
+    }
   }
 }
 model {

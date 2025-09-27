@@ -1,0 +1,21 @@
+syntax = "proto2";
+
+package lczero.training;
+
+message ShufflingChunkPoolControlRequest {
+  optional bool reset_chunk_anchor = 1;
+  optional string set_chunk_anchor = 2;
+}
+
+message StageControlRequest {
+  optional ShufflingChunkPoolControlRequest chunk_pool_request = 1;
+}
+
+message ShufflingChunkPoolControlResponse {
+  optional string chunk_anchor = 1;
+  optional int32 chunks_since_anchor = 2;
+}
+
+message StageControlResponse {
+  optional ShufflingChunkPoolControlResponse chunk_pool_response = 1;
+}

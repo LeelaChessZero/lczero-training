@@ -2,6 +2,7 @@
 // ABOUTME: Takes V6TrainingData frames and outputs them in randomized order.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "absl/random/random.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/stages/stage.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
@@ -23,18 +25,22 @@ using FrameType = V6TrainingData;
 // Worker that implements reservoir sampling for training frames.
 // Takes V6TrainingData frames as input and outputs them in shuffled order
 // using reservoir sampling algorithm.
-class ShufflingFrameSampler {
+class ShufflingFrameSampler
+    : public SingleInputStage<ShufflingFrameSamplerConfig, FrameType> {
  public:
   using InputType = FrameType;
   using OutputType = FrameType;
 
-  ShufflingFrameSampler(Queue<InputType>* input_queue,
-                        const ShufflingFrameSamplerConfig& config);
+  ShufflingFrameSampler(const ShufflingFrameSamplerConfig& config,
+                        const StageList& existing_stages);
   ~ShufflingFrameSampler();
 
   Queue<OutputType>* output();
-  void Start();
-  ShufflingFrameSamplerMetricsProto FlushMetrics();
+  void Start() override;
+  void Stop() override;
+  StageMetricProto FlushMetrics() override;
+
+  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   struct ThreadContext {
@@ -46,7 +52,6 @@ class ShufflingFrameSampler {
                         Queue<OutputType>::Producer& producer,
                         ThreadContext* context);
 
-  Queue<InputType>* input_queue_;
   Queue<OutputType> output_queue_;
   size_t reservoir_size_per_thread_;
   absl::BitGen gen_;
@@ -54,6 +59,7 @@ class ShufflingFrameSampler {
   // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   ThreadPool thread_pool_;
+  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace training
