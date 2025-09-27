@@ -94,8 +94,7 @@ PYBIND11_MODULE(_lczero_training, m) {
           "Get serialized metrics for aggregate duration and actual duration "
           "as (bytes, float)")
       .def("start", &DataLoader::Start, "Start the data loader processing")
-      .def("stop", &DataLoader::Stop, py::arg("graceful_drain") = false,
-           "Stop the data loader")
+      .def("stop", &DataLoader::Stop, "Stop the data loader")
       .def(
           "reset_chunk_anchor",
           [](DataLoader& self) {

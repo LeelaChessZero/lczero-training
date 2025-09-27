@@ -44,7 +44,7 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
   LOG(INFO) << "DataLoader initialized with " << stages_.size() << " stage(s).";
 }
 
-DataLoader::~DataLoader() { Stop(false); }
+DataLoader::~DataLoader() { Stop(); }
 
 void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
   AddStages(ParseConfig(serialized_data_loader_config));
@@ -169,14 +169,9 @@ void DataLoader::Start() {
 
 TensorTuple DataLoader::GetNext() { return GetOutputQueue()->Get(); }
 
-void DataLoader::Stop(bool graceful_drain) {
+void DataLoader::Stop() {
   if (stopped_) {
     return;
-  }
-
-  if (graceful_drain) {
-    LOG(WARNING) << "Graceful drain is no longer supported. Proceeding with "
-                    "immediate stop.";
   }
 
   LOG(INFO) << "Stopping DataLoader.";
