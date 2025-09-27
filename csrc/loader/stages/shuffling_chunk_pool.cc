@@ -110,6 +110,8 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
 
     if (chunk_source_with_phase.message_type ==
         FilePathProvider::MessageType::kInitialScanComplete) {
+      LOG(INFO)
+          << "ShufflingChunkPool received initial scan completion marker.";
       break;
     }
 
@@ -120,6 +122,9 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
           std::move(chunk_source_with_phase.source));
     }
   }
+
+  LOG(INFO) << "ShufflingChunkPool initial directory walk produced "
+            << uninitialized_sources.size() << " chunk source candidate(s).";
 
   // Sort in descending order (newest first).
   std::sort(uninitialized_sources.begin(), uninitialized_sources.end(),
@@ -164,7 +169,13 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   }
   indexing_pool.WaitAll();
 
+  LOG(INFO) << "ShufflingChunkPool indexed " << total_chunks.load()
+            << " chunk(s) across " << sources_to_keep
+            << " source(s) during startup.";
+
   if (total_chunks < chunk_pool_size_ && !output_queue_.IsClosed()) {
+    LOG(INFO) << "ShufflingChunkPool startup chunk requirement not met: "
+              << total_chunks.load() << " < " << chunk_pool_size_;
     throw std::runtime_error(
         absl::StrCat("Not enough chunks to initialize ShufflingChunkPool: ",
                      total_chunks.load(), " < ", chunk_pool_size_));
@@ -178,6 +189,8 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
 void ShufflingChunkPool::ProcessInputFiles(
     std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources) {
   // Initialize chunk sources from the initial scan.
+  size_t initial_window_sources = 0;
+  size_t initial_total_chunks = 0;
   {
     absl::MutexLock lock(&chunk_sources_mutex_);
     size_t start_chunk_index = 0;
@@ -199,8 +212,14 @@ void ShufflingChunkPool::ProcessInputFiles(
           total_chunks > chunk_pool_size_ ? total_chunks - chunk_pool_size_ : 0;
       stream_shuffler_.SetLowerBound(lower_bound);
       stream_shuffler_.SetUpperBound(total_chunks);
+      initial_total_chunks = total_chunks;
     }
+    initial_window_sources = chunk_sources_.size();
   }
+
+  LOG(INFO) << "ShufflingChunkPool initial window ready with "
+            << initial_window_sources << " source(s) totaling "
+            << initial_total_chunks << " chunk(s).";
 }
 
 void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {

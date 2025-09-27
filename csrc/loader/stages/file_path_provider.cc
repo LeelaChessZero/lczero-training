@@ -90,6 +90,9 @@ StageMetricProto FilePathProvider::FlushMetrics() {
 void FilePathProvider::AddDirectory(const Path& directory) {
   ScanDirectoryWithWatch(directory);
 
+  LOG(INFO) << "FilePathProvider registered " << directory
+            << "; active watch descriptors: " << watch_descriptors_.size();
+
   // Signal that initial scan is complete
   LOG(INFO) << "FilePathProvider initial scan complete";
   producer_.Put({{.filepath = Path{},
@@ -120,6 +123,12 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
     }
   }
 
+  const size_t initial_file_count = files.size();
+  const size_t subdirectory_count = subdirectories.size();
+  LOG(INFO) << "FilePathProvider scanned " << directory << " discovering "
+            << initial_file_count << " file(s) and " << subdirectory_count
+            << " subdirectory(ies) before watch reconciliation.";
+
   // Send notifications for discovered files
   constexpr size_t kBatchSize = 10000;
   std::vector<File> batch;
@@ -135,6 +144,11 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
     batch.push_back(
         {.filepath = filepath.string(), .message_type = MessageType::kFile});
     if (batch.size() >= kBatchSize) flush_batch();
+  }
+
+  if (initial_file_count > 0) {
+    LOG(INFO) << "FilePathProvider enqueued " << initial_file_count
+              << " file(s) from initial scan of " << directory;
   }
 
   // Step 3: Read from watch descriptor, skipping already discovered files
@@ -192,6 +206,8 @@ void FilePathProvider::ProcessWatchEventsForNewItems(
 
   // Send notifications for any new files discovered through watch events
   if (!new_files.empty()) {
+    LOG(INFO) << "FilePathProvider observed " << new_files.size()
+              << " new file(s) while reconciling race events.";
     producer_.Put(new_files);
   }
 }
@@ -267,9 +283,13 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;
+  size_t total_events = 0;
+  size_t total_enqueued = 0;
+  bool saw_events = false;
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
+    total_enqueued += files.size();
     producer.Put(files);
     files.clear();
   };
@@ -277,11 +297,13 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   while (true) {
     ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
     if (length <= 0) break;  // No more events to process
+    saw_events = true;
 
     ssize_t offset = 0;
     while (offset < length) {
       const struct inotify_event* event =
           reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
+      ++total_events;
       auto file = ProcessInotifyEvent(*event);
       if (file) files.push_back(*file);
       if (files.size() >= kNotifyBatchSize) flush_batch();
@@ -290,6 +312,12 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   }
 
   flush_batch();  // Flush any remaining files in the batch
+
+  if (saw_events) {
+    LOG(INFO) << "FilePathProvider processed " << total_events
+              << " inotify event(s) and enqueued " << total_enqueued
+              << " file notification(s).";
+  }
 }
 
 auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)

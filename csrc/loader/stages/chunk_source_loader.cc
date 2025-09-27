@@ -83,11 +83,15 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
 
       if (file.message_type ==
           FilePathProvider::MessageType::kInitialScanComplete) {
+        LOG(INFO)
+            << "ChunkSourceLoader received initial scan completion marker.";
         producer.Put({.source = nullptr, .message_type = file.message_type});
         continue;
       }
 
       // Create ChunkSource from the file.
+      LOG_EVERY_N(INFO, 1000)
+          << "ChunkSourceLoader preparing chunk source for " << file.filepath;
       auto source = CreateChunkSourceFromFile(file.filepath);
       if (source) {
         // Track the last chunk key.
@@ -101,6 +105,8 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(output));
       } else {
+        LOG_EVERY_N(INFO, 100)
+            << "ChunkSourceLoader skipping unsupported file: " << file.filepath;
         skipped_files_count_++;
       }
     }
