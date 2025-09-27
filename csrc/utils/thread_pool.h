@@ -2,8 +2,10 @@
 
 #include <cstddef>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <future>
+#include <iostream>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
@@ -50,6 +52,7 @@ class ThreadPool {
 
  private:
   void WorkerLoop();
+  void WorkerEntryPoint();
   void StartWorkerThread() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool TaskAvailableCond() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     return stop_ || !pending_tasks_.empty();
@@ -83,7 +86,7 @@ inline ThreadPool::ThreadPool(size_t initial_threads,
                               const ThreadPoolOptions& options)
     : options_(options) {
   for (size_t i = 0; i < initial_threads; ++i) {
-    threads_.emplace_back(&ThreadPool::WorkerLoop, this);
+    threads_.emplace_back(&ThreadPool::WorkerEntryPoint, this);
   }
 }
 
@@ -137,6 +140,20 @@ inline void ThreadPool::WorkerLoop() {
   }
 }
 
+inline void ThreadPool::WorkerEntryPoint() {
+  try {
+    WorkerLoop();
+  } catch (const std::exception& exception) {
+    std::cerr << "ThreadPool worker exited due to uncaught exception: "
+              << exception.what() << std::endl;
+    throw;
+  } catch (...) {
+    std::cerr << "ThreadPool worker exited due to unknown exception."
+              << std::endl;
+    throw;
+  }
+}
+
 inline void ThreadPool::WaitAll() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &ThreadPool::AllTasksCompletedCond));
@@ -164,7 +181,7 @@ inline void ThreadPool::WaitForPendingTasksBelow(size_t threshold) {
 
 inline void ThreadPool::StartWorkerThread()
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-  threads_.emplace_back(&ThreadPool::WorkerLoop, this);
+  threads_.emplace_back(&ThreadPool::WorkerEntryPoint, this);
 }
 
 inline size_t ThreadPool::num_pending_tasks() const {
