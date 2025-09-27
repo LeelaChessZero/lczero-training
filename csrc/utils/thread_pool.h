@@ -50,22 +50,18 @@ class ThreadPool {
   // Number of worker threads (busy or not).
   size_t num_threads() const;
 
+  // Signal workers to terminate and join all threads.
+  void Shutdown();
+
  private:
   void WorkerLoop();
   void WorkerEntryPoint();
   void StartWorkerThread() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  bool TaskAvailableCond() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    return stop_ || !pending_tasks_.empty();
-  }
   bool AllTasksCompletedCond() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     return pending_tasks_.empty() && running_tasks_ == 0;
   }
   bool ThreadAvailableCond() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     return pending_tasks_.empty() && running_tasks_ < threads_.size();
-  }
-  bool TaskCountBelowThreshold(size_t threshold) const
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    return pending_tasks_.size() < threshold;
   }
 
   ThreadPool(const ThreadPool&) = delete;
@@ -75,6 +71,8 @@ class ThreadPool {
 
   ThreadPoolOptions options_;
   mutable absl::Mutex mutex_;
+  absl::CondVar work_available_;
+  absl::CondVar work_done_;
 
   std::vector<std::thread> threads_ ABSL_GUARDED_BY(mutex_);
   std::deque<absl::AnyInvocable<void()>> pending_tasks_ ABSL_GUARDED_BY(mutex_);
@@ -94,6 +92,8 @@ inline ThreadPool::~ThreadPool() {
   {
     absl::MutexLock lock(&mutex_);
     stop_ = true;
+    work_available_.SignalAll();
+    work_done_.SignalAll();
   }
   for (std::thread& worker : threads_) worker.join();
 }
@@ -115,6 +115,7 @@ auto ThreadPool::Enqueue(F&& f, Args&&... args)
       StartWorkerThread();
     }
     pending_tasks_.emplace_back([task = std::move(task)]() mutable { task(); });
+    work_available_.Signal();
   }
 
   return future;
@@ -125,7 +126,7 @@ inline void ThreadPool::WorkerLoop() {
     absl::AnyInvocable<void()> task;
     {
       absl::MutexLock lock(&mutex_);
-      mutex_.Await(absl::Condition(this, &ThreadPool::TaskAvailableCond));
+      while (!stop_ && pending_tasks_.empty()) work_available_.Wait(&mutex_);
       if (stop_ && pending_tasks_.empty()) return;
       task = std::move(pending_tasks_.front());
       pending_tasks_.pop_front();
@@ -136,6 +137,8 @@ inline void ThreadPool::WorkerLoop() {
     {
       absl::MutexLock lock(&mutex_);
       running_tasks_ -= 1;
+      work_done_.SignalAll();
+      if (!pending_tasks_.empty()) work_available_.Signal();
     }
   }
 }
@@ -156,27 +159,17 @@ inline void ThreadPool::WorkerEntryPoint() {
 
 inline void ThreadPool::WaitAll() {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(this, &ThreadPool::AllTasksCompletedCond));
+  while (!AllTasksCompletedCond()) work_done_.Wait(&mutex_);
 }
 
 inline void ThreadPool::WaitForAvailableThread() {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(this, &ThreadPool::ThreadAvailableCond));
+  while (!ThreadAvailableCond()) work_done_.Wait(&mutex_);
 }
 
 inline void ThreadPool::WaitForPendingTasksBelow(size_t threshold) {
-  struct Args {
-    ThreadPool* pool;
-    size_t threshold;
-  };
-  Args args{this, threshold};
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->pool->pending_tasks_.size() < args->threshold;
-      },
-      &args));
+  while (pending_tasks_.size() >= threshold) work_done_.Wait(&mutex_);
 }
 
 inline void ThreadPool::StartWorkerThread()
@@ -197,6 +190,19 @@ inline size_t ThreadPool::num_running_tasks() const {
 inline size_t ThreadPool::num_threads() const {
   absl::MutexLock lock(&mutex_);
   return threads_.size();
+}
+
+inline void ThreadPool::Shutdown() {
+  {
+    absl::MutexLock lock(&mutex_);
+    if (!stop_) stop_ = true;
+    work_available_.SignalAll();
+    work_done_.SignalAll();
+  }
+  for (std::thread& worker : threads_) {
+    if (worker.joinable()) worker.join();
+  }
+  threads_.clear();
 }
 
 }  // namespace lczero

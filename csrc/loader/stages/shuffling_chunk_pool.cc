@@ -97,6 +97,8 @@ void ShufflingChunkPool::Stop() {
 
   indexing_pool_.WaitAll();
   chunk_loading_pool_.WaitAll();
+  indexing_pool_.Shutdown();
+  chunk_loading_pool_.Shutdown();
   LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 

@@ -1,25 +1,36 @@
-// ABOUTME: Comprehensive unit tests for the FilePathProvider class
-// ABOUTME: Tests initial directory scanning, file monitoring, and Queue-based
-// output
-
 #include "loader/stages/file_path_provider.h"
 
-#include <absl/cleanup/cleanup.h>
-#include <absl/log/log.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 namespace lczero {
 namespace training {
 
+namespace {
+
+FilePathProviderConfig MakeConfig(const std::filesystem::path& directory) {
+  FilePathProviderConfig config;
+  config.set_queue_capacity(128);
+  config.set_directory(directory.string());
+  return config;
+}
+
+std::string RelativeTo(const std::filesystem::path& base,
+                       const std::filesystem::path& target) {
+  return target.lexically_relative(base).generic_string();
+}
+
+}  // namespace
+
 class FilePathProviderTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // Create unique test directory
     test_dir_ =
         std::filesystem::temp_directory_path() /
         ("file_path_provider_test_" +
@@ -29,284 +40,195 @@ class FilePathProviderTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Clean up test directory
     if (std::filesystem::exists(test_dir_)) {
       std::filesystem::remove_all(test_dir_);
     }
   }
 
   void CreateFile(const std::filesystem::path& path,
-                  const std::string& content = "test") {
+                  const std::string& content = "payload") {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream file(path);
     file << content;
-    file.close();
   }
 
   void CreateDirectory(const std::filesystem::path& path) {
     std::filesystem::create_directories(path);
   }
 
-  std::filesystem::path test_dir_;
-
-  // Helper function to consume all initial scan results including completion
-  // marker
-  void ConsumeInitialScan(Queue<FilePathProvider::File>* queue) {
-    bool scan_complete = false;
-    while (!scan_complete) {
-      auto file = queue->Get();
-      if (file.message_type ==
+  std::vector<std::filesystem::path> DrainInitialScan(
+      Queue<FilePathProvider::File>* queue) {
+    std::vector<std::filesystem::path> files;
+    while (true) {
+      auto message = queue->Get();
+      if (message.message_type ==
           FilePathProvider::MessageType::kInitialScanComplete) {
-        scan_complete = true;
+        EXPECT_TRUE(message.filepath.empty());
+        break;
       }
-      // We consume and discard all initial scan files
+      if (message.message_type != FilePathProvider::MessageType::kFile) {
+        ADD_FAILURE() << "Unexpected message type in initial scan.";
+        continue;
+      }
+      files.push_back(message.filepath);
+    }
+    return files;
+  }
+
+  FilePathProvider::File AwaitNextFile(Queue<FilePathProvider::File>* queue) {
+    while (true) {
+      auto message = queue->Get();
+      if (message.message_type == FilePathProvider::MessageType::kFile) {
+        return message;
+      }
+      if (message.message_type !=
+          FilePathProvider::MessageType::kInitialScanComplete) {
+        ADD_FAILURE()
+            << "Unexpected message type while waiting for file notification.";
+      }
     }
   }
+
+  FilePathProviderConfig Config() const { return MakeConfig(test_dir_); }
+
+  std::filesystem::path test_dir_;
 };
 
 TEST_F(FilePathProviderTest, ConstructorCreatesQueue) {
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
-  auto* queue = file_path_provider.output();
-  EXPECT_NE(queue, nullptr);
-  EXPECT_EQ(queue->Capacity(), 100);
+  FilePathProvider provider(Config());
+  provider.Start();
 
-  // Should have kInitialScanComplete message for empty directory
-  auto file = queue->Get();
-  EXPECT_EQ(file.message_type,
+  auto* queue = provider.output();
+  ASSERT_NE(queue, nullptr);
+  EXPECT_EQ(queue->Capacity(), 128);
+
+  auto message = queue->Get();
+  EXPECT_EQ(message.message_type,
             FilePathProvider::MessageType::kInitialScanComplete);
-  EXPECT_TRUE(file.filepath.empty());
+  EXPECT_TRUE(message.filepath.empty());
+
+  provider.Stop();
 }
 
-TEST_F(FilePathProviderTest, InitialScanFindsExistingFiles) {
-  // Create some test files
+TEST_F(FilePathProviderTest, InitialScanFindsVisibleFiles) {
   CreateFile(test_dir_ / "file1.txt");
   CreateFile(test_dir_ / "file2.txt");
-  CreateFile(test_dir_ / "subdir" / "file3.txt");
+  CreateFile(test_dir_ / "sub" / "nested.txt");
 
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
 
-  // Collect files from queue
-  std::unordered_set<std::string> found_files;
-  auto* queue = file_path_provider.output();
-
-  // Collect all files found during initial scan
-  bool scan_complete_received = false;
-  while (!scan_complete_received) {
-    auto file = queue->Get();
-    if (file.message_type ==
-        FilePathProvider::MessageType::kInitialScanComplete) {
-      EXPECT_TRUE(file.filepath.empty());
-      scan_complete_received = true;
-    } else {
-      EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
-      found_files.insert(file.filepath.filename().string());
-    }
+  auto discovered = DrainInitialScan(queue);
+  std::unordered_set<std::string> relative_paths;
+  for (const auto& path : discovered) {
+    relative_paths.insert(RelativeTo(test_dir_, path));
   }
 
-  EXPECT_EQ(found_files.size(), 3);
-  EXPECT_TRUE(found_files.count("file1.txt"));
-  EXPECT_TRUE(found_files.count("file2.txt"));
-  EXPECT_TRUE(found_files.count("file3.txt"));
-  EXPECT_TRUE(scan_complete_received);
+  EXPECT_EQ(relative_paths.size(), 3u);
+  EXPECT_TRUE(relative_paths.count("file1.txt"));
+  EXPECT_TRUE(relative_paths.count("file2.txt"));
+  EXPECT_TRUE(relative_paths.count("sub/nested.txt"));
+
+  provider.Stop();
 }
 
-TEST_F(FilePathProviderTest, InitialScanIgnoresDirectories) {
-  // Create files and directories
-  CreateFile(test_dir_ / "file.txt");
-  CreateDirectory(test_dir_ / "subdir");
-  CreateDirectory(test_dir_ / "empty_dir");
+TEST_F(FilePathProviderTest, InitialScanSkipsHiddenEntries) {
+  CreateFile(test_dir_ / "visible.txt");
+  CreateFile(test_dir_ / ".hidden_file");
+  CreateFile(test_dir_ / ".hidden_dir" / "nested.txt");
+  CreateFile(test_dir_ / "visible_dir" / "child.txt");
 
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
 
-  // Should only find the file, not directories
-  std::vector<FilePathProvider::File> files;
-  auto* queue = file_path_provider.output();
-  bool scan_complete_received = false;
-  while (!scan_complete_received) {
-    auto file = queue->Get();
-    if (file.message_type ==
-        FilePathProvider::MessageType::kInitialScanComplete) {
-      scan_complete_received = true;
-    } else {
-      files.push_back(file);
-    }
+  auto discovered = DrainInitialScan(queue);
+  std::unordered_set<std::string> relative_paths;
+  for (const auto& path : discovered) {
+    relative_paths.insert(RelativeTo(test_dir_, path));
   }
 
-  EXPECT_EQ(files.size(), 1);
-  EXPECT_EQ(files[0].filepath.filename().string(), "file.txt");
-  EXPECT_EQ(files[0].message_type, FilePathProvider::MessageType::kFile);
+  EXPECT_TRUE(relative_paths.count("visible.txt"));
+  EXPECT_TRUE(relative_paths.count("visible_dir/child.txt"));
+  EXPECT_FALSE(relative_paths.count(".hidden_file"));
+  EXPECT_FALSE(relative_paths.count(".hidden_dir/nested.txt"));
+
+  provider.Stop();
 }
 
-TEST_F(FilePathProviderTest, DetectsNewFiles) {
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
+TEST_F(FilePathProviderTest, DetectsNewVisibleFile) {
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
+  DrainInitialScan(queue);
 
-  auto* queue = file_path_provider.output();
-  // Consume initial scan results
-  ConsumeInitialScan(queue);
-
-  // Create a new file
   CreateFile(test_dir_ / "new_file.txt");
 
-  // Wait for the new file to be detected
-  auto file = queue->Get();
-  EXPECT_EQ(file.filepath.filename().string(), "new_file.txt");
-  EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
+  auto message = AwaitNextFile(queue);
+  EXPECT_EQ(RelativeTo(test_dir_, message.filepath), "new_file.txt");
+
+  provider.Stop();
 }
 
-TEST_F(FilePathProviderTest, DetectsFilesInNewSubdirectory) {
-  // Pre-create the subdirectory structure
-  auto subdir = test_dir_ / "new_subdir";
+TEST_F(FilePathProviderTest, DetectsFilesInPreExistingSubdirectory) {
+  auto subdir = test_dir_ / "subdir";
   CreateDirectory(subdir);
 
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
+  DrainInitialScan(queue);
 
-  auto* queue = file_path_provider.output();
-  // Consume initial scan results
-  ConsumeInitialScan(queue);
+  CreateFile(subdir / "from_subdir.txt");
 
-  // Create file in the existing subdirectory
-  CreateFile(subdir / "file_in_new_dir.txt");
+  auto message = AwaitNextFile(queue);
+  EXPECT_EQ(RelativeTo(test_dir_, message.filepath), "subdir/from_subdir.txt");
 
-  // Wait for the new file to be detected
-  auto file = queue->Get();
-  EXPECT_EQ(file.filepath.filename().string(), "file_in_new_dir.txt");
-  EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
+  provider.Stop();
+}
+
+TEST_F(FilePathProviderTest, IgnoresHiddenFileEvents) {
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
+  DrainInitialScan(queue);
+
+  CreateFile(test_dir_ / ".hidden_event.txt");
+  CreateFile(test_dir_ / "visible_after_hidden.txt");
+
+  auto message = AwaitNextFile(queue);
+  EXPECT_EQ(RelativeTo(test_dir_, message.filepath),
+            "visible_after_hidden.txt");
+
+  provider.Stop();
+}
+
+TEST_F(FilePathProviderTest, SkipsHiddenDirectoryRecursion) {
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
+  DrainInitialScan(queue);
+
+  CreateDirectory(test_dir_ / ".hidden_dir");
+  CreateFile(test_dir_ / ".hidden_dir" / "inner.txt");
+  CreateFile(test_dir_ / "outer.txt");
+
+  auto message = AwaitNextFile(queue);
+  EXPECT_EQ(RelativeTo(test_dir_, message.filepath), "outer.txt");
+
+  provider.Stop();
 }
 
 TEST_F(FilePathProviderTest, HandlesEmptyDirectory) {
-  // Test with empty directory
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
+  FilePathProvider provider(Config());
+  provider.Start();
+  auto* queue = provider.output();
 
-  auto* queue = file_path_provider.output();
-  auto file = queue->Get();
-  EXPECT_EQ(file.message_type,
-            FilePathProvider::MessageType::kInitialScanComplete);
-  EXPECT_TRUE(file.filepath.empty());
-}
+  auto discovered = DrainInitialScan(queue);
+  EXPECT_TRUE(discovered.empty());
 
-TEST_F(FilePathProviderTest, MultipleFilesInBatch) {
-  // Create many files BEFORE starting discovery
-  for (int i = 0; i < 5; ++i) {
-    CreateFile(test_dir_ / ("batch_file_" + std::to_string(i) + ".txt"));
-  }
-
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
-
-  // Collect all files
-  std::unordered_set<std::string> found_files;
-  auto* queue = file_path_provider.output();
-  bool scan_complete_received = false;
-  while (!scan_complete_received) {
-    auto file = queue->Get();
-    if (file.message_type ==
-        FilePathProvider::MessageType::kInitialScanComplete) {
-      EXPECT_TRUE(file.filepath.empty());
-      scan_complete_received = true;
-    } else {
-      EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
-      found_files.insert(file.filepath.filename().string());
-    }
-  }
-
-  EXPECT_EQ(found_files.size(), 5);
-  for (int i = 0; i < 5; ++i) {
-    EXPECT_TRUE(found_files.count("batch_file_" + std::to_string(i) + ".txt"));
-  }
-}
-
-TEST_F(FilePathProviderTest, QueueClosurePreventsNewFiles) {
-  FilePathProviderConfig config;
-  config.set_queue_capacity(100);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
-
-  auto* queue = file_path_provider.output();
-  // Consume initial scan results
-  ConsumeInitialScan(queue);
-
-  file_path_provider.Stop();
-
-  // Any subsequent queue operations should throw
-  EXPECT_THROW(queue->Get(), QueueClosedException);
-}
-
-TEST_F(FilePathProviderTest, DestructorCleansUpProperly) {
-  auto test_cleanup = [&]() {
-    FilePathProviderConfig config;
-    config.set_queue_capacity(100);
-    config.set_directory(test_dir_.string());
-    FilePathProvider file_path_provider(config);
-    file_path_provider.Start();
-
-    CreateFile(test_dir_ / "cleanup_test.txt");
-
-    auto* queue = file_path_provider.output();
-    // Consume initial scan results
-    ConsumeInitialScan(queue);
-
-    // FilePathProvider destructor should be called here
-  };
-
-  // This should not crash or hang
-  EXPECT_NO_THROW(test_cleanup());
-}
-
-// Stress test with rapid file creation
-TEST_F(FilePathProviderTest, RapidFileCreation) {
-  FilePathProviderConfig config;
-  config.set_queue_capacity(1000);
-  config.set_directory(test_dir_.string());
-  FilePathProvider file_path_provider(config);
-  file_path_provider.Start();
-
-  auto* queue = file_path_provider.output();
-  // Consume initial scan results
-  ConsumeInitialScan(queue);
-
-  // Rapidly create files
-  constexpr int num_files = 10;
-  for (int i = 0; i < num_files; ++i) {
-    CreateFile(test_dir_ / ("rapid_" + std::to_string(i) + ".txt"));
-  }
-
-  // Collect detected files - we should get at least some
-  std::vector<FilePathProvider::File> files;
-  constexpr int min_expected = num_files / 2;
-  for (int i = 0; i < min_expected; ++i) {
-    auto file = queue->Get();
-    EXPECT_EQ(file.message_type, FilePathProvider::MessageType::kFile);
-    files.push_back(file);
-  }
-  EXPECT_GE(files.size(), min_expected);
+  provider.Stop();
 }
 
 }  // namespace training

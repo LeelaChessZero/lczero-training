@@ -54,8 +54,9 @@ void ShufflingFrameSampler::Stop() {
 
   LOG(INFO) << "Stopping ShufflingFrameSampler.";
   input_queue()->Close();
-  thread_pool_.WaitAll();
   output_queue_.Close();
+  thread_pool_.WaitAll();
+  thread_pool_.Shutdown();
   LOG(INFO) << "ShufflingFrameSampler stopped.";
 }
 

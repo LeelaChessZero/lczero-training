@@ -13,12 +13,26 @@
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
+
+namespace {
+
+bool ShouldSkipName(std::string_view name) {
+  return !name.empty() && name.front() == '.';
+}
+
+bool ShouldSkipPathEntry(const FilePathProvider::Path& path) {
+  return ShouldSkipName(path.filename().string());
+}
+
+}  // namespace
 
 FilePathProvider::FilePathProvider(const FilePathProviderConfig& config,
                                    const StageList& existing_stages)
@@ -117,10 +131,13 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
              << ec.message();
 
   for (const auto& entry : iterator) {
+    const Path entry_path = entry.path();
+    if (ShouldSkipPathEntry(entry_path)) continue;
+
     if (entry.is_regular_file(ec) && !ec) {
-      files.push_back(entry.path());
+      files.push_back(entry_path);
     } else if (entry.is_directory(ec) && !ec) {
-      subdirectories.push_back(entry.path());
+      subdirectories.push_back(entry_path);
     }
   }
 
@@ -189,14 +206,18 @@ void FilePathProvider::ProcessWatchEventsForNewItems(
       const struct inotify_event* event =
           reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
 
+      const bool skip_entry = event->len > 0 && ShouldSkipName(event->name);
+
       // Only process file creation/write events, skip already known files
-      if ((event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) && event->len > 0) {
+      if ((event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) != 0 &&
+          event->len > 0 && !skip_entry) {
         const Path directory(watch_descriptors_.at(event->wd));
         Path filepath = directory / event->name;
+        std::string filepath_string = filepath.string();
 
         // Only add if we haven't seen this file before
-        if (!known_file_set.contains(filepath.string())) {
-          new_files.push_back({.filepath = filepath.string(),
+        if (!known_file_set.contains(filepath_string)) {
+          new_files.push_back({.filepath = std::move(filepath_string),
                                .message_type = MessageType::kFile});
         }
       }
@@ -228,8 +249,10 @@ void FilePathProvider::AddWatchRecursive(const Path& path) {
   CHECK(!ec) << "Failed to iterate directory " << path << ": " << ec.message();
 
   for (const auto& entry : iterator) {
+    const Path entry_path = entry.path();
+    if (ShouldSkipPathEntry(entry_path)) continue;
     if (!entry.is_directory(ec) || ec) continue;
-    AddWatchRecursive(entry.path().string());
+    AddWatchRecursive(entry_path);
   }
 }
 
@@ -327,11 +350,13 @@ auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)
   if (event.mask & IN_IGNORED) return std::nullopt;
 
   const Path directory(watch_descriptors_.at(event.wd));
-  // Create full file path
-  Path filepath = directory / event.name;
+  const bool has_name = event.len > 0 && event.name[0] != '\0';
+  const bool skip_entry = has_name && ShouldSkipName(event.name);
+  const Path filepath = has_name ? directory / event.name : directory;
 
   // Handle different event types
-  if (event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
+  if ((event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) != 0 && has_name &&
+      !skip_entry) {
     // File finished writing or moved into directory
     return File{.filepath = filepath, .message_type = MessageType::kFile};
   }
@@ -339,10 +364,12 @@ auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)
   constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;
   constexpr uint32_t kDirDeleteMask = IN_DELETE | IN_ISDIR;
   if ((event.mask & kDirCreateMask) == kDirCreateMask) {
-    ScanDirectoryWithWatch(filepath.string());
+    if (!has_name || skip_entry) return std::nullopt;
+    ScanDirectoryWithWatch(filepath);
   } else if ((event.mask & kDirDeleteMask) == kDirDeleteMask) {
+    if (!has_name || skip_entry) return std::nullopt;
     // Directory deleted - remove all watches for it and subdirectories
-    RemoveWatchRecursive(filepath.string());
+    RemoveWatchRecursive(filepath);
   } else if (event.mask & IN_DELETE_SELF) {
     RemoveWatchRecursive(directory);
   }
