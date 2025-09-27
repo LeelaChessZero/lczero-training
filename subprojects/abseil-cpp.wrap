@@ -3,7 +3,7 @@ directory = abseil-cpp-20250814.1
 source_url = https://github.com/abseil/abseil-cpp/releases/download/20250814.1/abseil-cpp-20250814.1.tar.gz
 source_filename = abseil-cpp-20250814.1.tar.gz
 source_hash = 1692f77d1739bacf3f94337188b78583cf09bab7e420d2dc6c5605a4f86785a1
-patch_directory = abseil-cpp_20250814.1
+patch_directory = abseil-cpp-20250814.1
 source_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/abseil-cpp_20250814.1-1/abseil-cpp-20250814.1.tar.gz
 
 [provide]
