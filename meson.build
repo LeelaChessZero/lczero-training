@@ -25,13 +25,25 @@ zlib_dep = dependency('zlib')
 python3 = import('python').find_installation()
 pybind11_dep = dependency('pybind11')
 
-# Abseil dependencies
-absl_deps = {}
-foreach name : [
-  'log', 'log_initialize', 'check', 'hash', 'raw_hash_set', 
-  'synchronization', 'random_random', 'flags', 'flags_parse', 'throw_delegate'
+# Abseil dependencies always resolved from the wrap subproject.
+absl_proj = subproject('abseil-cpp')
+absl_dep_specs = [
+  ['log', 'absl_log_dep'],
+  ['log_initialize', 'absl_log_dep'],
+  ['check', 'absl_log_dep'],
+  ['hash', 'absl_hash_dep'],
+  ['raw_hash_set', 'absl_container_dep'],
+  ['synchronization', 'absl_synchronization_dep'],
+  ['random_random', 'absl_random_dep'],
+  ['flags', 'absl_flags_dep'],
+  ['flags_parse', 'absl_flags_dep'],
+  ['throw_delegate', 'absl_base_dep'],
 ]
-  absl_deps += {name.underscorify() : dependency('absl_' + name).as_system()}
+absl_deps = {}
+foreach spec : absl_dep_specs
+  absl_deps += {
+    spec[0].underscorify() : absl_proj.get_variable(spec[1]).as_system()
+  }
 endforeach
 
 # Test dependencies
