@@ -1,5 +1,6 @@
 import argparse
 
+from .dataloader_probe import probe_dataloader
 from .describe import describe
 from .eval import eval
 from .init import init
@@ -95,6 +96,28 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     describe_parser.set_defaults(func=run)
 
+    # Data loader test command
+    dataloader_parser = subparsers.add_parser(
+        "test-dataloader",
+        help=(
+            "Fetch batches from the data loader to measure latency and "
+            "throughput."
+        ),
+    )
+    dataloader_parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the training config file.",
+    )
+    dataloader_parser.add_argument(
+        "--num-batches",
+        type=int,
+        default=10,
+        help="Number of batches to fetch from the data loader.",
+    )
+    dataloader_parser.set_defaults(func=run)
+
 
 def run(args: argparse.Namespace) -> None:
     if args.subcommand == "init":
@@ -115,6 +138,11 @@ def run(args: argparse.Namespace) -> None:
         describe(
             config_filename=args.config,
             shapes=getattr(args, "shapes", False),
+        )
+    elif args.subcommand == "test-dataloader":
+        probe_dataloader(
+            config_filename=args.config,
+            num_batches=args.num_batches,
         )
 
 
