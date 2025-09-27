@@ -317,7 +317,7 @@ ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
   }
 
   // Get queue metrics.
-  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
 
   // Get chunk sources statistics and pool state.
   {

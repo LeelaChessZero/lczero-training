@@ -33,7 +33,9 @@ def test_protobuf_functionality() -> None:
 
     # Create a config and set some values
     config = data_loader_config_pb2.DataLoaderConfig()
-    config.file_path_provider.directory = "/test/path"
+    stage = config.stage.add()
+    stage.name = "file_path_provider"
+    stage.file_path_provider.directory = "/test/path"
 
     # Serialize and deserialize
     serialized = config.SerializeToString()
@@ -42,12 +44,14 @@ def test_protobuf_functionality() -> None:
     config2 = data_loader_config_pb2.DataLoaderConfig()
     config2.ParseFromString(serialized)
 
-    assert config2.file_path_provider.directory == "/test/path"
+    assert config2.stage[0].file_path_provider.directory == "/test/path"
 
     # Test RootConfig functionality
     root_config = root_config_pb2.RootConfig()
     root_config.name = "test_config"
-    root_config.data_loader.file_path_provider.directory = "/test/path"
+    stage_config = root_config.data_loader.stage.add()
+    stage_config.name = "file_path_provider"
+    stage_config.file_path_provider.directory = "/test/path"
 
     # Serialize and deserialize root config
     root_serialized = root_config.SerializeToString()
@@ -57,4 +61,7 @@ def test_protobuf_functionality() -> None:
     root_config2.ParseFromString(root_serialized)
 
     assert root_config2.name == "test_config"
-    assert root_config2.data_loader.file_path_provider.directory == "/test/path"
+    assert (
+        root_config2.data_loader.stage[0].file_path_provider.directory
+        == "/test/path"
+    )

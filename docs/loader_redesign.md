@@ -163,7 +163,7 @@ template <typename ConfigT, typename InputT>
 class SingleInputStage : public Stage {
  protected:
   explicit SingleInputStage(
-      const ConfigT& config,
+      std::string_view input_name,
       const std::vector<std::pair<std::string, Stage*>>& existing_stages);
   Queue<InputT>* input_queue();
 };
@@ -179,7 +179,7 @@ name, and `dynamic_cast` the output queue to `Queue<InputT>`. Failures raise
 
 ```proto
 message DataLoaderConfig {
-  repeated StageConfig stages = 1;
+  repeated StageConfig stage = 1;
 }
 
 message StageConfig {
@@ -283,4 +283,3 @@ Key responsibilities:
 - `just build` — Rebuilds the C++ components (including regenerating protobufs).
 - `just build-proto` — Regenerates the Python protobuf stubs.
 - `just pre-commit` — Runs formatting, lint, build, and test checks locally.
-

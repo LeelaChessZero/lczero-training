@@ -297,7 +297,18 @@ def eval(
 
     dataloader_config = config.data_loader
     if batch_size_override is not None:
-        dataloader_config.tensor_generator.batch_size = batch_size_override
+        tensor_stage_config = None
+        for stage in dataloader_config.stage:
+            if stage.HasField("tensor_generator"):
+                tensor_stage_config = stage.tensor_generator
+                break
+
+        if tensor_stage_config is None:
+            raise ValueError(
+                "tensor_generator stage is required to override batch size"
+            )
+
+        tensor_stage_config.batch_size = batch_size_override
         logger.info(f"Overriding batch size to {batch_size_override}")
 
     evaluation = Evaluation(loss_fn=LczeroLoss(config=config.training.losses))

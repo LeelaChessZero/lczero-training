@@ -195,7 +195,7 @@ TensorGeneratorMetricsProto TensorGenerator::FlushMetrics() {
     UpdateFrom(*result.mutable_load(),
                context->load_metric_updater.FlushMetrics());
   }
-  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
   return result;
 }
 

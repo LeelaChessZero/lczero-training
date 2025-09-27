@@ -12,6 +12,47 @@ from textual.widgets import ProgressBar, Sparkline, Static
 import proto.training_metrics_pb2 as training_metrics_pb2
 
 
+def _find_stage_metric(
+    metrics: training_metrics_pb2.DataLoaderMetricsProto | None,
+    stage_key: str,
+) -> training_metrics_pb2.StageMetricProto | None:
+    """Locate a StageMetricProto by name."""
+    if not metrics:
+        return None
+    for stage_metric in metrics.stage_metrics:
+        if stage_metric.name == stage_key:
+            return stage_metric
+    return None
+
+
+def _get_stage_specific_metrics(
+    stage_metric: training_metrics_pb2.StageMetricProto | None,
+    field_name: str,
+) -> Any:
+    """Return the stage-specific metrics message if present."""
+    if not stage_metric:
+        return None
+    try:
+        if stage_metric.HasField(field_name):
+            return getattr(stage_metric, field_name)
+    except ValueError:
+        return None
+    return None
+
+
+def _get_queue_metrics(
+    stage_metric: training_metrics_pb2.StageMetricProto | None,
+    queue_name: str = "output",
+) -> training_metrics_pb2.QueueMetricProto | None:
+    """Find a queue metric by name, falling back to the first metric."""
+    if not stage_metric or not stage_metric.output_queue_metrics:
+        return None
+    for queue_metric in stage_metric.output_queue_metrics:
+        if queue_metric.name == queue_name:
+            return queue_metric
+    return stage_metric.output_queue_metrics[0]
+
+
 class StageWidget(Static):
     """Base class for all data pipeline stage widgets."""
 
@@ -133,13 +174,13 @@ class QueueWidget(Container):
     def __init__(
         self,
         item_name: str = "items",
-        queue_field_name: str | None = None,
+        stage_key: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.item_name = item_name
         self.border_title = f"Queue ({item_name})"
-        self.queue_field_name = queue_field_name
+        self.stage_key = stage_key
         self._rate_history: deque[int] = deque(maxlen=16)
         self._max_rate_seen = 0
 
@@ -212,28 +253,30 @@ class QueueWidget(Container):
     ) -> None:
         """Update the queue metrics display."""
         current_rate = 0  # Default to 0
-        if dataloader_1_second and dataloader_total and self.queue_field_name:
-            try:
-                stage_1sec = getattr(dataloader_1_second, self.queue_field_name)
-                stage_total = getattr(dataloader_total, self.queue_field_name)
+        if dataloader_1_second and dataloader_total and self.stage_key:
+            stage_1sec = _find_stage_metric(dataloader_1_second, self.stage_key)
+            stage_total = _find_stage_metric(dataloader_total, self.stage_key)
 
-                queue_1sec = stage_1sec.queue
-                queue_total = stage_total.queue
+            queue_1sec = _get_queue_metrics(stage_1sec)
+            queue_total = _get_queue_metrics(stage_total)
 
+            if queue_1sec and queue_total:
                 current_rate = queue_1sec.get_count
                 self.total_transferred = queue_total.get_count
                 self.capacity = queue_1sec.queue_capacity
 
-                if queue_1sec.queue_fullness.count > 0:
+                if (
+                    queue_1sec.HasField("queue_fullness")
+                    and queue_1sec.queue_fullness.count > 0
+                ):
                     self.current_size = int(
                         queue_1sec.queue_fullness.sum
                         / queue_1sec.queue_fullness.count
                     )
                 else:
                     self.current_size = 0
-            except AttributeError:
-                self._show_error_state(f"Error ({self.queue_field_name})")
-                current_rate = 0
+            else:
+                self._show_error_state(f"Error ({self.stage_key})")
 
         self.rate = current_rate
 
@@ -269,14 +312,15 @@ class MetricsStageWidget(StageWidget):
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the stage metrics display from protobuf data."""
-        if not dataloader_1_second:
-            self.load_widget.update_load_metrics(None)
-            return
-
-        try:
-            stage_1sec = getattr(dataloader_1_second, self.metrics_field_name)
-            self.load_widget.update_load_metrics(stage_1sec.load)
-        except AttributeError:
+        stage_metric = _find_stage_metric(
+            dataloader_1_second, self.metrics_field_name
+        )
+        stage_metrics = _get_stage_specific_metrics(
+            stage_metric, self.metrics_field_name
+        )
+        if stage_metrics is not None and stage_metrics.HasField("load"):
+            self.load_widget.update_load_metrics(stage_metrics.load)
+        else:
             self.load_widget.update_load_metrics(None)
 
 
@@ -316,7 +360,21 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the stage metrics display from protobuf data."""
-        if not dataloader_1_second or not dataloader_total:
+        stage_1sec = _find_stage_metric(
+            dataloader_1_second, self.metrics_field_name
+        )
+        stage_total = _find_stage_metric(
+            dataloader_total, self.metrics_field_name
+        )
+
+        metrics_1sec = _get_stage_specific_metrics(
+            stage_1sec, self.metrics_field_name
+        )
+        metrics_total = _get_stage_specific_metrics(
+            stage_total, self.metrics_field_name
+        )
+
+        if not metrics_1sec or not metrics_total:
             self.load_widget.update_load_metrics(None)
             self.skipped_files_display.update("skipped: --")
             self.last_chunk_display.update("Last: --")
@@ -324,58 +382,52 @@ class ChunkSourceLoaderStageWidget(StageWidget):
             self.chunks_since_anchor_display.update("Since ⚓: --")
             return
 
-        try:
-            stage_1sec = getattr(dataloader_1_second, self.metrics_field_name)
-            stage_total = getattr(dataloader_total, self.metrics_field_name)
-
-            self.load_widget.update_load_metrics(stage_1sec.load)
-
-            self._skipped_total = stage_total.skipped_files_count
-            self._skipped_rate = stage_1sec.skipped_files_count
-
-            skipped_text = f"skipped: {format_full_number(self._skipped_total)}"
-            if self._skipped_rate > 0:
-                skipped_text += f" ({format_si(self._skipped_rate)}/s)"
-            else:
-                skipped_text += " (0/s)"
-
-            self.skipped_files_display.update(skipped_text)
-
-            # Update last chunk key display.
-            if (
-                hasattr(stage_1sec, "last_chunk_key")
-                and stage_1sec.last_chunk_key
-            ):
-                self.last_chunk_display.update(
-                    f"Last: {stage_1sec.last_chunk_key}"
-                )
-            else:
-                self.last_chunk_display.update("Last: --")
-
-            # Get anchor metrics from shuffling_chunk_pool instead
-            pool_1sec = getattr(
-                dataloader_1_second, "shuffling_chunk_pool", None
-            )
-
-            # Update anchor display.
-            if pool_1sec and hasattr(pool_1sec, "anchor") and pool_1sec.anchor:
-                self.anchor_display.update(f"⚓: {pool_1sec.anchor}")
-            else:
-                self.anchor_display.update("⚓: --")
-
-            # Update chunks since anchor display.
-            if pool_1sec and hasattr(pool_1sec, "chunks_since_anchor"):
-                chunks_count = pool_1sec.chunks_since_anchor
-                self.chunks_since_anchor_display.update(
-                    f"Since ⚓: {format_full_number(chunks_count)}"
-                )
-            else:
-                self.chunks_since_anchor_display.update("Since ⚓: --")
-        except AttributeError:
+        if metrics_1sec.HasField("load"):
+            self.load_widget.update_load_metrics(metrics_1sec.load)
+        else:
             self.load_widget.update_load_metrics(None)
-            self.skipped_files_display.update("skipped: --")
+
+        self._skipped_total = metrics_total.skipped_files_count
+        self._skipped_rate = metrics_1sec.skipped_files_count
+
+        skipped_text = f"skipped: {format_full_number(self._skipped_total)}"
+        if self._skipped_rate > 0:
+            skipped_text += f" ({format_si(self._skipped_rate)}/s)"
+        else:
+            skipped_text += " (0/s)"
+
+        self.skipped_files_display.update(skipped_text)
+
+        if (
+            metrics_1sec.HasField("last_chunk_key")
+            and metrics_1sec.last_chunk_key
+        ):
+            self.last_chunk_display.update(
+                f"Last: {metrics_1sec.last_chunk_key}"
+            )
+        else:
             self.last_chunk_display.update("Last: --")
+
+        pool_metrics = _get_stage_specific_metrics(
+            _find_stage_metric(dataloader_1_second, "shuffling_chunk_pool"),
+            "shuffling_chunk_pool",
+        )
+
+        if (
+            pool_metrics
+            and pool_metrics.HasField("anchor")
+            and pool_metrics.anchor
+        ):
+            self.anchor_display.update(f"⚓: {pool_metrics.anchor}")
+        else:
             self.anchor_display.update("⚓: --")
+
+        if pool_metrics and pool_metrics.HasField("chunks_since_anchor"):
+            chunks_count = pool_metrics.chunks_since_anchor
+            self.chunks_since_anchor_display.update(
+                f"Since ⚓: {format_full_number(chunks_count)}"
+            )
+        else:
             self.chunks_since_anchor_display.update("Since ⚓: --")
 
 
@@ -416,7 +468,14 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         """Update the stage metrics display from protobuf data."""
-        if not dataloader_1_second:
+        stage_metric = _find_stage_metric(
+            dataloader_1_second, self.metrics_field_name
+        )
+        metrics = _get_stage_specific_metrics(
+            stage_metric, self.metrics_field_name
+        )
+
+        if not metrics:
             self.indexing_load.update_load_metrics(None)
             self.chunk_loading_load.update_load_metrics(None)
             self.files_in_pool.update("files: --")
@@ -429,45 +488,39 @@ class ShufflingChunkPoolStageWidget(StageWidget):
             chunks_ratio.update("--/--")
             return
 
-        try:
-            stage_1sec = getattr(dataloader_1_second, self.metrics_field_name)
-            self.indexing_load.update_load_metrics(stage_1sec.indexing_load)
-            self.chunk_loading_load.update_load_metrics(
-                stage_1sec.chunk_loading_load
-            )
-
-            if stage_1sec.chunk_sources_count.count > 0:
-                files_count = stage_1sec.chunk_sources_count.latest
-                self.files_in_pool.update(f"files: {format_si(files_count)}")
-            else:
-                self.files_in_pool.update("files: --")
-
-            current_chunks = stage_1sec.current_chunks
-            pool_capacity = stage_1sec.pool_capacity
-
-            chunks_progress = self.query_one(
-                ".chunks-progress-bar", ProgressBar
-            )
-            chunks_ratio = self.query_one(".chunks-ratio", Static)
-
-            if pool_capacity > 0:
-                chunks_progress.total = pool_capacity
-                chunks_progress.progress = min(current_chunks, pool_capacity)
-                chunks_ratio.update(
-                    f"{format_si(current_chunks)}/{format_si(pool_capacity)}"
-                )
-            else:
-                chunks_progress.total = 1
-                chunks_progress.progress = 0
-                chunks_ratio.update("--/--")
-        except AttributeError:
+        if metrics.HasField("indexing_load"):
+            self.indexing_load.update_load_metrics(metrics.indexing_load)
+        else:
             self.indexing_load.update_load_metrics(None)
-            self.chunk_loading_load.update_load_metrics(None)
-            self.files_in_pool.update("files: --")
-            chunks_progress = self.query_one(
-                ".chunks-progress-bar", ProgressBar
+
+        if metrics.HasField("chunk_loading_load"):
+            self.chunk_loading_load.update_load_metrics(
+                metrics.chunk_loading_load
             )
-            chunks_ratio = self.query_one(".chunks-ratio", Static)
+        else:
+            self.chunk_loading_load.update_load_metrics(None)
+
+        if metrics.HasField("chunk_sources_count") and (
+            metrics.chunk_sources_count.count > 0
+        ):
+            files_count = metrics.chunk_sources_count.latest
+            self.files_in_pool.update(f"files: {format_si(files_count)}")
+        else:
+            self.files_in_pool.update("files: --")
+
+        current_chunks = metrics.current_chunks
+        pool_capacity = metrics.pool_capacity
+
+        chunks_progress = self.query_one(".chunks-progress-bar", ProgressBar)
+        chunks_ratio = self.query_one(".chunks-ratio", Static)
+
+        if pool_capacity > 0:
+            chunks_progress.total = pool_capacity
+            chunks_progress.progress = min(current_chunks, pool_capacity)
+            chunks_ratio.update(
+                f"{format_si(current_chunks)}/{format_si(pool_capacity)}"
+            )
+        else:
             chunks_progress.total = 1
             chunks_progress.progress = 0
             chunks_ratio.update("--/--")

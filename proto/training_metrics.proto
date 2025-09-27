@@ -29,11 +29,12 @@ message StatisticsProtoDouble {
 
 // Metrics for queue performance monitoring.
 message QueueMetricProto {
-  optional uint64 put_count = 1 [default = 0];
-  optional uint64 get_count = 2 [default = 0];
-  optional uint64 drop_count = 3 [default = 0];
-  optional StatisticsProtoInt64 queue_fullness = 4;
-  optional uint64 queue_capacity = 5 [default = 0];
+  optional string name = 1;
+  optional uint64 put_count = 2 [default = 0];
+  optional uint64 get_count = 3 [default = 0];
+  optional uint64 drop_count = 4 [default = 0];
+  optional StatisticsProtoInt64 queue_fullness = 5;
+  optional uint64 queue_capacity = 6 [default = 0];
 }
 
 // Metrics for FilePathProvider performance monitoring.
@@ -86,11 +87,17 @@ message TensorGeneratorMetricsProto {
 
 // Top-level metrics for the DataLoader.
 // Replaces the old MetricGroup<FilePathProviderMetrics>.
+message StageMetricProto {
+  optional string name = 1;
+  optional FilePathProviderMetricsProto file_path_provider = 2;
+  optional ChunkSourceLoaderMetricsProto chunk_source_loader = 3;
+  optional ShufflingChunkPoolMetricsProto shuffling_chunk_pool = 4;
+  optional ChunkUnpackerMetricsProto chunk_unpacker = 5;
+  optional ShufflingFrameSamplerMetricsProto shuffling_frame_sampler = 6;
+  optional TensorGeneratorMetricsProto tensor_generator = 7;
+  repeated QueueMetricProto output_queue_metrics = 10;
+}
+
 message DataLoaderMetricsProto {
-  optional FilePathProviderMetricsProto file_path_provider = 1;
-  optional ChunkSourceLoaderMetricsProto chunk_source_loader = 2;
-  optional ShufflingChunkPoolMetricsProto shuffling_chunk_pool = 3;
-  optional ChunkUnpackerMetricsProto chunk_unpacker = 4;
-  optional ShufflingFrameSamplerMetricsProto shuffling_frame_sampler = 5;
-  optional TensorGeneratorMetricsProto tensor_generator = 6;
+  repeated StageMetricProto stage_metrics = 1;
 }

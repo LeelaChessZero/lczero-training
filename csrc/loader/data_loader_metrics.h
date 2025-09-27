@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "absl/strings/string_view.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"
 #include "utils/metrics/statistics_metric.h"
@@ -25,12 +26,14 @@ void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,
                 const ShufflingFrameSamplerMetricsProto& src);
 void UpdateFrom(TensorGeneratorMetricsProto& dest,
                 const TensorGeneratorMetricsProto& src);
+void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src);
 void UpdateFrom(DataLoaderMetricsProto& dest,
                 const DataLoaderMetricsProto& src);
 
 template <typename T>
-QueueMetricProto MetricsFromQueue(Queue<T>& queue) {
+QueueMetricProto MetricsFromQueue(absl::string_view name, Queue<T>& queue) {
   QueueMetricProto result;
+  result.set_name(std::string(name));
   result.set_put_count(queue.GetTotalPutCount(true));
   result.set_get_count(queue.GetTotalGetCount(true));
   result.set_drop_count(queue.GetTotalDropCount(true));

@@ -70,7 +70,7 @@ void FilePathProvider::Close() {
 FilePathProviderMetricsProto FilePathProvider::FlushMetrics() {
   FilePathProviderMetricsProto result;
   *result.mutable_load() = load_metric_updater_.FlushMetrics();
-  *result.mutable_queue() = MetricsFromQueue(output_queue_);
+  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
   return result;
 }
 

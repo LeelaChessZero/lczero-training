@@ -47,6 +47,12 @@ class DataLoader {
   void MetricsThread(std::stop_token stop_token);
 
   DataLoaderConfig config_;
+  std::string file_path_provider_stage_name_;
+  std::string chunk_source_loader_stage_name_;
+  std::string shuffling_chunk_pool_stage_name_;
+  std::string chunk_unpacker_stage_name_;
+  std::string shuffling_frame_sampler_stage_name_;
+  std::string tensor_generator_stage_name_;
   FilePathProvider file_path_provider_;
   ChunkSourceLoader chunk_source_loader_;
   ShufflingChunkPool shuffling_chunk_pool_;

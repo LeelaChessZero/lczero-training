@@ -71,7 +71,7 @@ class DataPipelinePane(Container):
 
             queue = QueueWidget(
                 item_name=config.item_name,
-                queue_field_name=config.metrics_field,
+                stage_key=config.metrics_field,
             )
             self._queues.append(queue)
             yield queue
