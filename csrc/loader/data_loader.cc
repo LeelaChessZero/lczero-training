@@ -1,79 +1,29 @@
-#include "data_loader.h"
+#include "loader/data_loader.h"
 
 #include <absl/log/log.h>
-#include <absl/strings/string_view.h>
+#include <absl/strings/str_cat.h>
 
 #include <chrono>
+#include <cmath>
+#include <optional>
+#include <stdexcept>
 
 #include "loader/data_loader_metrics.h"
-#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
 namespace {
 
-template <typename ConfigT>
-const ConfigT& GetStageConfigOrDefault(
-    const DataLoaderConfig& config, bool (StageConfig::*has_member)() const,
-    const ConfigT& (StageConfig::*get_member)() const, std::string* stage_name,
-    absl::string_view default_name) {
-  for (const auto& stage : config.stage()) {
-    if ((stage.*has_member)()) {
-      if (stage_name != nullptr) {
-        *stage_name =
-            stage.has_name() ? stage.name() : std::string(default_name);
-      }
-      return (stage.*get_member)();
+StageControlResponse ExtractFirstChunkPoolResponse(
+    const std::vector<std::pair<std::string, StageControlResponse>>&
+        responses) {
+  for (const auto& [name, response] : responses) {
+    (void)name;
+    if (response.has_chunk_pool_response()) {
+      return response;
     }
   }
-  if (stage_name != nullptr) {
-    *stage_name = std::string(default_name);
-  }
-  static const ConfigT kDefault;
-  return kDefault;
-}
-
-const FilePathProviderConfig& GetFilePathProviderConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<FilePathProviderConfig>(
-      config, &StageConfig::has_file_path_provider,
-      &StageConfig::file_path_provider, stage_name, "file_path_provider");
-}
-
-const ChunkSourceLoaderConfig& GetChunkSourceLoaderConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<ChunkSourceLoaderConfig>(
-      config, &StageConfig::has_chunk_source_loader,
-      &StageConfig::chunk_source_loader, stage_name, "chunk_source_loader");
-}
-
-const ShufflingChunkPoolConfig& GetShufflingChunkPoolConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<ShufflingChunkPoolConfig>(
-      config, &StageConfig::has_shuffling_chunk_pool,
-      &StageConfig::shuffling_chunk_pool, stage_name, "shuffling_chunk_pool");
-}
-
-const ChunkUnpackerConfig& GetChunkUnpackerConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<ChunkUnpackerConfig>(
-      config, &StageConfig::has_chunk_unpacker, &StageConfig::chunk_unpacker,
-      stage_name, "chunk_unpacker");
-}
-
-const ShufflingFrameSamplerConfig& GetShufflingFrameSamplerConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<ShufflingFrameSamplerConfig>(
-      config, &StageConfig::has_shuffling_frame_sampler,
-      &StageConfig::shuffling_frame_sampler, stage_name,
-      "shuffling_frame_sampler");
-}
-
-const TensorGeneratorConfig& GetTensorGeneratorConfig(
-    const DataLoaderConfig& config, std::string* stage_name) {
-  return GetStageConfigOrDefault<TensorGeneratorConfig>(
-      config, &StageConfig::has_tensor_generator,
-      &StageConfig::tensor_generator, stage_name, "tensor_generator");
+  return StageControlResponse();
 }
 
 }  // namespace
@@ -85,54 +35,117 @@ DataLoaderConfig DataLoader::ParseConfig(const std::string& serialized_config) {
 }
 
 DataLoader::DataLoader(const std::string& serialized_data_loader_config)
-    : config_(ParseConfig(serialized_data_loader_config)),
-      file_path_provider_stage_name_(),
-      chunk_source_loader_stage_name_(),
-      shuffling_chunk_pool_stage_name_(),
-      chunk_unpacker_stage_name_(),
-      shuffling_frame_sampler_stage_name_(),
-      tensor_generator_stage_name_(),
-      file_path_provider_(
-          GetFilePathProviderConfig(config_, &file_path_provider_stage_name_)),
-      chunk_source_loader_(
-          GetChunkSourceLoaderConfig(config_, &chunk_source_loader_stage_name_),
-          Stage::StageList{
-              {file_path_provider_stage_name_, &file_path_provider_}}),
-      shuffling_chunk_pool_(
-          GetShufflingChunkPoolConfig(config_,
-                                      &shuffling_chunk_pool_stage_name_),
-          Stage::StageList{
-              {file_path_provider_stage_name_, &file_path_provider_},
-              {chunk_source_loader_stage_name_, &chunk_source_loader_}}),
-      chunk_unpacker_(
-          GetChunkUnpackerConfig(config_, &chunk_unpacker_stage_name_),
-          Stage::StageList{
-              {file_path_provider_stage_name_, &file_path_provider_},
-              {chunk_source_loader_stage_name_, &chunk_source_loader_},
-              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_}}),
-      shuffling_frame_sampler_(
-          GetShufflingFrameSamplerConfig(config_,
-                                         &shuffling_frame_sampler_stage_name_),
-          Stage::StageList{
-              {file_path_provider_stage_name_, &file_path_provider_},
-              {chunk_source_loader_stage_name_, &chunk_source_loader_},
-              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_},
-              {chunk_unpacker_stage_name_, &chunk_unpacker_}}),
-      tensor_generator_(
-          GetTensorGeneratorConfig(config_, &tensor_generator_stage_name_),
-          Stage::StageList{
-              {file_path_provider_stage_name_, &file_path_provider_},
-              {chunk_source_loader_stage_name_, &chunk_source_loader_},
-              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_},
-              {chunk_unpacker_stage_name_, &chunk_unpacker_},
-              {shuffling_frame_sampler_stage_name_,
-               &shuffling_frame_sampler_}}),
-      metrics_aggregator_(
+    : metrics_aggregator_(
           [](DataLoaderMetricsProto& m) { m.Clear(); },
           [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
             UpdateFrom(dest, src);
           }) {
-  LOG(INFO) << "DataLoader initialized (not started).";
+  AddStages(serialized_data_loader_config);
+  LOG(INFO) << "DataLoader initialized with " << stages_.size() << " stage(s).";
+}
+
+DataLoader::~DataLoader() { Stop(false); }
+
+void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
+  AddStages(ParseConfig(serialized_data_loader_config));
+}
+
+void DataLoader::AddStages(const DataLoaderConfig& config) {
+  for (const auto& stage_config : config.stage()) {
+    AddStage(stage_config);
+  }
+  if (stages_.empty()) {
+    throw std::runtime_error(
+        "DataLoader pipeline must contain at least one "
+        "stage.");
+  }
+  if (output_queue_ == nullptr) {
+    throw std::runtime_error(
+        "Pipeline does not expose a TensorTuple output queue.");
+  }
+}
+
+void DataLoader::AddStage(const StageConfig& stage_config) {
+  if (started_) {
+    throw std::runtime_error("Cannot add stages after DataLoader has started.");
+  }
+
+  const std::string stage_name = ResolveStageName(stage_config);
+  for (const auto& entry : stages_) {
+    if (entry.first == stage_name) {
+      throw std::runtime_error(
+          absl::StrCat("Duplicate stage name detected: ", stage_name));
+    }
+  }
+
+  Stage::StageList existing = BuildStageList();
+  auto stage = CreateStage(stage_config, existing);
+  Stage* stage_raw = stage.get();
+  stages_.emplace_back(stage_name, std::move(stage));
+  UpdateOutputQueue(stage_name, stage_raw);
+}
+
+Stage::StageList DataLoader::BuildStageList() const {
+  Stage::StageList list;
+  list.reserve(stages_.size());
+  for (const auto& entry : stages_) {
+    list.emplace_back(entry.first, entry.second.get());
+  }
+  return list;
+}
+
+std::string DataLoader::ResolveStageName(
+    const StageConfig& stage_config) const {
+  if (stage_config.has_name() && !stage_config.name().empty()) {
+    return std::string(stage_config.name());
+  }
+  if (stage_config.has_file_path_provider()) {
+    return "file_path_provider";
+  }
+  if (stage_config.has_chunk_source_loader()) {
+    return "chunk_source_loader";
+  }
+  if (stage_config.has_shuffling_chunk_pool()) {
+    return "shuffling_chunk_pool";
+  }
+  if (stage_config.has_chunk_unpacker()) {
+    return "chunk_unpacker";
+  }
+  if (stage_config.has_shuffling_frame_sampler()) {
+    return "shuffling_frame_sampler";
+  }
+  if (stage_config.has_tensor_generator()) {
+    return "tensor_generator";
+  }
+  throw std::runtime_error(
+      "Cannot resolve name for stage without a specific configuration.");
+}
+
+void DataLoader::UpdateOutputQueue(const std::string& stage_name,
+                                   Stage* stage) {
+  QueueBase* raw_output = stage->GetOutput();
+  if (raw_output == nullptr) {
+    return;
+  }
+  auto* tensor_queue = dynamic_cast<Queue<TensorTuple>*>(raw_output);
+  if (tensor_queue != nullptr) {
+    output_queue_ = tensor_queue;
+    output_stage_name_ = stage_name;
+  }
+}
+
+Queue<TensorTuple>* DataLoader::GetOutputQueue() {
+  if (output_queue_ == nullptr) {
+    throw std::runtime_error("Tensor output queue is not configured.");
+  }
+  return output_queue_;
+}
+
+const Queue<TensorTuple>* DataLoader::GetOutputQueue() const {
+  if (output_queue_ == nullptr) {
+    throw std::runtime_error("Tensor output queue is not configured.");
+  }
+  return output_queue_;
 }
 
 void DataLoader::Start() {
@@ -140,13 +153,12 @@ void DataLoader::Start() {
     LOG(WARNING) << "DataLoader::Start called but loader already running.";
     return;
   }
-  LOG(INFO) << "Starting DataLoader...";
-  file_path_provider_.Start();
-  chunk_source_loader_.Start();
-  shuffling_chunk_pool_.Start();
-  chunk_unpacker_.Start();
-  shuffling_frame_sampler_.Start();
-  tensor_generator_.Start();
+  LOG(INFO) << "Starting DataLoader with output stage '" << output_stage_name_
+            << "'.";
+  for (auto& [name, stage] : stages_) {
+    LOG(INFO) << "Starting stage '" << name << "'.";
+    stage->Start();
+  }
 
   metrics_thread_ = std::jthread(
       [this](std::stop_token stop_token) { MetricsThread(stop_token); });
@@ -155,7 +167,7 @@ void DataLoader::Start() {
   LOG(INFO) << "DataLoader started.";
 }
 
-DataLoader::~DataLoader() { Stop(false); }
+TensorTuple DataLoader::GetNext() { return GetOutputQueue()->Get(); }
 
 void DataLoader::Stop(bool graceful_drain) {
   if (stopped_) {
@@ -174,21 +186,15 @@ void DataLoader::Stop(bool graceful_drain) {
     metrics_thread_.join();
   }
 
-  tensor_generator_.Stop();
-  shuffling_frame_sampler_.Stop();
-  chunk_unpacker_.Stop();
-  shuffling_chunk_pool_.Stop();
-  chunk_source_loader_.Stop();
-  file_path_provider_.Stop();
+  for (auto it = stages_.rbegin(); it != stages_.rend(); ++it) {
+    LOG(INFO) << "Stopping stage '" << it->first << "'.";
+    it->second->Stop();
+  }
 
   stopped_ = true;
   started_ = false;
   LOG(INFO) << "DataLoader stopped.";
 }
-
-TensorTuple DataLoader::GetNext() { return output()->Get(); }
-
-Queue<TensorTuple>* DataLoader::output() { return tensor_generator_.output(); }
 
 std::pair<std::string, float> DataLoader::GetBucketMetrics(
     int time_period, bool include_pending) const {
@@ -220,19 +226,11 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   while (!stop_token.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     DataLoaderMetricsProto metrics;
-    auto collect_metric = [&metrics](const std::string& name, Stage& stage) {
-      StageMetricProto stage_metric = stage.FlushMetrics();
+    for (auto& [name, stage] : stages_) {
+      StageMetricProto stage_metric = stage->FlushMetrics();
       stage_metric.set_name(name);
       *metrics.add_stage_metrics() = std::move(stage_metric);
-    };
-
-    collect_metric(file_path_provider_stage_name_, file_path_provider_);
-    collect_metric(chunk_source_loader_stage_name_, chunk_source_loader_);
-    collect_metric(shuffling_chunk_pool_stage_name_, shuffling_chunk_pool_);
-    collect_metric(chunk_unpacker_stage_name_, chunk_unpacker_);
-    collect_metric(shuffling_frame_sampler_stage_name_,
-                   shuffling_frame_sampler_);
-    collect_metric(tensor_generator_stage_name_, tensor_generator_);
+    }
 
     metrics_aggregator_.RecordMetrics(std::move(metrics));
     metrics_aggregator_.Advance(std::chrono::steady_clock::now());
@@ -240,20 +238,63 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   LOG(INFO) << "Metrics thread stopping.";
 }
 
+std::vector<std::pair<std::string, StageControlResponse>>
+DataLoader::SendControlMessage(const StageControlRequest& request) {
+  std::vector<std::pair<std::string, StageControlResponse>> responses;
+  responses.reserve(stages_.size());
+  for (auto& [name, stage] : stages_) {
+    std::optional<StageControlResponse> response = stage->Control(request);
+    if (response.has_value()) {
+      responses.emplace_back(name, std::move(*response));
+    }
+  }
+  return responses;
+}
+
 std::pair<std::string, int> DataLoader::ResetChunkAnchor() {
-  return shuffling_chunk_pool_.ResetAnchor();
+  StageControlRequest request;
+  request.mutable_chunk_pool_request()->set_reset_chunk_anchor(true);
+  StageControlResponse response =
+      ExtractFirstChunkPoolResponse(SendControlMessage(request));
+  if (!response.has_chunk_pool_response()) {
+    return {"", 0};
+  }
+  const auto& chunk_response = response.chunk_pool_response();
+  return {std::string(chunk_response.chunk_anchor()),
+          chunk_response.chunks_since_anchor()};
 }
 
 int DataLoader::ChunksSinceAnchor() {
-  return shuffling_chunk_pool_.ChunksSinceAnchor();
+  StageControlRequest request;
+  request.mutable_chunk_pool_request();
+  StageControlResponse response =
+      ExtractFirstChunkPoolResponse(SendControlMessage(request));
+  if (!response.has_chunk_pool_response()) {
+    return 0;
+  }
+  return response.chunk_pool_response().chunks_since_anchor();
 }
 
 std::string DataLoader::CurrentChunkAnchor() {
-  return shuffling_chunk_pool_.CurrentAnchor();
+  StageControlRequest request;
+  request.mutable_chunk_pool_request();
+  StageControlResponse response =
+      ExtractFirstChunkPoolResponse(SendControlMessage(request));
+  if (!response.has_chunk_pool_response()) {
+    return "";
+  }
+  return std::string(response.chunk_pool_response().chunk_anchor());
 }
 
 void DataLoader::SetChunkAnchor(std::string_view anchor) {
-  shuffling_chunk_pool_.SetAnchor(anchor);
+  StageControlRequest request;
+  request.mutable_chunk_pool_request()->set_set_chunk_anchor(
+      std::string(anchor));
+  StageControlResponse response =
+      ExtractFirstChunkPoolResponse(SendControlMessage(request));
+  if (!response.has_chunk_pool_response()) {
+    LOG(WARNING) << "No stage accepted chunk anchor control request.";
+  }
 }
 
 }  // namespace training

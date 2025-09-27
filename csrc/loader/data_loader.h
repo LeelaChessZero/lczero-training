@@ -1,18 +1,18 @@
 #pragma once
 
-#include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
-#include "loader/stages/chunk_source_loader.h"
-#include "loader/stages/chunk_unpacker.h"
-#include "loader/stages/file_path_provider.h"
-#include "loader/stages/shuffling_chunk_pool.h"
-#include "loader/stages/shuffling_frame_sampler.h"
-#include "loader/stages/tensor_generator.h"
+#include "loader/stages/stage_factory.h"
 #include "proto/data_loader_config.pb.h"
+#include "proto/stage_control.pb.h"
+#include "proto/training_metrics.pb.h"
 #include "utils/metrics/exponential_aggregator.h"
+#include "utils/queue.h"
 #include "utils/tensor.h"
 
 namespace lczero {
@@ -23,7 +23,7 @@ class DataLoader {
   using MetricsAggregator = ExponentialAggregator<DataLoaderMetricsProto,
                                                   TimePeriod::k250Milliseconds>;
 
-  DataLoader(const std::string& serialized_data_loader_config);
+  explicit DataLoader(const std::string& serialized_data_loader_config);
   ~DataLoader();
 
   void Start();
@@ -34,7 +34,13 @@ class DataLoader {
   std::pair<std::string, float> GetAggregateEndingNow(
       float duration_seconds, bool include_pending) const;
 
-  // Chunk anchor management methods.
+  void AddStage(const StageConfig& stage_config);
+  void AddStages(const DataLoaderConfig& config);
+  void AddStages(const std::string& serialized_data_loader_config);
+
+  std::vector<std::pair<std::string, StageControlResponse>> SendControlMessage(
+      const StageControlRequest& request);
+
   std::pair<std::string, int> ResetChunkAnchor();
   int ChunksSinceAnchor();
   std::string CurrentChunkAnchor();
@@ -43,22 +49,18 @@ class DataLoader {
  private:
   static DataLoaderConfig ParseConfig(
       const std::string& serialized_data_loader_config);
-  Queue<TensorTuple>* output();
+  Stage::StageList BuildStageList() const;
+  std::string ResolveStageName(const StageConfig& stage_config) const;
+  void UpdateOutputQueue(const std::string& stage_name, Stage* stage);
+  Queue<TensorTuple>* GetOutputQueue();
+  const Queue<TensorTuple>* GetOutputQueue() const;
   void MetricsThread(std::stop_token stop_token);
 
-  DataLoaderConfig config_;
-  std::string file_path_provider_stage_name_;
-  std::string chunk_source_loader_stage_name_;
-  std::string shuffling_chunk_pool_stage_name_;
-  std::string chunk_unpacker_stage_name_;
-  std::string shuffling_frame_sampler_stage_name_;
-  std::string tensor_generator_stage_name_;
-  FilePathProvider file_path_provider_;
-  ChunkSourceLoader chunk_source_loader_;
-  ShufflingChunkPool shuffling_chunk_pool_;
-  ChunkUnpacker chunk_unpacker_;
-  ShufflingFrameSampler shuffling_frame_sampler_;
-  TensorGenerator tensor_generator_;
+  using StageEntry = std::pair<std::string, std::unique_ptr<Stage>>;
+
+  std::vector<StageEntry> stages_;
+  Queue<TensorTuple>* output_queue_ = nullptr;
+  std::string output_stage_name_;
   MetricsAggregator metrics_aggregator_;
   std::jthread metrics_thread_;
   bool started_ = false;

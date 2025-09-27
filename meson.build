@@ -73,6 +73,7 @@ files = [
   'csrc/loader/stages/chunk_source_loader.cc',
   'csrc/loader/stages/chunk_unpacker.cc',
   'csrc/loader/stages/file_path_provider.cc',
+  'csrc/loader/stages/stage_factory.cc',
   'csrc/loader/chunk_source/rawfile_chunk_source.cc',
   'csrc/loader/chunk_source/tar_chunk_source.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
@@ -203,6 +204,22 @@ load_metric_test = executable(
   dependencies : test_deps + [absl_deps['synchronization']],
   link_with : loader_lib,
 )
+
+stage_factory_test = executable(
+  'stage_factory_test',
+  'csrc/loader/stages/stage_factory_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
+
+data_loader_test = executable(
+  'data_loader_test',
+  'csrc/loader/data_loader_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
@@ -216,6 +233,8 @@ test('tensor_test', tensor_test)
 test('tensor_generator_test', tensor_generator_test)
 test('stats_test', stats_test)
 test('load_metric_test', load_metric_test)
+test('stage_factory_test', stage_factory_test)
+test('data_loader_test', data_loader_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',
