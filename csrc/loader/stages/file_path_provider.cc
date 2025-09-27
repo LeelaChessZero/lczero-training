@@ -104,7 +104,8 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
   int wd = inotify_add_watch(inotify_fd_, directory.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
                                  IN_DELETE | IN_DELETE_SELF | IN_MOVE);
-  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << directory;
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << directory << ": "
+                   << strerror(errno);
   watch_descriptors_[wd] = directory;
 
   // Step 2: Scan directory non-recursively, remembering files and subdirs
@@ -217,7 +218,8 @@ void FilePathProvider::AddWatchRecursive(const Path& path) {
   int wd = inotify_add_watch(inotify_fd_, path.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
                                  IN_DELETE | IN_DELETE_SELF | IN_MOVE);
-  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << path;
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << path << ": "
+                   << strerror(errno);
   watch_descriptors_[wd] = path;
 
   // Recursively add watches for subdirectories
@@ -247,14 +249,14 @@ void FilePathProvider::MonitorThread() {
   AddDirectory(directory_);
 
   int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-  CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd";
+  CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd: " << strerror(errno);
   absl::Cleanup epoll_cleanup([epoll_fd]() { close(epoll_fd); });
 
   struct epoll_event event;
   event.events = EPOLLIN;
   event.data.fd = inotify_fd_;
   CHECK_EQ(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event), 0)
-      << "Failed to add inotify fd to epoll";
+      << "Failed to add inotify fd to epoll: " << strerror(errno);
 
   while (true) {
     {
