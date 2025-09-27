@@ -94,22 +94,39 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
       tensor_generator_stage_name_(),
       file_path_provider_(
           GetFilePathProviderConfig(config_, &file_path_provider_stage_name_)),
-      chunk_source_loader_(file_path_provider_.output(),
-                           GetChunkSourceLoaderConfig(
-                               config_, &chunk_source_loader_stage_name_)),
-      shuffling_chunk_pool_(chunk_source_loader_.output(),
-                            GetShufflingChunkPoolConfig(
-                                config_, &shuffling_chunk_pool_stage_name_)),
+      chunk_source_loader_(
+          GetChunkSourceLoaderConfig(config_, &chunk_source_loader_stage_name_),
+          Stage::StageList{
+              {file_path_provider_stage_name_, &file_path_provider_}}),
+      shuffling_chunk_pool_(
+          GetShufflingChunkPoolConfig(config_,
+                                      &shuffling_chunk_pool_stage_name_),
+          Stage::StageList{
+              {file_path_provider_stage_name_, &file_path_provider_},
+              {chunk_source_loader_stage_name_, &chunk_source_loader_}}),
       chunk_unpacker_(
-          shuffling_chunk_pool_.output(),
-          GetChunkUnpackerConfig(config_, &chunk_unpacker_stage_name_)),
+          GetChunkUnpackerConfig(config_, &chunk_unpacker_stage_name_),
+          Stage::StageList{
+              {file_path_provider_stage_name_, &file_path_provider_},
+              {chunk_source_loader_stage_name_, &chunk_source_loader_},
+              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_}}),
       shuffling_frame_sampler_(
-          chunk_unpacker_.output(),
           GetShufflingFrameSamplerConfig(config_,
-                                         &shuffling_frame_sampler_stage_name_)),
+                                         &shuffling_frame_sampler_stage_name_),
+          Stage::StageList{
+              {file_path_provider_stage_name_, &file_path_provider_},
+              {chunk_source_loader_stage_name_, &chunk_source_loader_},
+              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_},
+              {chunk_unpacker_stage_name_, &chunk_unpacker_}}),
       tensor_generator_(
-          shuffling_frame_sampler_.output(),
-          GetTensorGeneratorConfig(config_, &tensor_generator_stage_name_)),
+          GetTensorGeneratorConfig(config_, &tensor_generator_stage_name_),
+          Stage::StageList{
+              {file_path_provider_stage_name_, &file_path_provider_},
+              {chunk_source_loader_stage_name_, &chunk_source_loader_},
+              {shuffling_chunk_pool_stage_name_, &shuffling_chunk_pool_},
+              {chunk_unpacker_stage_name_, &chunk_unpacker_},
+              {shuffling_frame_sampler_stage_name_,
+               &shuffling_frame_sampler_}}),
       metrics_aggregator_(
           [](DataLoaderMetricsProto& m) { m.Clear(); },
           [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
@@ -119,6 +136,10 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
 }
 
 void DataLoader::Start() {
+  if (started_) {
+    LOG(WARNING) << "DataLoader::Start called but loader already running.";
+    return;
+  }
   LOG(INFO) << "Starting DataLoader...";
   file_path_provider_.Start();
   chunk_source_loader_.Start();
@@ -129,25 +150,40 @@ void DataLoader::Start() {
 
   metrics_thread_ = std::jthread(
       [this](std::stop_token stop_token) { MetricsThread(stop_token); });
+  started_ = true;
+  stopped_ = false;
   LOG(INFO) << "DataLoader started.";
 }
 
 DataLoader::~DataLoader() { Stop(false); }
 
 void DataLoader::Stop(bool graceful_drain) {
-  LOG(INFO) << "Shutting down FilePathProvider.";
-  file_path_provider_.Close();
-  LOG(INFO) << "Shutting down ShufflingChunkPool.";
-  shuffling_chunk_pool_.Close();
-  if (!graceful_drain) {
-    file_path_provider_.output()->Close();
-    chunk_source_loader_.output()->Close();
-    shuffling_chunk_pool_.output()->Close();
-    chunk_unpacker_.output()->Close();
-    shuffling_frame_sampler_.output()->Close();
-    tensor_generator_.output()->Close();
+  if (stopped_) {
+    return;
   }
-  LOG(INFO) << "DataLoader shutting down.";
+
+  if (graceful_drain) {
+    LOG(WARNING) << "Graceful drain is no longer supported. Proceeding with "
+                    "immediate stop.";
+  }
+
+  LOG(INFO) << "Stopping DataLoader.";
+
+  if (metrics_thread_.joinable()) {
+    metrics_thread_.request_stop();
+    metrics_thread_.join();
+  }
+
+  tensor_generator_.Stop();
+  shuffling_frame_sampler_.Stop();
+  chunk_unpacker_.Stop();
+  shuffling_chunk_pool_.Stop();
+  chunk_source_loader_.Stop();
+  file_path_provider_.Stop();
+
+  stopped_ = true;
+  started_ = false;
+  LOG(INFO) << "DataLoader stopped.";
 }
 
 TensorTuple DataLoader::GetNext() { return output()->Get(); }
@@ -184,61 +220,20 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   while (!stop_token.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     DataLoaderMetricsProto metrics;
-    {
-      auto stage_metrics = file_path_provider_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(file_path_provider_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_file_path_provider() = std::move(stage_metrics);
-    }
-    {
-      auto stage_metrics = chunk_source_loader_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(chunk_source_loader_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_chunk_source_loader() = std::move(stage_metrics);
-    }
-    {
-      auto stage_metrics = shuffling_chunk_pool_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(shuffling_chunk_pool_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_shuffling_chunk_pool() = std::move(stage_metrics);
-    }
-    {
-      auto stage_metrics = chunk_unpacker_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(chunk_unpacker_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_chunk_unpacker() = std::move(stage_metrics);
-    }
-    {
-      auto stage_metrics = shuffling_frame_sampler_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(shuffling_frame_sampler_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_shuffling_frame_sampler() =
-          std::move(stage_metrics);
-    }
-    {
-      auto stage_metrics = tensor_generator_.FlushMetrics();
-      auto* stage_proto = metrics.add_stage_metrics();
-      stage_proto->set_name(tensor_generator_stage_name_);
-      if (stage_metrics.has_queue()) {
-        *stage_proto->add_output_queue_metrics() = stage_metrics.queue();
-      }
-      *stage_proto->mutable_tensor_generator() = std::move(stage_metrics);
-    }
+    auto collect_metric = [&metrics](const std::string& name, Stage& stage) {
+      StageMetricProto stage_metric = stage.FlushMetrics();
+      stage_metric.set_name(name);
+      *metrics.add_stage_metrics() = std::move(stage_metric);
+    };
+
+    collect_metric(file_path_provider_stage_name_, file_path_provider_);
+    collect_metric(chunk_source_loader_stage_name_, chunk_source_loader_);
+    collect_metric(shuffling_chunk_pool_stage_name_, shuffling_chunk_pool_);
+    collect_metric(chunk_unpacker_stage_name_, chunk_unpacker_);
+    collect_metric(shuffling_frame_sampler_stage_name_,
+                   shuffling_frame_sampler_);
+    collect_metric(tensor_generator_stage_name_, tensor_generator_);
+
     metrics_aggregator_.RecordMetrics(std::move(metrics));
     metrics_aggregator_.Advance(std::chrono::steady_clock::now());
   }

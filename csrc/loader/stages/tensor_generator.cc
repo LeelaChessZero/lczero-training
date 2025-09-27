@@ -16,9 +16,10 @@
 namespace lczero {
 namespace training {
 
-TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
-                                 const TensorGeneratorConfig& config)
-    : input_queue_(input_queue),
+TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config,
+                                 const StageList& existing_stages)
+    : SingleInputStage<TensorGeneratorConfig, InputType>(config,
+                                                         existing_stages),
       output_queue_(config.queue_capacity()),
       batch_size_(config.batch_size()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
@@ -32,11 +33,14 @@ TensorGenerator::TensorGenerator(Queue<InputType>* input_queue,
   }
 }
 
-TensorGenerator::~TensorGenerator() {
-  LOG(INFO) << "TensorGenerator shutting down.";
-}
+TensorGenerator::~TensorGenerator() { Stop(); }
 
 Queue<TensorGenerator::OutputType>* TensorGenerator::output() {
+  return &output_queue_;
+}
+
+QueueBase* TensorGenerator::GetOutput(std::string_view name) {
+  (void)name;
   return &output_queue_;
 }
 
@@ -45,6 +49,19 @@ void TensorGenerator::Start() {
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
     thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
   }
+}
+
+void TensorGenerator::Stop() {
+  bool expected = false;
+  if (!stop_requested_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  LOG(INFO) << "Stopping TensorGenerator.";
+  input_queue()->Close();
+  thread_pool_.WaitAll();
+  output_queue_.Close();
+  LOG(INFO) << "TensorGenerator stopped.";
 }
 
 void TensorGenerator::Worker(ThreadContext* context) {
@@ -58,7 +75,7 @@ void TensorGenerator::Worker(ThreadContext* context) {
       batch.clear();
       for (size_t i = 0; i < batch_size_; ++i) {
         LoadMetricPauser pauser(context->load_metric_updater);
-        batch.push_back(input_queue_->Get());
+        batch.push_back(input_queue()->Get());
       }
 
       // Convert batch to tensors.
@@ -189,14 +206,16 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
   }
 }
 
-TensorGeneratorMetricsProto TensorGenerator::FlushMetrics() {
-  TensorGeneratorMetricsProto result;
+StageMetricProto TensorGenerator::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_tensor_generator();
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*result.mutable_load(),
+    UpdateFrom(*metrics->mutable_load(),
                context->load_metric_updater.FlushMetrics());
   }
-  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
-  return result;
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 }  // namespace training

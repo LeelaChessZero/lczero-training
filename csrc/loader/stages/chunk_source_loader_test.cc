@@ -10,12 +10,36 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+template <typename T>
+class PassthroughStage : public Stage {
+ public:
+  explicit PassthroughStage(Queue<T>* queue) : queue_(queue) {}
+
+  void Start() override {}
+  void Stop() override {}
+  StageMetricProto FlushMetrics() override { return StageMetricProto(); }
+  QueueBase* GetOutput(std::string_view name = "") override {
+    (void)name;
+    return queue_;
+  }
+
+ private:
+  Queue<T>* queue_;
+};
+
+}  // namespace
+
 TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.set_queue_capacity(10);
-  ChunkSourceLoader feed(&input_queue, config);
+  config.set_input("source");
+  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkSourceLoader feed(config, stages);
   feed.Start();
 
   {
@@ -48,7 +72,10 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.set_queue_capacity(10);
-  ChunkSourceLoader feed(&input_queue, config);
+  config.set_input("source");
+  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkSourceLoader feed(config, stages);
   feed.Start();
 
   {
@@ -79,7 +106,10 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.set_queue_capacity(10);
-  ChunkSourceLoader feed(&input_queue, config);
+  config.set_input("source");
+  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
+  Stage::StageList stages{{"source", &source_stage}};
+  ChunkSourceLoader feed(config, stages);
   feed.Start();
 
   {

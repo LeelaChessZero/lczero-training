@@ -17,6 +17,27 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+template <typename T>
+class PassthroughStage : public Stage {
+ public:
+  explicit PassthroughStage(Queue<T>* queue) : queue_(queue) {}
+
+  void Start() override {}
+  void Stop() override {}
+  StageMetricProto FlushMetrics() override { return StageMetricProto(); }
+  QueueBase* GetOutput(std::string_view name = "") override {
+    (void)name;
+    return queue_;
+  }
+
+ private:
+  Queue<T>* queue_;
+};
+
+}  // namespace
+
 // Mock ChunkSource for testing
 class MockChunkSource : public ChunkSource {
  public:
@@ -62,6 +83,8 @@ class ShufflingChunkPoolTest : public ::testing::Test {
     input_queue_ = std::make_unique<Queue<ChunkSourceWithPhase>>(100);
     input_producer_ = std::make_unique<Queue<ChunkSourceWithPhase>::Producer>(
         input_queue_->CreateProducer());
+    input_stage_ = std::make_unique<PassthroughStage<ChunkSourceWithPhase>>(
+        input_queue_.get());
   }
 
   void TearDown() override {
@@ -93,8 +116,17 @@ class ShufflingChunkPoolTest : public ::testing::Test {
     if (input_producer_) input_producer_.reset();
   }
 
+  Stage::StageList StageListForInput() const {
+    return Stage::StageList{{"source", input_stage_.get()}};
+  }
+
+  void SetInputProvider(ShufflingChunkPoolConfig* config) const {
+    config->set_input("source");
+  }
+
   std::unique_ptr<Queue<ChunkSourceWithPhase>> input_queue_;
   std::unique_ptr<Queue<ChunkSourceWithPhase>::Producer> input_producer_;
+  std::unique_ptr<PassthroughStage<ChunkSourceWithPhase>> input_stage_;
 };
 
 TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
@@ -109,8 +141,9 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
   auto* output_queue = shuffling_chunk_pool.output();
 
@@ -140,9 +173,10 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Constructor should now succeed (initialization is asynchronous)
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
   // The initialization thread should handle the error case
   auto* output_queue = shuffling_chunk_pool.output();
@@ -175,10 +209,11 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Test that constructor completes and processes mock chunk sources
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+    ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -202,8 +237,9 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
@@ -236,8 +272,9 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
   // Verify chunks are being produced from initial sources
   auto* output_queue = shuffling_chunk_pool.output();
@@ -270,10 +307,11 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Should only keep sources that fit in the window
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+    ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -323,10 +361,11 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // ShufflingChunkPool should handle sorting internally (newest first)
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+    ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -349,10 +388,11 @@ TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Should work without hanging or crashing
   EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+    ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -373,8 +413,9 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);  // Large enough to hold all chunks
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
   auto* output_queue = shuffling_chunk_pool.output();
 
@@ -421,8 +462,9 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
@@ -431,8 +473,8 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
   // Verify output queue is working before close
   EXPECT_GT(output_queue->Size(), 0);
 
-  // Explicitly close the chunk set
-  shuffling_chunk_pool.Close();
+  // Explicitly stop the chunk set
+  shuffling_chunk_pool.Stop();
 
   // Drain all remaining items from the queue
   while (output_queue->Size() > 0) {
@@ -456,16 +498,17 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(2);
   config.set_queue_capacity(50);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce chunks
   output_queue->WaitForSizeAtLeast(1);
   size_t chunks_before_close = output_queue->Size();
 
-  // Close the chunk set
-  shuffling_chunk_pool.Close();
+  // Stop the chunk set
+  shuffling_chunk_pool.Stop();
 
   // Drain any remaining chunks from the queue
   try {
@@ -493,13 +536,14 @@ TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
-  // Close multiple times - should not crash or cause issues
-  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
-  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
-  EXPECT_NO_THROW(shuffling_chunk_pool.Close());
+  // Stop multiple times - should not crash or cause issues
+  EXPECT_NO_THROW(shuffling_chunk_pool.Stop());
+  EXPECT_NO_THROW(shuffling_chunk_pool.Stop());
+  EXPECT_NO_THROW(shuffling_chunk_pool.Stop());
 
   CloseInputQueue();
 }
@@ -515,10 +559,11 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Test that destructor calls Close() and properly shuts down
   {
-    ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+    ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
     auto* output_queue = shuffling_chunk_pool.output();
 
     // Wait for workers to produce some chunks
@@ -528,7 +573,7 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
     // Close input queue before destructor to allow threads to finish
     CloseInputQueue();
 
-    // ShufflingChunkPool destructor should be called here, which calls Close()
+    // ShufflingChunkPool destructor should be called here, which calls Stop()
     // and waits for all threads to finish
   }
 
@@ -547,8 +592,9 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool shuffling_chunk_pool(input_queue_.get(), config);
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
@@ -564,8 +610,8 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   // Should still be able to get chunks (queue not closed)
   EXPECT_NO_THROW(output_queue->Get());
 
-  // Explicitly close to clean up
-  shuffling_chunk_pool.Close();
+  // Explicitly stop to clean up
+  shuffling_chunk_pool.Stop();
 }
 
 TEST_F(ShufflingChunkPoolTest, BasicAnchorFunctionality) {
@@ -578,8 +624,9 @@ TEST_F(ShufflingChunkPoolTest, BasicAnchorFunctionality) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool pool(input_queue_.get(), config);
+  ShufflingChunkPool pool(config, StageListForInput());
 
   // Test initial state
   EXPECT_EQ(pool.ChunksSinceAnchor(), 0);
@@ -607,8 +654,9 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool pool(input_queue_.get(), config);
+  ShufflingChunkPool pool(config, StageListForInput());
 
   // Wait for initialization to complete
   pool.output()->WaitForSizeAtLeast(1);
@@ -631,12 +679,13 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterIncrement) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
   // Start with some initial sources and complete scan
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPool pool(input_queue_.get(), config);
+  ShufflingChunkPool pool(config, StageListForInput());
 
   // Set anchor to a key that won't match our new sources
   pool.SetAnchor("non_matching_key");
@@ -671,8 +720,9 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
   config.set_indexing_threads(1);
   config.set_chunk_loading_threads(1);
   config.set_queue_capacity(100);
+  SetInputProvider(&config);
 
-  ShufflingChunkPool pool(input_queue_.get(), config);
+  ShufflingChunkPool pool(config, StageListForInput());
 
   // Set anchor to middle source before marking scan complete
   pool.SetAnchor("source_b");

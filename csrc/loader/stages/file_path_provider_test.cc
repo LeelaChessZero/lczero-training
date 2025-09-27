@@ -253,7 +253,7 @@ TEST_F(FilePathProviderTest, QueueClosurePreventsNewFiles) {
   // Consume initial scan results
   ConsumeInitialScan(queue);
 
-  file_path_provider.Close();
+  file_path_provider.Stop();
 
   // Any subsequent queue operations should throw
   EXPECT_THROW(queue->Get(), QueueClosedException);

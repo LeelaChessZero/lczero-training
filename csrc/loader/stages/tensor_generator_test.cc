@@ -15,6 +15,27 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+template <typename T>
+class PassthroughStage : public Stage {
+ public:
+  explicit PassthroughStage(Queue<T>* queue) : queue_(queue) {}
+
+  void Start() override {}
+  void Stop() override {}
+  StageMetricProto FlushMetrics() override { return StageMetricProto(); }
+  QueueBase* GetOutput(std::string_view name = "") override {
+    (void)name;
+    return queue_;
+  }
+
+ private:
+  Queue<T>* queue_;
+};
+
+}  // namespace
+
 class TensorGeneratorTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -22,6 +43,7 @@ class TensorGeneratorTest : public ::testing::Test {
     config_.set_batch_size(4);
     config_.set_threads(1);
     config_.set_queue_capacity(10);
+    config_.set_input("source");
   }
 
   V6TrainingData CreateTestFrame() {
@@ -198,7 +220,9 @@ class TensorGeneratorTest : public ::testing::Test {
 };
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -214,7 +238,9 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 }
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -231,7 +257,9 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -266,7 +294,9 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   config_.set_batch_size(2);
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -282,7 +312,9 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   // Close input queue without sending data.
@@ -294,7 +326,9 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   config_.set_batch_size(1);
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -332,7 +366,9 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   config_.set_batch_size(1);
-  TensorGenerator generator(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  TensorGenerator generator(config_, stages);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();

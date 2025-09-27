@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -11,7 +12,9 @@
 #include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
 #include "loader/stages/chunk_source_loader.h"
+#include "loader/stages/stage.h"
 #include "proto/data_loader_config.pb.h"
+#include "proto/stage_control.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/metrics/load_metric.h"
 #include "utils/queue.h"
@@ -21,17 +24,22 @@
 namespace lczero {
 namespace training {
 
-class ShufflingChunkPool {
+class ShufflingChunkPool
+    : public SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase> {
  public:
-  ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
-                     const ShufflingChunkPoolConfig& config);
+  ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
+                     const StageList& existing_stages);
   ~ShufflingChunkPool();
 
   Queue<std::string>* output();
-  void Start();
-  void Close();
+  void Start() override;
+  void Stop() override;
 
-  ShufflingChunkPoolMetricsProto FlushMetrics();
+  StageMetricProto FlushMetrics() override;
+
+  QueueBase* GetOutput(std::string_view name = "") override;
+  std::optional<StageControlResponse> Control(
+      const StageControlRequest& request) override;
 
   // Anchor management methods for tracking chunks since a specific point.
   std::pair<std::string, int> ResetAnchor();
@@ -68,7 +76,6 @@ class ShufflingChunkPool {
   const ShufflingChunkPoolConfig config_;
   ThreadPool indexing_pool_;
   ThreadPool chunk_loading_pool_;
-  Queue<ChunkSourceWithPhase>* input_queue_;
   Queue<std::string> output_queue_;
 
   absl::Mutex chunk_sources_mutex_;
@@ -84,6 +91,7 @@ class ShufflingChunkPool {
   absl::Mutex anchor_mutex_;
   std::string anchor_ ABSL_GUARDED_BY(anchor_mutex_);
   std::atomic<int> chunks_since_anchor_{0};
+  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace training

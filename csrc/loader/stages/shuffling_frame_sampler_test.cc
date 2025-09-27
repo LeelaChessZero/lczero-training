@@ -10,12 +10,34 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+template <typename T>
+class PassthroughStage : public Stage {
+ public:
+  explicit PassthroughStage(Queue<T>* queue) : queue_(queue) {}
+
+  void Start() override {}
+  void Stop() override {}
+  StageMetricProto FlushMetrics() override { return StageMetricProto(); }
+  QueueBase* GetOutput(std::string_view name = "") override {
+    (void)name;
+    return queue_;
+  }
+
+ private:
+  Queue<T>* queue_;
+};
+
+}  // namespace
+
 class ShufflingFrameSamplerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_reservoir_size_per_thread(10);  // Small size for testing
     config_.set_queue_capacity(20);
+    config_.set_input("source");
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -31,7 +53,10 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
 };
 
 TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ShufflingFrameSampler sampler(config_, stages);
+  sampler.Start();
 
   // Send 5 frames (less than reservoir size)
   auto producer = input_queue_->CreateProducer();
@@ -58,7 +83,10 @@ TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ShufflingFrameSampler sampler(config_, stages);
+  sampler.Start();
 
   // Send 20 frames (more than reservoir size of 10)
   auto producer = input_queue_->CreateProducer();
@@ -92,7 +120,10 @@ TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
-  ShufflingFrameSampler sampler(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ShufflingFrameSampler sampler(config_, stages);
+  sampler.Start();
 
   // Close input queue without sending data
   input_queue_->Close();
@@ -102,7 +133,10 @@ TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
-  ShufflingFrameSampler sampler(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ShufflingFrameSampler sampler(config_, stages);
+  sampler.Start();
 
   // Send exactly reservoir_size_per_thread frames
   auto producer = input_queue_->CreateProducer();
@@ -131,7 +165,10 @@ TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
 
 TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   config_.set_reservoir_size_per_thread(2);
-  ShufflingFrameSampler sampler(input_queue_.get(), config_);
+  PassthroughStage<FrameType> source_stage(input_queue_.get());
+  Stage::StageList stages{{"source", &source_stage}};
+  ShufflingFrameSampler sampler(config_, stages);
+  sampler.Start();
 
   auto producer = input_queue_->CreateProducer();
 

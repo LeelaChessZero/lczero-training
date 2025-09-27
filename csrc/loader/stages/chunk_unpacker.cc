@@ -10,9 +10,9 @@
 namespace lczero {
 namespace training {
 
-ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
-                             const ChunkUnpackerConfig& config)
-    : input_queue_(input_queue),
+ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
+                             const StageList& existing_stages)
+    : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkUnpacker with " << config.threads()
@@ -25,9 +25,14 @@ ChunkUnpacker::ChunkUnpacker(Queue<InputType>* input_queue,
   }
 }
 
-ChunkUnpacker::~ChunkUnpacker() { LOG(INFO) << "ChunkUnpacker shutting down."; }
+ChunkUnpacker::~ChunkUnpacker() { Stop(); }
 
 Queue<ChunkUnpacker::OutputType>* ChunkUnpacker::output() {
+  return &output_queue_;
+}
+
+QueueBase* ChunkUnpacker::GetOutput(std::string_view name) {
+  (void)name;
   return &output_queue_;
 }
 
@@ -38,6 +43,19 @@ void ChunkUnpacker::Start() {
   }
 }
 
+void ChunkUnpacker::Stop() {
+  bool expected = false;
+  if (!stop_requested_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  LOG(INFO) << "Stopping ChunkUnpacker.";
+  input_queue()->Close();
+  thread_pool_.WaitAll();
+  output_queue_.Close();
+  LOG(INFO) << "ChunkUnpacker stopped.";
+}
+
 void ChunkUnpacker::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread.
   auto producer = output_queue_.CreateProducer();
@@ -46,7 +64,7 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
     while (true) {
       auto chunk = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue_->Get();
+        return input_queue()->Get();
       }();
 
       // Check if chunk size is valid for V6TrainingData frames.
@@ -77,14 +95,16 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
   }
 }
 
-ChunkUnpackerMetricsProto ChunkUnpacker::FlushMetrics() {
-  ChunkUnpackerMetricsProto result;
+StageMetricProto ChunkUnpacker::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_chunk_unpacker();
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*result.mutable_load(),
+    UpdateFrom(*metrics->mutable_load(),
                context->load_metric_updater.FlushMetrics());
   }
-  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
-  return result;
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 }  // namespace training

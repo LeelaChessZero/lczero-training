@@ -61,6 +61,8 @@ class DataLoader {
   TensorGenerator tensor_generator_;
   MetricsAggregator metrics_aggregator_;
   std::jthread metrics_thread_;
+  bool started_ = false;
+  bool stopped_ = false;
 };
 
 }  // namespace training

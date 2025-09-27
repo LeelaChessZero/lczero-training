@@ -19,33 +19,27 @@
 namespace lczero {
 namespace training {
 
-ShufflingChunkPool::ShufflingChunkPool(Queue<ChunkSourceWithPhase>* input_queue,
-                                       const ShufflingChunkPoolConfig& config)
-    : chunk_pool_size_(config.chunk_pool_size()),
+ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
+                                       const StageList& existing_stages)
+    : SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>(
+          config, existing_stages),
+      chunk_pool_size_(config.chunk_pool_size()),
       config_(config),
       indexing_pool_(config.indexing_threads(), ThreadPoolOptions{}),
       chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}),
-      input_queue_(input_queue),
       output_queue_(config.queue_capacity()) {
   LOG(INFO) << "Initializing ShufflingChunkPool with pool size "
             << config.chunk_pool_size();
 }
 
-ShufflingChunkPool::~ShufflingChunkPool() {
-  LOG(INFO) << "ShufflingChunkPool shutting down.";
-  Close();
-  if (initialization_thread_.joinable()) {
-    LOG(INFO) << "Waiting for initialization thread to join...";
-    initialization_thread_.join();
-  }
-  LOG(INFO) << "Waiting for indexing pool to finish...";
-  indexing_pool_.WaitAll();
-  LOG(INFO) << "Waiting for chunk loading pool to finish...";
-  chunk_loading_pool_.WaitAll();
-  LOG(INFO) << "ShufflingChunkPool shutdown complete.";
-}
+ShufflingChunkPool::~ShufflingChunkPool() { Stop(); }
 
 Queue<std::string>* ShufflingChunkPool::output() { return &output_queue_; }
+
+QueueBase* ShufflingChunkPool::GetOutput(std::string_view name) {
+  (void)name;
+  return &output_queue_;
+}
 
 void ShufflingChunkPool::Start() {
   LOG(INFO) << "Starting ShufflingChunkPool initialization thread.";
@@ -76,11 +70,34 @@ void ShufflingChunkPool::Start() {
         chunk_loading_pool_.Enqueue(
             [this, context]() { OutputWorker(context); });
       }
+    } catch (const QueueClosedException&) {
+      LOG(INFO) << "ShufflingChunkPool initialization interrupted, input "
+                   "queue closed.";
+      output_queue_.Close();
     } catch (const std::exception& e) {
       LOG(ERROR) << "ShufflingChunkPool initialization failed: " << e.what();
       output_queue_.Close();
     }
   });
+}
+
+void ShufflingChunkPool::Stop() {
+  bool expected = false;
+  if (!stop_requested_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  LOG(INFO) << "Stopping ShufflingChunkPool.";
+  input_queue()->Close();
+  output_queue_.Close();
+
+  if (initialization_thread_.joinable()) {
+    initialization_thread_.join();
+  }
+
+  indexing_pool_.WaitAll();
+  chunk_loading_pool_.WaitAll();
+  LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 
 std::vector<std::unique_ptr<ChunkSource>>
@@ -89,7 +106,7 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
 
   // Read from input queue until kInitialScanComplete.
   while (true) {
-    auto chunk_source_with_phase = input_queue_->Get();
+    auto chunk_source_with_phase = input_queue()->Get();
 
     if (chunk_source_with_phase.message_type ==
         FilePathProvider::MessageType::kInitialScanComplete) {
@@ -191,7 +208,7 @@ void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
     while (true) {
       auto chunk_source_with_phase = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue_->Get();
+        return input_queue()->Get();
       }();
 
       if (chunk_source_with_phase.message_type ==
@@ -301,28 +318,26 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
   stream_shuffler_.SetLowerBound(new_lower_bound);
 }
 
-ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
-  ShufflingChunkPoolMetricsProto result;
+StageMetricProto ShufflingChunkPool::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_shuffling_chunk_pool();
 
   // Aggregate indexing load metrics from all indexing threads.
   for (const auto& context : indexing_thread_contexts_) {
-    UpdateFrom(*result.mutable_indexing_load(),
+    UpdateFrom(*metrics->mutable_indexing_load(),
                context->load_metric_updater.FlushMetrics());
   }
 
   // Aggregate chunk loading load metrics from all chunk loading threads.
   for (const auto& context : chunk_loading_thread_contexts_) {
-    UpdateFrom(*result.mutable_chunk_loading_load(),
+    UpdateFrom(*metrics->mutable_chunk_loading_load(),
                context->load_metric_updater.FlushMetrics());
   }
-
-  // Get queue metrics.
-  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
 
   // Get chunk sources statistics and pool state.
   {
     absl::MutexLock lock(&chunk_sources_mutex_);
-    AddSample(*result.mutable_chunk_sources_count(),
+    AddSample(*metrics->mutable_chunk_sources_count(),
               static_cast<int64_t>(chunk_sources_.size()));
 
     // Calculate current chunks and set pool capacity.
@@ -331,18 +346,20 @@ ShufflingChunkPoolMetricsProto ShufflingChunkPool::FlushMetrics() {
       current_chunks = chunk_sources_.back().start_chunk_index +
                        chunk_sources_.back().source->GetChunkCount();
     }
-    result.set_current_chunks(current_chunks);
-    result.set_pool_capacity(chunk_pool_size_);
+    metrics->set_current_chunks(current_chunks);
+    metrics->set_pool_capacity(chunk_pool_size_);
   }
 
   // Get anchor-related metrics.
   {
     absl::MutexLock lock(&anchor_mutex_);
-    result.set_chunks_since_anchor(chunks_since_anchor_);
-    result.set_anchor(anchor_);
+    metrics->set_chunks_since_anchor(chunks_since_anchor_);
+    metrics->set_anchor(anchor_);
   }
 
-  return result;
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
@@ -359,11 +376,7 @@ std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
   return {anchor_, previous_count};
 }
 
-int ShufflingChunkPool::ChunksSinceAnchor() {
-  absl::MutexLock lock(&chunk_sources_mutex_);
-  if (chunk_sources_.empty()) return 0;
-  return chunks_since_anchor_;
-}
+int ShufflingChunkPool::ChunksSinceAnchor() { return chunks_since_anchor_; }
 
 std::string ShufflingChunkPool::CurrentAnchor() {
   absl::MutexLock lock(&anchor_mutex_);
@@ -375,7 +388,34 @@ void ShufflingChunkPool::SetAnchor(std::string_view anchor) {
   anchor_ = anchor;
 }
 
-void ShufflingChunkPool::Close() { output_queue_.Close(); }
+std::optional<StageControlResponse> ShufflingChunkPool::Control(
+    const StageControlRequest& request) {
+  if (!request.has_chunk_pool_request()) {
+    return std::nullopt;
+  }
+
+  const auto& chunk_request = request.chunk_pool_request();
+  StageControlResponse response;
+  auto* chunk_response = response.mutable_chunk_pool_response();
+
+  if (chunk_request.reset_chunk_anchor()) {
+    auto [anchor, chunks] = ResetAnchor();
+    chunk_response->set_chunk_anchor(anchor);
+    chunk_response->set_chunks_since_anchor(chunks);
+    return response;
+  }
+
+  if (chunk_request.has_set_chunk_anchor()) {
+    SetAnchor(chunk_request.set_chunk_anchor());
+    chunk_response->set_chunk_anchor(chunk_request.set_chunk_anchor());
+    chunk_response->set_chunks_since_anchor(ChunksSinceAnchor());
+    return response;
+  }
+
+  chunk_response->set_chunk_anchor(CurrentAnchor());
+  chunk_response->set_chunks_since_anchor(ChunksSinceAnchor());
+  return response;
+}
 
 }  // namespace training
 }  // namespace lczero

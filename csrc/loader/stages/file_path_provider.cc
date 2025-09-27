@@ -20,11 +20,13 @@
 namespace lczero {
 namespace training {
 
-FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
+FilePathProvider::FilePathProvider(const FilePathProviderConfig& config,
+                                   const StageList& existing_stages)
     : output_queue_(config.queue_capacity()),
       directory_(config.directory()),
       producer_(output_queue_.CreateProducer()),
       load_metric_updater_() {
+  (void)existing_stages;
   LOG(INFO) << "Initializing FilePathProvider for directory: "
             << config.directory();
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
@@ -34,7 +36,7 @@ FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
 
 FilePathProvider::~FilePathProvider() {
   LOG(INFO) << "FilePathProvider shutting down.";
-  Close();
+  Stop();
   if (inotify_fd_ != -1) close(inotify_fd_);
   LOG(INFO) << "FilePathProvider shutdown complete.";
 }
@@ -43,12 +45,21 @@ Queue<FilePathProvider::File>* FilePathProvider::output() {
   return &output_queue_;
 }
 
+QueueBase* FilePathProvider::GetOutput(std::string_view name) {
+  (void)name;
+  return &output_queue_;
+}
+
 void FilePathProvider::Start() {
   LOG(INFO) << "Starting FilePathProvider monitoring thread.";
   monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
 }
 
-void FilePathProvider::Close() {
+void FilePathProvider::Stop() {
+  if (stop_condition_.HasBeenNotified()) {
+    return;
+  }
+
   LOG(INFO) << "Stopping all watches...";
   for (const auto& [wd, path] : watch_descriptors_) {
     inotify_rm_watch(inotify_fd_, wd);
@@ -67,11 +78,13 @@ void FilePathProvider::Close() {
   LOG(INFO) << "FilePathProvider closed.";
 }
 
-FilePathProviderMetricsProto FilePathProvider::FlushMetrics() {
-  FilePathProviderMetricsProto result;
-  *result.mutable_load() = load_metric_updater_.FlushMetrics();
-  *result.mutable_queue() = MetricsFromQueue("output", output_queue_);
-  return result;
+StageMetricProto FilePathProvider::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto* metrics = stage_metric.mutable_file_path_provider();
+  *metrics->mutable_load() = load_metric_updater_.FlushMetrics();
+  *stage_metric.add_output_queue_metrics() =
+      MetricsFromQueue("output", output_queue_);
+  return stage_metric;
 }
 
 void FilePathProvider::AddDirectory(const Path& directory) {
