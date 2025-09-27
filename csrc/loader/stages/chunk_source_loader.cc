@@ -14,11 +14,17 @@ namespace training {
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
     const std::filesystem::path& filepath) {
   auto extension = filepath.extension();
-  if (extension == ".gz") {
-    return std::make_unique<RawFileChunkSource>(filepath);
-  }
-  if (extension == ".tar") {
-    return std::make_unique<TarChunkSource>(filepath);
+  try {
+    if (extension == ".gz") {
+      return std::make_unique<RawFileChunkSource>(filepath);
+    }
+    if (extension == ".tar") {
+      return std::make_unique<TarChunkSource>(filepath);
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to create chunk source for " << filepath << ": "
+               << e.what();
+    return nullptr;
   }
   return nullptr;
 }
