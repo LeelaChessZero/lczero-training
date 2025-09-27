@@ -41,11 +41,6 @@ class DataLoader {
   std::vector<std::pair<std::string, StageControlResponse>> SendControlMessage(
       const StageControlRequest& request);
 
-  std::pair<std::string, int> ResetChunkAnchor();
-  int ChunksSinceAnchor();
-  std::string CurrentChunkAnchor();
-  void SetChunkAnchor(std::string_view anchor);
-
  private:
   static DataLoaderConfig ParseConfig(
       const std::string& serialized_data_loader_config);

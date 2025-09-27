@@ -6,12 +6,18 @@ Zero training process.
 
 ## Python Integration
 
-The loader has been exposed to Python through pybind11, allowing direct use of the C++ DataLoader from Python code. Key aspects:
+The loader has been exposed to Python through pybind11, allowing direct use of
+the C++ `DataLoader` from Python code. Key aspects:
 
-* **Configuration**: Python dataclasses mirror C++ configuration structures (e.g., `FilePathProviderConfig`, `DataLoaderConfig`)
+* **Configuration**: Generated protobufs (for example `DataLoaderConfig`) are
+  passed directly to the binding, or via the convenience wrapper
+  `lczero_training.dataloader.make_dataloader`.
+* **Control Plane**: Use `DataLoader.send_control_message()` with
+  `proto.stage_control_pb2.StageControlRequest` to fan out commands such as
+  chunk-pool anchor updates.
 * **Memory Management**: Uses `unique_ptr::release()` with `py::return_value_policy::take_ownership` for efficient tensor ownership transfer
 * **Output Format**: Returns tuple of numpy arrays compatible with JAX through the buffer protocol
-* **Usage**: Import via `from lczero_training import DataLoader, DataLoaderConfig`
+* **Usage**: `from lczero_training.dataloader import make_dataloader`
 
 ## High-Level Overview
 
@@ -179,6 +185,11 @@ More specifically, we add the following functions to ShufflingChunkPool:
 * `void SetAnchor(std::string_view)` — is usually called BEFORE starting processing
   chunks. Does not reset the counter, but sets the anchor to the given value.
   When the read chunk has the same key as the anchor, the counter is reset to zero.
+
+Python clients access this functionality by issuing
+`StageControlRequest` messages through
+`DataLoader.send_control_message()`. The daemon pipeline demonstrates how the
+first chunk-pool response is used to update anchor state.
 
 The anchor functionality works differently during initial load vs. ongoing processing:
 

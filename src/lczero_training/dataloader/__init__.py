@@ -5,7 +5,6 @@ __all__ = ["DataLoader", "make_dataloader", "TensorBase"]
 
 
 def make_dataloader(config: DataLoaderConfig) -> DataLoader:
-    data_loader_config_bytes = config.SerializeToString()
-    loader = DataLoader(data_loader_config_bytes)
+    loader = DataLoader(config)
     loader.start()
     return loader

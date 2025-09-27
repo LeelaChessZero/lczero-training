@@ -1,0 +1,99 @@
+# Writing a New Data Loader Stage
+
+This guide walks through the lifecycle of adding another stage to the dynamic
+data loader pipeline. It assumes you are working in the C++ orchestrator (under
+`csrc/loader/stages/`) and that the Python bindings already consume staged
+configurations.
+
+## 1. Design the Stage Surface
+
+- **Purpose and data flow**: Decide whether the stage produces new data (no
+  upstream input) or transforms items from an existing queue.
+- **Configuration shape**: Determine which knobs are required during
+  construction (thread counts, capacities, etc.). These become fields on the
+  stage-specific protobuf message.
+- **Outputs and control hooks**: Clarify what queue type the stage emits and
+  whether it needs control-plane messages.
+
+## 2. Extend the Protobufs
+
+- Add a new `message <YourStage>Config` to
+  `proto/data_loader_config.proto`, including an `optional string input` field
+  if the stage consumes upstream data.
+- Update `StageConfig` with an `optional <YourStage>Config` entry so the stage
+  can be referenced from the `repeated stage` list.
+- If the stage emits custom metrics, add a corresponding message to
+  `proto/training_metrics.proto` and hang it off `StageMetricProto`.
+- When the stage needs control requests or responses, extend
+  `proto/stage_control.proto` so they can be carried through
+  `StageControlRequest`/`StageControlResponse`.
+- Regenerate protobufs (`meson compile -C builddir` or `just build-proto`).
+
+## 3. Choose a Base Class
+
+- **Use `SingleInputStage`** when the stage consumes exactly one upstream queue.
+  The helper resolves the input binding, performs the `dynamic_cast`, and
+  surfaces the typed `Queue<InputT>*` via `input_queue()`.
+- **Inherit `Stage` directly** when the stage has multiple inputs, produces
+  outputs without upstream data, or manages more complex wiring. In that case
+  you must implement any input discovery logic yourself using the
+  `Stage::StageList` supplied to the constructor.
+- Place declarations in `csrc/loader/stages/<stage_name>.h` and definitions in
+  the matching `.cc` file.
+
+## 4. Implement the Stage API
+
+- **Constructor**: Store the config, resolve input queues (if applicable), and
+  initialise queues or worker pools. Avoid starting threads here.
+- **`Start()`**: Launch background work. Acquire `Queue::Producer` instances for
+  emitting data and honour `stop_requested_` flags so shutdown is cooperative.
+- **`Stop()`**: Close output queues, signal workers to exit, and join threads.
+  Remember that downstream stages expect `Queue::Close()` to signal completion.
+- **`GetOutput(std::string_view name)`**: Return the appropriate `QueueBase*`.
+  If the stage offers multiple outputs, switch on `name` to choose.
+- **`Control()`**: Handle relevant `StageControlRequest` sub-messages and return
+  a populated `StageControlResponse` wrapped in `std::optional`. Return
+  `std::nullopt` for requests the stage does not recognise.
+
+## 5. Report Metrics
+
+- **Accumulate state** while workers run (e.g., load metrics, counters,
+  queue statistics).
+- **`FlushMetrics()`** should snapshot the current values, reset internal
+  counters as needed, and populate the appropriate subsection of
+  `StageMetricProto`. Use helpers like `MetricsFromQueue("output", queue)` to
+  expose queue utilisation under `output_queue_metrics`.
+- For multiple queues or distinct metric groups, add additional entries with
+  meaningful names (`"output"`, `"prefetch"`, etc.) so downstream tooling can
+  pick the right series.
+
+## 6. Register the Stage
+
+- Update `CreateStage` in `csrc/loader/stages/stage_factory.cc` to construct
+  the new class when its config is present. Enforce the “exactly one sub-config”
+  rule by keeping the existing `CountStageConfigs()` logic in sync.
+- Ensure `meson.build` lists the new source files so the static library rebuilds.
+
+## 7. Wire Up Tests
+
+- Add focused unit tests under `csrc/loader/stages/` validating constructor
+  errors, thread lifecycle, metric flushing, and (if applicable) control-plane
+  behaviour.
+- Provide integration coverage where the stage participates in a small pipeline
+  built from serialized `DataLoaderConfig` messages.
+- If Python bindings surface stage-specific behaviour, extend the relevant
+  `pytest` suites too.
+
+## 8. Update Documentation and Examples
+
+- Document new config fields in `docs/` (for example, augment `docs/loader.md`
+  or create stage-specific notes).
+- Add sample snippets or textproto fragments showing how to reference the
+  stage in a pipeline.
+- Mention any new control commands so the daemon/TUI maintainers know how to
+  surface them.
+
+Following these steps keeps the stage ecosystem consistent: configurations are
+validated at construction time, queues remain type-safe, metrics feed the UI,
+and Python clients continue to operate through the generic factory and control
+plane.

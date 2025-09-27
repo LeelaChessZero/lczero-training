@@ -42,8 +42,7 @@ def test_dataloader_initialization() -> None:
 
     config = _make_basic_config(str(script_dir))
 
-    config_bytes = config.SerializeToString()
-    loader = DataLoader(config_bytes)
+    loader = DataLoader(config)
     loader.start()
     assert loader is not None
 
@@ -53,8 +52,7 @@ def test_dataloader_methods_exist() -> None:
     script_dir = Path(__file__).parent
 
     config = _make_basic_config(str(script_dir))
-    config_bytes = config.SerializeToString()
-    loader = DataLoader(config_bytes)
+    loader = DataLoader(config)
     loader.start()
 
     assert hasattr(loader, "get_next")

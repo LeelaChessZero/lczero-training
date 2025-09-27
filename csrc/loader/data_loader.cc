@@ -12,22 +12,6 @@
 
 namespace lczero {
 namespace training {
-namespace {
-
-StageControlResponse ExtractFirstChunkPoolResponse(
-    const std::vector<std::pair<std::string, StageControlResponse>>&
-        responses) {
-  for (const auto& [name, response] : responses) {
-    (void)name;
-    if (response.has_chunk_pool_response()) {
-      return response;
-    }
-  }
-  return StageControlResponse();
-}
-
-}  // namespace
-
 DataLoaderConfig DataLoader::ParseConfig(const std::string& serialized_config) {
   DataLoaderConfig config;
   config.ParseFromString(serialized_config);
@@ -244,52 +228,6 @@ DataLoader::SendControlMessage(const StageControlRequest& request) {
     }
   }
   return responses;
-}
-
-std::pair<std::string, int> DataLoader::ResetChunkAnchor() {
-  StageControlRequest request;
-  request.mutable_chunk_pool_request()->set_reset_chunk_anchor(true);
-  StageControlResponse response =
-      ExtractFirstChunkPoolResponse(SendControlMessage(request));
-  if (!response.has_chunk_pool_response()) {
-    return {"", 0};
-  }
-  const auto& chunk_response = response.chunk_pool_response();
-  return {std::string(chunk_response.chunk_anchor()),
-          chunk_response.chunks_since_anchor()};
-}
-
-int DataLoader::ChunksSinceAnchor() {
-  StageControlRequest request;
-  request.mutable_chunk_pool_request();
-  StageControlResponse response =
-      ExtractFirstChunkPoolResponse(SendControlMessage(request));
-  if (!response.has_chunk_pool_response()) {
-    return 0;
-  }
-  return response.chunk_pool_response().chunks_since_anchor();
-}
-
-std::string DataLoader::CurrentChunkAnchor() {
-  StageControlRequest request;
-  request.mutable_chunk_pool_request();
-  StageControlResponse response =
-      ExtractFirstChunkPoolResponse(SendControlMessage(request));
-  if (!response.has_chunk_pool_response()) {
-    return "";
-  }
-  return std::string(response.chunk_pool_response().chunk_anchor());
-}
-
-void DataLoader::SetChunkAnchor(std::string_view anchor) {
-  StageControlRequest request;
-  request.mutable_chunk_pool_request()->set_set_chunk_anchor(
-      std::string(anchor));
-  StageControlResponse response =
-      ExtractFirstChunkPoolResponse(SendControlMessage(request));
-  if (!response.has_chunk_pool_response()) {
-    LOG(WARNING) << "No stage accepted chunk anchor control request.";
-  }
 }
 
 }  // namespace training
