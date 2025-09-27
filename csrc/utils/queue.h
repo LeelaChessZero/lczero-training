@@ -5,6 +5,7 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/fixed_array.h"
+#include "absl/log/log.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 
@@ -235,13 +236,22 @@ template <typename T>
 void Queue<T>::RemoveProducer() {
   absl::MutexLock lock(&mutex_);
   --producer_count_;
-  if (producer_count_ == 0) closed_ = true;
+  if (producer_count_ == 0 && !closed_) {
+    closed_ = true;
+    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+              << " closed after last producer removed.";
+  }
 }
 
 template <typename T>
 void Queue<T>::PutInternal(const T& item) {
   absl::MutexLock lock(&mutex_);
-  if (closed_) throw QueueClosedException();
+  if (closed_) {
+    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+              << " PutInternal(const&) throwing QueueClosedException;"
+              << " producers=" << producer_count_;
+    throw QueueClosedException();
+  }
   ++total_put_count_;
 
   switch (overflow_behavior_) {
@@ -275,7 +285,12 @@ void Queue<T>::PutInternal(const T& item) {
 template <typename T>
 void Queue<T>::PutInternal(T&& item) {
   absl::MutexLock lock(&mutex_);
-  if (closed_) throw QueueClosedException();
+  if (closed_) {
+    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+              << " PutInternal(T&&) throwing QueueClosedException;"
+              << " producers=" << producer_count_;
+    throw QueueClosedException();
+  }
   ++total_put_count_;
 
   switch (overflow_behavior_) {
@@ -315,7 +330,12 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
 
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
-    if (closed_) throw QueueClosedException();
+    if (closed_) {
+      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+                << " PutInternal(span const) throwing QueueClosedException;"
+                << " producers=" << producer_count_;
+      throw QueueClosedException();
+    }
 
     size_t batch_size;
     switch (overflow_behavior_) {
@@ -366,7 +386,12 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
 
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
-    if (closed_) throw QueueClosedException();
+    if (closed_) {
+      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+                << " PutInternal(span) throwing QueueClosedException;"
+                << " producers=" << producer_count_;
+      throw QueueClosedException();
+    }
 
     size_t batch_size;
     switch (overflow_behavior_) {
@@ -412,7 +437,12 @@ template <typename T>
 T Queue<T>::Get() {
   absl::MutexLock lock(&mutex_);
   mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
-  if (closed_ && size_ == 0) throw QueueClosedException();
+  if (closed_ && size_ == 0) {
+    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+              << " Get() throwing QueueClosedException; producers="
+              << producer_count_;
+    throw QueueClosedException();
+  }
 
   T item = std::move(buffer_[head_]);
   head_ = (head_ + 1) % capacity_;
@@ -433,7 +463,12 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
     mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
-    if (closed_ && size_ == 0) throw QueueClosedException();
+    if (closed_ && size_ == 0) {
+      LOG(INFO) << "Queue@" << static_cast<const void*>(this) << " Get("
+                << count << ") throwing QueueClosedException; producers="
+                << producer_count_;
+      throw QueueClosedException();
+    }
 
     // Get as many items as possible in this batch
     size_t batch_size = std::min(remaining, size_);
@@ -466,7 +501,11 @@ size_t Queue<T>::Capacity() const {
 template <typename T>
 void Queue<T>::Close() {
   absl::MutexLock lock(&mutex_);
-  closed_ = true;
+  if (!closed_) {
+    closed_ = true;
+    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+              << " closed explicitly; producers=" << producer_count_;
+  }
 }
 
 template <typename T>

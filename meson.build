@@ -143,7 +143,7 @@ queue_test = executable(
   'queue_test',
   'csrc/utils/queue_test.cc',
   include_directories : includes,
-  dependencies : test_deps + [absl_deps['synchronization']],
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
 )
 
 file_path_provider_test = executable(
