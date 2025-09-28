@@ -6,8 +6,8 @@ import jax.numpy as jnp
 import jax.random
 from flax import nnx
 
-from hlo_pb2 import XlaShapeProto
 from proto import model_config_pb2, net_pb2
+from proto.hlo_pb2 import XlaShapeProto
 
 from .embedding import Embedding
 from .encoder import EncoderTower

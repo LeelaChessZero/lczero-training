@@ -7,9 +7,8 @@ from typing import Optional
 import jax.numpy as jnp
 from flax import nnx, serialization
 
-import hlo_pb2
 from lczero_training.model.model import LczeroModel
-from proto import net_pb2
+from proto import hlo_pb2, net_pb2
 
 from .jax_to_leela import LeelaExportOptions, jax_to_leela
 from .leela_pytree_visitor import LeelaPytreeWeightsVisitor

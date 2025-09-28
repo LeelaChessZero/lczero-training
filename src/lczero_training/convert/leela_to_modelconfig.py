@@ -1,5 +1,4 @@
-import hlo_pb2
-from proto import model_config_pb2, net_pb2
+from proto import hlo_pb2, model_config_pb2, net_pb2
 
 
 def _defaultactivation_to_activation(

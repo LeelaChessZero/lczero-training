@@ -24,21 +24,17 @@ build-proto:
     touch src/lczero_training/proto/__init__.py
     protoc \
         --proto_path=. \
+        --proto_path=libs/lc0 \
         --python_out=src/ \
         --pyi_out=src/ \
-        -I libs/lczero-common/ \
-        -I libs/lc0/src/neural/xla/ \
         proto/*.proto
     protoc \
-        --proto_path=libs/lczero-common/ \
+        --proto_path=libs/lc0 \
         --python_out=src/ \
         --pyi_out=src/ \
-        libs/lczero-common/proto/*.proto
-    protoc \
-        --proto_path=libs/lc0/src/neural/xla/ \
-        --python_out=src/ \
-        --pyi_out=src/ \
-        libs/lc0/src/neural/xla/hlo.proto
+        proto/net.proto \
+        proto/onnx.proto \
+        proto/hlo.proto
 
 # Check if all Python files in src/ are formatted according to ruff
 check-python:

@@ -8,7 +8,6 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
 
-import hlo_pb2
 from lczero_training.convert.leela_to_jax import (
     LeelaImportOptions,
     fix_older_weights_file,
@@ -17,7 +16,7 @@ from lczero_training.convert.leela_to_jax import (
 from lczero_training.convert.leela_to_modelconfig import leela_to_modelconfig
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import TrainingState
-from proto import net_pb2
+from proto import hlo_pb2, net_pb2
 from proto.root_config_pb2 import RootConfig
 
 logger = logging.getLogger(__name__)
