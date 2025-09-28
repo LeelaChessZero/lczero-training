@@ -320,6 +320,106 @@ class ChunkSourceLoaderStageWidget(StageWidget):
             self._since_anchor_chip.update("since anchor --")
 
 
+class ChunkRescorerStageWidget(StageWidget):
+    """Row widget for the chunk rescorer stage."""
+
+    def __init__(
+        self,
+        stage_name: str,
+        metrics_field_name: str,
+        item_name: str = "items",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(metrics_field_name, fallback_name=stage_name, **kwargs)
+        self.item_name = item_name
+        self.metrics_field_name = metrics_field_name
+        self._load_chip = Static("load --", classes="metric-chip load-chip")
+        self._queue_rate_chip = Static(
+            "queue --/s", classes="metric-chip info-chip"
+        )
+        self._queue_fill_chip = Static(
+            "fill --/--", classes="metric-chip info-chip"
+        )
+        self._drop_chip = Static("drops --", classes="metric-chip warning-chip")
+        self._content_widgets.extend(
+            [
+                self._load_chip,
+                self._queue_rate_chip,
+                self._queue_fill_chip,
+                self._drop_chip,
+            ]
+        )
+
+    def update_metrics(
+        self,
+        dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
+    ) -> None:
+        stage_1sec = _find_stage_metric(
+            dataloader_1_second, self.metrics_field_name
+        )
+        stage_total = _find_stage_metric(
+            dataloader_total, self.metrics_field_name
+        )
+        self._update_name(stage_1sec or stage_total)
+
+        metrics_1sec = _get_stage_specific_metrics(
+            stage_1sec, self.metrics_field_name
+        )
+        metrics_total = _get_stage_specific_metrics(
+            stage_total, self.metrics_field_name
+        )
+
+        load_metric = None
+        if metrics_1sec is not None and metrics_1sec.HasField("load"):
+            load_metric = metrics_1sec.load
+        self._load_chip.update(_format_load(load_metric))
+
+        queue_1sec = None
+        if metrics_1sec is not None and metrics_1sec.HasField("queue"):
+            queue_1sec = metrics_1sec.queue
+        queue_total = None
+        if metrics_total is not None and metrics_total.HasField("queue"):
+            queue_total = metrics_total.queue
+
+        if queue_1sec:
+            rate = queue_1sec.get_count
+            self._queue_rate_chip.update(f"queue {format_si(rate)}/s")
+        else:
+            self._queue_rate_chip.update("queue --/s")
+
+        queue_size = _average_queue_fullness(queue_1sec)
+        capacity: int | None = None
+        if queue_1sec and queue_1sec.queue_capacity > 0:
+            capacity = queue_1sec.queue_capacity
+        elif queue_total and queue_total.queue_capacity > 0:
+            capacity = queue_total.queue_capacity
+
+        if capacity and capacity > 0:
+            if queue_size is not None:
+                self._queue_fill_chip.update(
+                    f"fill {format_full_number(queue_size)}/"
+                    f"{format_full_number(capacity)}"
+                )
+            else:
+                self._queue_fill_chip.update(
+                    f"fill --/{format_full_number(capacity)}"
+                )
+        else:
+            self._queue_fill_chip.update("fill --/--")
+
+        if queue_1sec and queue_1sec.drop_count > 0:
+            self._drop_chip.update(
+                f"drops {format_si(queue_1sec.drop_count)}/s"
+            )
+        elif queue_total and queue_total.drop_count > 0:
+            self._drop_chip.update(
+                f"drops {format_full_number(queue_total.drop_count)}"
+            )
+        else:
+            self._drop_chip.update("drops --")
+
+
 class ShufflingChunkPoolStageWidget(StageWidget):
     """Row widget for the shuffling chunk pool stage."""
 

@@ -10,6 +10,7 @@ from textual.containers import Container
 import proto.training_metrics_pb2 as training_metrics_pb2
 
 from .dataloader_widgets import (
+    ChunkRescorerStageWidget,
     ChunkSourceLoaderStageWidget,
     MetricsStageWidget,
     QueueWidget,
@@ -21,6 +22,7 @@ FRIENDLY_STAGE_NAMES = {
     "file_path_provider": "File discovery",
     "chunk_source_loader": "Chunk source loader",
     "shuffling_chunk_pool": "Shuffling chunk pool",
+    "chunk_rescorer": "Chunk rescorer",
     "chunk_splitter": "Chunk splitter",
     "chunk_unpacker": "Chunk unpacker",
     "shuffling_frame_sampler": "Shuffling frame sampler",
@@ -32,6 +34,7 @@ ITEM_NAMES = {
     "file_path_provider": "Files",
     "chunk_source_loader": "Files",
     "shuffling_chunk_pool": "Chunks",
+    "chunk_rescorer": "Chunks",
     "chunk_splitter": "Frames",
     "chunk_unpacker": "Frames",
     "shuffling_frame_sampler": "Frames",
@@ -81,6 +84,12 @@ class DataPipelinePane(Container):
             )
         if metrics_field == "chunk_source_loader":
             return ChunkSourceLoaderStageWidget(
+                stage_name=friendly,
+                metrics_field_name=metrics_field,
+                item_name=item_name,
+            )
+        if metrics_field == "chunk_rescorer":
+            return ChunkRescorerStageWidget(
                 stage_name=friendly,
                 metrics_field_name=metrics_field,
                 item_name=item_name,
