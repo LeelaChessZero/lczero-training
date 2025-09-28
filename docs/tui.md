@@ -28,25 +28,27 @@ pipeline without relying on borders or grid positioning.
 
 - **Pipeline Stages (Rows):** Each stage of the C++ pipeline is rendered as a
   single line.
-  - **Stage Heading:** We show the friendly stage name followed by the proto
-    field key in square brackets, for example `Chunk source loader
-    [chunk_source_loader]`.
+  - **Stage Heading:** The label uses the canonical stage name reported in the
+    metrics, so newly added stages automatically appear without additional UI
+    wiring.
   - **Load Metrics:** Stages with thread pools render load in `load
     active/total` format.
-  - **Specific Stats:** When a stage has additional data we append short
-    segments separated by `|`, e.g. skipped file counts or pool sizes. Extra
-    detail spills onto an indented second line when required.
+  - **Specific Stats:** Each metric is rendered as an individual "chip" widget,
+    e.g. skipped file counters or pool sizes, so additional detail can be added
+    without breaking alignment.
 
 - **Queues (Rows):** Each stage row is followed by a queue row that surfaces the
   metrics of the outgoing queue.
-  - **Queue Heading:** The row title includes the stage name and proto key plus
-    the queue name when provided, for example `Chunk source loader queue
-    [chunk_source_loader] (queue output)`.
-  - **Throughput:** 1-second rate in `items/s`.
-  - **Totals:** Total items transferred, formatted with apostrophes.
-  - **Fill State:** Average queue fullness displayed as `avg / capacity`. If the
-    queue does not report either value we keep the placeholder `--` to avoid
-    misinterpretation.
+  - **Queue Heading:** The row label is the canonical stage name reported by the
+    daemon. The first chip shows the queue name when it differs from the
+    default.
+  - **Throughput:** A chip displays the 1-second `items/s` rate and turns red
+    when the rate drops to zero.
+  - **Totals:** A chip shows the lifetime count of elements that passed through
+    the queue, formatted with apostrophes.
+  - **Fill State:** A horizontal progress bar visualises the average queue fill
+    against capacity, followed by a chip with the numeric `avg/capacity`
+    display. Unknown values fall back to `--`.
 
 - **Train/Validation/Test Splitter:**
   - The pipeline view will show a "Stream Splitter" stage.

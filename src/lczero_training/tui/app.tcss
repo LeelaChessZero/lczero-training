@@ -55,6 +55,7 @@ RichLog {
 }
 
 .dataloader-row {
+    layout: horizontal;
     border: none;
     padding: 0;
     margin: 0;
@@ -72,6 +73,80 @@ RichLog {
 .queue-row {
     background: $surface-darken-2;
     color: $text;
+}
+
+.row-label {
+    padding: 0 1 0 0;
+    margin: 0;
+    width: 18;
+    text-style: bold;
+    color: $text;
+}
+
+.row-content {
+    layout: horizontal;
+    content-align: left middle;
+    width: 1fr;
+    padding: 0;
+    margin: 0;
+}
+
+.row-wrapper {
+    layout: horizontal;
+    height: 1;
+    min-height: 1;
+    content-align: left middle;
+}
+
+.metric-chip {
+    background: $surface-darken-1;
+    color: $text;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    height: 1;
+    border: none;
+    content-align: center middle;
+    width: auto;
+    min-width: 10;
+}
+
+.load-chip {
+    background: $primary-darken-2;
+    color: $text;
+}
+
+.info-chip {
+    background: $surface-darken-1;
+    color: $text;
+}
+
+.warning-chip {
+    background: $warning;
+    color: $text;
+}
+
+.queue-name-chip {
+    background: transparent;
+    color: $text-muted;
+    padding: 0;
+    margin-right: 1;
+}
+
+.queue-fill {
+    height: 1;
+    width: 1fr;
+    margin-right: 1;
+}
+
+.queue-fill-text {
+    background: transparent;
+    color: $text;
+    margin: 0;
+    padding: 0;
+}
+
+.queue-rate--zero {
+    color: $error;
 }
 
 

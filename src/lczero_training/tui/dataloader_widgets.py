@@ -1,9 +1,10 @@
-"""Widgets that render data loader metrics as single-line rows."""
+"""Widgets that render data loader metrics as horizontal rows."""
 
-from collections.abc import Sequence
 from typing import Any
 
-from textual.widgets import Static
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.widgets import ProgressBar, Static
 
 import proto.training_metrics_pb2 as training_metrics_pb2
 
@@ -84,20 +85,6 @@ def _format_load(
     return f"{label} {load_metric.load_seconds:.1f}/{total_part}s"
 
 
-def _format_segments(
-    title: str, segments: Sequence[str], extra: Sequence[str] | None
-) -> str:
-    primary = " | ".join(segment for segment in segments if segment)
-    if not primary:
-        primary = "--"
-    text = f"{title}: {primary}"
-    if extra:
-        secondary = " | ".join(segment for segment in extra if segment)
-        if secondary:
-            text = f"{text}\n  {secondary}"
-    return text
-
-
 def _average_queue_fullness(
     queue_metric: training_metrics_pb2.QueueMetricProto | None,
 ) -> int | None:
@@ -113,16 +100,80 @@ def _average_queue_fullness(
     return None
 
 
-class StageWidget(Static):
+def _canonical_stage_name(
+    stage_metric: training_metrics_pb2.StageMetricProto | None,
+    fallback: str | None,
+    stage_key: str | None,
+) -> str:
+    if stage_metric and stage_metric.name:
+        return stage_metric.name
+    if fallback:
+        return fallback
+    if stage_key:
+        return stage_key
+    return "--"
+
+
+class BaseRowWidget(Horizontal):
+    """Base class for pipeline rows that renders a name and content widgets."""
+
+    def __init__(
+        self,
+        stage_key: str | None = None,
+        fallback_name: str | None = None,
+        row_type: str = "stage-row",
+        **kwargs: Any,
+    ) -> None:
+        classes = f"dataloader-row {row_type}"
+        super().__init__(classes=classes, **kwargs)
+        self.stage_key = stage_key
+        self._fallback_name = fallback_name
+        self._name_label = Static(
+            _canonical_stage_name(None, fallback_name, stage_key),
+            classes="row-label",
+        )
+        self._row_content: Horizontal | None = None
+        self._content_widgets: list[Static | ProgressBar] = []
+
+    def compose(self) -> ComposeResult:
+        row_content = Horizontal(classes="row-content")
+        self._row_content = row_content
+        yield Horizontal(
+            self._name_label,
+            row_content,
+            classes="row-wrapper",
+        )
+
+    def on_mount(self) -> None:
+        if self._content_widgets and self._row_content is not None:
+            self._row_content.mount(*self._content_widgets)
+
+    def _update_name(
+        self,
+        stage_metric: training_metrics_pb2.StageMetricProto | None,
+    ) -> None:
+        self._name_label.update(
+            _canonical_stage_name(
+                stage_metric, self._fallback_name, self.stage_key
+            )
+        )
+
+
+class StageWidget(BaseRowWidget):
     """Base row widget for a pipeline stage."""
 
     def __init__(
-        self, stage_name: str, stage_key: str | None = None, **kwargs: Any
+        self,
+        stage_key: str,
+        fallback_name: str | None = None,
+        **kwargs: Any,
     ) -> None:
-        super().__init__("", classes="dataloader-row", **kwargs)
-        self.stage_name = stage_name
-        self.stage_key = stage_key
-        self.add_class("stage-row")
+        super().__init__(
+            stage_key=stage_key,
+            fallback_name=fallback_name,
+            row_type="stage-row",
+            **kwargs,
+        )
 
     def update_metrics(
         self,
@@ -131,27 +182,9 @@ class StageWidget(Static):
     ) -> None:
         raise NotImplementedError
 
-    def _format_title(self, suffix: str | None = None) -> str:
-        title = self.stage_name
-        if self.stage_key:
-            title = f"{title} [{self.stage_key}]"
-        if suffix:
-            title = f"{title} {suffix}"
-        return title
-
-    def _update_row(
-        self,
-        segments: Sequence[str],
-        extra: Sequence[str] | None = None,
-        title_suffix: str | None = None,
-    ) -> None:
-        self.update(
-            _format_segments(self._format_title(title_suffix), segments, extra)
-        )
-
 
 class MetricsStageWidget(StageWidget):
-    """Row widget for stages that only expose generic load metrics."""
+    """Row widget for stages that expose generic load metrics only."""
 
     def __init__(
         self,
@@ -160,25 +193,32 @@ class MetricsStageWidget(StageWidget):
         item_name: str = "items",
         **kwargs: Any,
     ) -> None:
-        super().__init__(stage_name, stage_key=metrics_field_name, **kwargs)
-        self.metrics_field_name = metrics_field_name
+        super().__init__(metrics_field_name, fallback_name=stage_name, **kwargs)
         self.item_name = item_name
+        self.metrics_field_name = metrics_field_name
+        self._load_chip = Static("load --", classes="metric-chip load-chip")
+        self._content_widgets.append(self._load_chip)
 
     def update_metrics(
         self,
         dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
-        stage_metric = _find_stage_metric(
+        stage_metric_1s = _find_stage_metric(
             dataloader_1_second, self.metrics_field_name
         )
+        stage_metric_total = _find_stage_metric(
+            dataloader_total, self.metrics_field_name
+        )
+        self._update_name(stage_metric_1s or stage_metric_total)
+
         stage_metrics = _get_stage_specific_metrics(
-            stage_metric, self.metrics_field_name
+            stage_metric_1s, self.metrics_field_name
         )
         load_metric = None
         if stage_metrics is not None and stage_metrics.HasField("load"):
             load_metric = stage_metrics.load
-        self._update_row([_format_load(load_metric)])
+        self._load_chip.update(_format_load(load_metric))
 
 
 class ChunkSourceLoaderStageWidget(StageWidget):
@@ -191,9 +231,29 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         item_name: str = "items",
         **kwargs: Any,
     ) -> None:
-        super().__init__(stage_name, stage_key=metrics_field_name, **kwargs)
-        self.metrics_field_name = metrics_field_name
+        super().__init__(metrics_field_name, fallback_name=stage_name, **kwargs)
         self.item_name = item_name
+        self.metrics_field_name = metrics_field_name
+        self._load_chip = Static("load --", classes="metric-chip load-chip")
+        self._skipped_chip = Static(
+            "skipped --", classes="metric-chip warning-chip"
+        )
+        self._last_chunk_chip = Static(
+            "last --", classes="metric-chip info-chip"
+        )
+        self._anchor_chip = Static("anchor --", classes="metric-chip info-chip")
+        self._since_anchor_chip = Static(
+            "since anchor --", classes="metric-chip info-chip"
+        )
+        self._content_widgets.extend(
+            [
+                self._load_chip,
+                self._skipped_chip,
+                self._last_chunk_chip,
+                self._anchor_chip,
+                self._since_anchor_chip,
+            ]
+        )
 
     def update_metrics(
         self,
@@ -206,6 +266,7 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         stage_total = _find_stage_metric(
             dataloader_total, self.metrics_field_name
         )
+        self._update_name(stage_1sec or stage_total)
 
         metrics_1sec = _get_stage_specific_metrics(
             stage_1sec, self.metrics_field_name
@@ -217,21 +278,26 @@ class ChunkSourceLoaderStageWidget(StageWidget):
         load_metric = None
         if metrics_1sec is not None and metrics_1sec.HasField("load"):
             load_metric = metrics_1sec.load
-
-        primary: list[str] = [_format_load(load_metric)]
+        self._load_chip.update(_format_load(load_metric))
 
         if metrics_total is not None and metrics_1sec is not None:
             skipped_total = metrics_total.skipped_files_count
             skipped_rate = metrics_1sec.skipped_files_count
-            primary.append(
-                f"skipped {format_full_number(skipped_total)} ({format_si(skipped_rate)}/s)"
+            skipped_text = (
+                f"skipped {format_full_number(skipped_total)}"
+                f" ({format_si(skipped_rate)}/s)"
             )
+        else:
+            skipped_text = "skipped --"
+        self._skipped_chip.update(skipped_text)
 
-        extra: list[str] = []
-        if metrics_1sec is not None and metrics_1sec.HasField("last_chunk_key"):
+        if metrics_1sec and metrics_1sec.HasField("last_chunk_key"):
             last_chunk = metrics_1sec.last_chunk_key
-            if last_chunk:
-                extra.append(f"last chunk {last_chunk}")
+            self._last_chunk_chip.update(
+                f"last {last_chunk}" if last_chunk else "last --"
+            )
+        else:
+            self._last_chunk_chip.update("last --")
 
         pool_metrics = _get_stage_specific_metrics(
             _find_stage_metric(dataloader_1_second, "shuffling_chunk_pool"),
@@ -242,13 +308,16 @@ class ChunkSourceLoaderStageWidget(StageWidget):
             and pool_metrics.HasField("anchor")
             and pool_metrics.anchor
         ):
-            extra.append(f"anchor {pool_metrics.anchor}")
+            self._anchor_chip.update(f"anchor {pool_metrics.anchor}")
+        else:
+            self._anchor_chip.update("anchor --")
+
         if pool_metrics and pool_metrics.HasField("chunks_since_anchor"):
-            extra.append(
+            self._since_anchor_chip.update(
                 f"since anchor {format_full_number(pool_metrics.chunks_since_anchor)}"
             )
-
-        self._update_row(primary, extra or None)
+        else:
+            self._since_anchor_chip.update("since anchor --")
 
 
 class ShufflingChunkPoolStageWidget(StageWidget):
@@ -261,9 +330,25 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         item_name: str = "items",
         **kwargs: Any,
     ) -> None:
-        super().__init__(stage_name, stage_key=metrics_field_name, **kwargs)
-        self.metrics_field_name = metrics_field_name
+        super().__init__(metrics_field_name, fallback_name=stage_name, **kwargs)
         self.item_name = item_name
+        self.metrics_field_name = metrics_field_name
+        self._index_load_chip = Static(
+            "idx load --", classes="metric-chip load-chip"
+        )
+        self._chunk_load_chip = Static(
+            "chunk load --", classes="metric-chip load-chip"
+        )
+        self._files_chip = Static("files --", classes="metric-chip info-chip")
+        self._chunks_chip = Static("chunks --", classes="metric-chip info-chip")
+        self._content_widgets.extend(
+            [
+                self._index_load_chip,
+                self._chunk_load_chip,
+                self._files_chip,
+                self._chunks_chip,
+            ]
+        )
 
     def update_metrics(
         self,
@@ -273,52 +358,52 @@ class ShufflingChunkPoolStageWidget(StageWidget):
         stage_metric = _find_stage_metric(
             dataloader_1_second, self.metrics_field_name
         )
+        stage_metric_total = _find_stage_metric(
+            dataloader_total, self.metrics_field_name
+        )
+        self._update_name(stage_metric or stage_metric_total)
+
         metrics = _get_stage_specific_metrics(
             stage_metric, self.metrics_field_name
         )
 
-        primary: list[str] = []
-        extra: list[str] = []
-
         if metrics and metrics.HasField("indexing_load"):
-            primary.append(
+            self._index_load_chip.update(
                 _format_load(metrics.indexing_load, label="idx load")
             )
         else:
-            primary.append("idx load --")
+            self._index_load_chip.update("idx load --")
 
         if metrics and metrics.HasField("chunk_loading_load"):
-            primary.append(
+            self._chunk_load_chip.update(
                 _format_load(metrics.chunk_loading_load, label="chunk load")
             )
         else:
-            primary.append("chunk load --")
+            self._chunk_load_chip.update("chunk load --")
 
         if metrics and metrics.HasField("chunk_sources_count"):
             if metrics.chunk_sources_count.count > 0:
                 files_count = metrics.chunk_sources_count.latest
-                primary.append(f"files {format_si(files_count)}")
+                self._files_chip.update(f"files {format_si(files_count)}")
             else:
-                primary.append("files --")
+                self._files_chip.update("files --")
         else:
-            primary.append("files --")
+            self._files_chip.update("files --")
 
         if metrics:
             current_chunks = metrics.current_chunks
             pool_capacity = metrics.pool_capacity
             if pool_capacity > 0:
-                extra.append(
+                self._chunks_chip.update(
                     f"chunks {format_si(current_chunks)} / {format_si(pool_capacity)}"
                 )
             else:
-                extra.append("chunks --")
+                self._chunks_chip.update("chunks --")
         else:
-            extra.append("chunks --")
-
-        self._update_row(primary, extra or None)
+            self._chunks_chip.update("chunks --")
 
 
-class QueueWidget(StageWidget):
+class QueueWidget(BaseRowWidget):
     """Row widget for queue metrics between stages."""
 
     def __init__(
@@ -329,12 +414,33 @@ class QueueWidget(StageWidget):
         **kwargs: Any,
     ) -> None:
         super().__init__(
-            stage_name or f"Queue ({item_name})", stage_key=stage_key, **kwargs
+            stage_key=stage_key,
+            fallback_name=stage_name,
+            row_type="queue-row",
+            **kwargs,
         )
         self.item_name = item_name
         self.stage_key = stage_key
-        self.remove_class("stage-row")
-        self.add_class("queue-row")
+        self._queue_name_chip = Static(
+            "queue --", classes="metric-chip queue-name-chip"
+        )
+        self._rate_chip = Static("rate --/s", classes="metric-chip queue-rate")
+        self._total_chip = Static("total --", classes="metric-chip queue-total")
+        self._fill_bar = ProgressBar(
+            classes="queue-fill",
+            show_percentage=False,
+            show_eta=False,
+        )
+        self._fill_text = Static("--/--", classes="metric-chip queue-fill-text")
+        self._content_widgets.extend(
+            [
+                self._queue_name_chip,
+                self._rate_chip,
+                self._total_chip,
+                self._fill_bar,
+                self._fill_text,
+            ]
+        )
 
     def update_metrics(
         self,
@@ -342,26 +448,43 @@ class QueueWidget(StageWidget):
         dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
     ) -> None:
         if not self.stage_key:
-            self._update_row(["--"])
+            self._queue_name_chip.update("queue --")
+            self._rate_chip.update("rate --/s")
+            self._total_chip.update("total --")
+            self._fill_bar.total = 1
+            self._fill_bar.progress = 0
+            self._fill_text.update("--/--")
             return
 
         stage_1sec = _find_stage_metric(dataloader_1_second, self.stage_key)
         stage_total = _find_stage_metric(dataloader_total, self.stage_key)
+        self._update_name(stage_1sec or stage_total)
 
         queue_1sec = _get_queue_metrics(stage_1sec)
         queue_total = _get_queue_metrics(stage_total)
 
-        primary: list[str] = []
+        queue_name = None
+        if queue_1sec and queue_1sec.name:
+            queue_name = queue_1sec.name
+        elif queue_total and queue_total.name:
+            queue_name = queue_total.name
+        self._queue_name_chip.update(
+            f"queue {queue_name}" if queue_name else "queue --"
+        )
 
-        if queue_1sec:
-            primary.append(f"rate {format_si(queue_1sec.get_count)}/s")
+        rate = queue_1sec.get_count if queue_1sec else 0
+        self._rate_chip.update(f"rate {format_si(rate)}/s")
+        if rate == 0:
+            self._rate_chip.add_class("queue-rate--zero")
         else:
-            primary.append("rate --")
+            self._rate_chip.remove_class("queue-rate--zero")
 
         if queue_total:
-            primary.append(f"total {format_full_number(queue_total.get_count)}")
+            self._total_chip.update(
+                f"total {format_full_number(queue_total.get_count)}"
+            )
         else:
-            primary.append("total --")
+            self._total_chip.update("total --")
 
         size = _average_queue_fullness(queue_1sec)
         capacity: int | None = None
@@ -370,25 +493,18 @@ class QueueWidget(StageWidget):
         elif queue_total and queue_total.queue_capacity > 0:
             capacity = queue_total.queue_capacity
 
-        if size is not None and capacity is not None:
-            primary.append(
-                f"fill {format_full_number(size)} / {format_full_number(capacity)}"
-            )
-        elif capacity is not None:
-            primary.append(f"fill -- / {format_full_number(capacity)}")
+        if capacity and capacity > 0:
+            self._fill_bar.total = capacity
+            if size is not None:
+                self._fill_bar.progress = min(size, capacity)
+                fill_text = (
+                    f"{format_full_number(size)}/{format_full_number(capacity)}"
+                )
+            else:
+                self._fill_bar.progress = 0
+                fill_text = f"--/{format_full_number(capacity)}"
         else:
-            primary.append("fill --")
-
-        queue_name = None
-        if queue_1sec and queue_1sec.name:
-            queue_name = queue_1sec.name
-        elif queue_total and queue_total.name:
-            queue_name = queue_total.name
-
-        queue_suffix = None
-        if queue_name:
-            queue_suffix = f"(queue {queue_name})"
-        elif queue_1sec or queue_total:
-            queue_suffix = "(queue)"
-
-        self._update_row(primary, title_suffix=queue_suffix)
+            self._fill_bar.total = 1
+            self._fill_bar.progress = 0
+            fill_text = "--/--"
+        self._fill_text.update(fill_text)
