@@ -22,7 +22,11 @@ from proto.root_config_pb2 import RootConfig
 logger = logging.getLogger(__name__)
 
 
-def init(config_filename: str, lczero_model: Optional[str]) -> None:
+def init(
+    config_filename: str,
+    lczero_model: Optional[str],
+    seed: int = 42,
+) -> None:
     """
     Initializes a new training run.
     """
@@ -48,7 +52,7 @@ def init(config_filename: str, lczero_model: Optional[str]) -> None:
         training_config=config.training,
     )
     logger.info("Creating JAX FLAX/NNX model from configuration")
-    model = LczeroModel(config=config.model, rngs=nnx.Rngs(params=42))
+    model = LczeroModel(config=config.model, rngs=nnx.Rngs(params=seed))
     model_state = nnx.state(model)
 
     if lczero_model is not None:

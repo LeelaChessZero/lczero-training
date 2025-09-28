@@ -25,6 +25,12 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Path to an existing lczero model to start from.",
     )
+    init_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for initializing model parameters.",
+    )
     init_parser.set_defaults(func=run)
 
     # Train command
@@ -121,7 +127,11 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> None:
     if args.subcommand == "init":
-        init(config_filename=args.config, lczero_model=args.lczero_model)
+        init(
+            config_filename=args.config,
+            lczero_model=args.lczero_model,
+            seed=args.seed,
+        )
     elif args.subcommand == "train":
         train(config_filename=args.config)
     elif args.subcommand == "eval":
