@@ -69,7 +69,6 @@ message ShufflingChunkPoolMetricsProto {
 message ChunkUnpackerMetricsProto {
   optional LoadMetricProto load = 1;
   optional QueueMetricProto queue = 2;
-  optional StatisticsProtoInt64 bad_chunks_count = 3;
 }
 
 // Metrics for ShufflingFrameSampler performance monitoring.

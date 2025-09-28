@@ -69,7 +69,6 @@ void UpdateFrom(ChunkUnpackerMetricsProto& dest,
                 const ChunkUnpackerMetricsProto& src) {
   UpdateFrom(*dest.mutable_load(), src.load());
   UpdateFrom(*dest.mutable_queue(), src.queue());
-  UpdateFrom(*dest.mutable_bad_chunks_count(), src.bad_chunks_count());
 }
 
 void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,
