@@ -9,7 +9,7 @@ from textual.containers import Container
 
 import proto.training_metrics_pb2 as training_metrics_pb2
 
-from .stage_widgets import (
+from .dataloader_widgets import (
     ChunkSourceLoaderStageWidget,
     MetricsStageWidget,
     QueueWidget,
@@ -31,7 +31,7 @@ STAGES_CONFIG = [
     StageConfig("file_path_provider", "File discovery", "Files"),
     StageConfig("chunk_source_loader", "Chunk source loader", "Files"),
     StageConfig("shuffling_chunk_pool", "Shuffling chunk pool", "Chunks"),
-    StageConfig("chunk_unpacker", "Chunk unpacker", "Frames"),
+    StageConfig("chunk_splitter", "Chunk splitter", "Frames"),
     StageConfig("shuffling_frame_sampler", "Shuffling frame sampler", "Frames"),
     StageConfig("tensor_generator", "Batched tensor generator", "Tensors"),
 ]
@@ -72,6 +72,7 @@ class DataPipelinePane(Container):
             queue = QueueWidget(
                 item_name=config.item_name,
                 stage_key=config.metrics_field,
+                stage_name=f"{config.stage_name} queue",
             )
             self._queues.append(queue)
             yield queue

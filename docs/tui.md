@@ -20,27 +20,33 @@ This bar provides high-level, global status at a glance.
 
 ### 3. Data Pipeline Pane
 
-This pane visualizes the flow of data through the C++ pipeline. It will use a responsive flow layout, where widgets are arranged side-by-side and wrap to the next line if space is insufficient.
+This pane visualizes the flow of data through the C++ pipeline. The new
+design is a vertically scrollable list where every stage and queue consumes
+one row (two only when extra detail is needed). Rows are rendered in the same
+order as traffic flows through the loader, preserving the mental model of the
+pipeline without relying on borders or grid positioning.
 
-- **Pipeline Stages (Blocks):** Each stage of the C++ pipeline is a distinct widget.
-  - **Load Meter:** Most stages will show the number of active worker threads vs. allocated threads (e.g., `Load: 3.4/4`).
-  - **Specific Stats:** More complex stages will display additional, specific information.
-    - `FilePathProvider`: Stage (e.g., `Initial Scan`, `Watching`), Total files found.
-    - `ShufflingChunkPool`: A **full-width widget**. Will display:
-      - Initial fill progress as a progress bar.
-      - Current pool size and target size.
-      - A count of "buffer exhausted" events.
-      - Distribution of chunks in the buffer among different training epochs.
-    - `ChunkValidator`: Number and percentage of invalid chunks found, broken down by reason.
+- **Pipeline Stages (Rows):** Each stage of the C++ pipeline is rendered as a
+  single line.
+  - **Stage Heading:** We show the friendly stage name followed by the proto
+    field key in square brackets, for example `Chunk source loader
+    [chunk_source_loader]`.
+  - **Load Metrics:** Stages with thread pools render load in `load
+    active/total` format.
+  - **Specific Stats:** When a stage has additional data we append short
+    segments separated by `|`, e.g. skipped file counts or pool sizes. Extra
+    detail spills onto an indented second line when required.
 
-- **Queues (Connectors):** Between each stage widget, a queue widget will show the state of the message queue connecting them.
-  - **Title:** Name of the queue.
-  - **Fullness Text:** e.g., `850/1000`.
-  - **Fullness Bar:** A color-coded pseudographic bar (`██████░░░░`) to
-    visualize fullness. The color indicates the health of the queue (e.g., green
-    for consumer-bound, red for producer-bound).
-  - **Throughput:** The current rate of items passing through, e.g.,
-    `12.3k items/s`.
+- **Queues (Rows):** Each stage row is followed by a queue row that surfaces the
+  metrics of the outgoing queue.
+  - **Queue Heading:** The row title includes the stage name and proto key plus
+    the queue name when provided, for example `Chunk source loader queue
+    [chunk_source_loader] (queue output)`.
+  - **Throughput:** 1-second rate in `items/s`.
+  - **Totals:** Total items transferred, formatted with apostrophes.
+  - **Fill State:** Average queue fullness displayed as `avg / capacity`. If the
+    queue does not report either value we keep the placeholder `--` to avoid
+    misinterpretation.
 
 - **Train/Validation/Test Splitter:**
   - The pipeline view will show a "Stream Splitter" stage.
@@ -114,4 +120,3 @@ A pane across the bottom of the screen.
 - **Functionality:** The pane will be scrollable and will hold a fixed number of
   lines (e.g., 1000) to prevent unbounded memory usage, discarding the oldest
   lines as new ones arrive.
-

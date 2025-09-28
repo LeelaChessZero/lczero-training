@@ -12,12 +12,11 @@ HeaderBar {
 DataPipelinePane {
     background: $surface;
     color: $text;
-    border: solid $primary;
+    border: none;
     margin: 1;
-    layout: grid;
-    grid-size: 6;
-    grid-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
-    grid-gutter: 1 0;
+    padding: 0 1;
+    layout: vertical;
+    overflow-y: auto;
     height: 18;
 }
 
@@ -51,151 +50,30 @@ RichLog {
     overflow-y: scroll;
 }
 
-StageWidget {
-    background: $panel;
-    color: $text;
-    border: double $success;
-    border-title-color: $success;
-    height: 7;
-    padding: 1;
-}
-
-ShufflingChunkPoolStageWidget {
-    padding: 0;
-}
-
-ChunkSourceLoaderStageWidget {
-    padding: 0;
-}
-
-.chunks-progress {
-    height: 1;
-    layout: horizontal;
-}
-
-.chunks-label {
-    width: auto;
-    padding: 0;
-    margin-right: 1;
-    text-align: left;
-}
-
-.chunks-progress-bar {
-    width: 1fr;
-    height: 1;
-}
-
-.chunks-ratio {
-    width: auto;
-    padding: 0;
-    text-align: right;
-}
-
-QueueWidget {
-    background: $surface-darken-1;
-    color: $text-muted;
-    border: hkey $success-darken-2;
-    padding: 0 1;
-    height: 7;
-}
-
-LoadWidget {
-    height: 1;
-    layout: horizontal;
-}
-
-#load-label {
-    width: auto;
-    padding: 0;
-    margin-right: 1;
-    text-align: left;
-}
-
-#load-progress {
-    width: 1fr;
-    height: 1;
-}
-
-#load-ratio {
-    width: auto;
-    padding: 0;
-    text-align: right;
-}
-
-/* Queue widget internal styling */
-.rate-value {
-    text-align: left;
-    padding: 0;
-}
-
-.rate-value.rate--zero {
-    color: $error;
-}
-
-#rate-sparkline {
-    height: 1;
-    color: $primary;
-}
-
-#total-display {
-    text-align: left;
-    padding: 0;
-}
-
-#progress-container {
-    height: 1;
-    layout: horizontal;
-}
-
-#queue-progress {
-    height: 1;
-    width: 1fr;
-}
-
-#fill-level-label {
-    width: auto;
-    padding: 0;
-    margin-right: 1;
-    text-align: left;
-}
-
-#capacity-display {
-    text-align: right;
-    height: 1;
-    width: auto;
-    padding: 0;
-}
-
-#last-chunk-display {
-    text-align: right;
-    padding: 0;
-    width: 1fr;
-    height: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-#anchor-display {
-    text-align: right;
-    padding: 0;
-    width: 1fr;
-    height: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-#chunks-since-anchor-display {
-    text-align: right;
-    padding: 0;
-    width: 1fr;
-    height: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
 .stage-content, .queue-content {
     text-align: left;
 }
+
+.dataloader-row {
+    border: none;
+    padding: 0;
+    margin: 0;
+    height: auto;
+    min-height: 1;
+    content-align: left middle;
+    width: 100%;
+}
+
+.stage-row {
+    background: $surface;
+    color: $text;
+}
+
+.queue-row {
+    background: $surface-darken-2;
+    color: $text;
+}
+
 
 .jax-training-content {
     padding: 1;
