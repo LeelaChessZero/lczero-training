@@ -202,7 +202,10 @@ def train(config_filename: str) -> None:
         replicated_sharding = jshard.NamedSharding(mesh, P())
         jit_state = jax.device_put(jit_state, replicated_sharding)
 
-    optimizer_tx = make_gradient_transformation(config.training.optimizer)
+    optimizer_tx = make_gradient_transformation(
+        config.training.optimizer,
+        max_grad_norm=getattr(config.training, "max_grad_norm", 0.0),
+    )
     training = Training(
         optimizer_tx=optimizer_tx,
         graphdef=model,

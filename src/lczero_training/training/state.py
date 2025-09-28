@@ -43,7 +43,8 @@ class TrainingState:
         rngs = nnx.Rngs(params=42)
         model_state = nnx.state(LczeroModel(config=model_config, rngs=rngs))
         opt_state = make_gradient_transformation(
-            training_config.optimizer
+            training_config.optimizer,
+            max_grad_norm=getattr(training_config, "max_grad_norm", 0.0),
         ).init(model_state)
         jit_state = JitTrainingState(
             step=0,

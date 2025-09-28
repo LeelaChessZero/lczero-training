@@ -8,6 +8,8 @@ message TrainingConfig {
   CheckpointConfig checkpoint = 2;
   OptimizerConfig optimizer = 3;
   LossWeightsConfig losses = 4;
+  // Maximum gradient norm; set to 0 or omit to disable clipping.
+  float max_grad_norm = 5;
 }
 
 message ScheduleConfig {

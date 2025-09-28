@@ -94,6 +94,7 @@ training {
     nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
     constant_lr { lr: 0.001 }
   }
+  max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {
     policy { name: "main" weight: 1.0 illegal_moves: MASK }
     value { name: "winner" weight: 1.0 }
