@@ -62,6 +62,7 @@ message ShufflingChunkPoolMetricsProto {
   optional uint64 pool_capacity = 6 [default = 0];
   optional int32 chunks_since_anchor = 7 [default = 0];
   optional string anchor = 8;
+  optional StatisticsProtoInt64 dropped_chunks = 9;
 }
 
 // Metrics for ChunkUnpacker performance monitoring.

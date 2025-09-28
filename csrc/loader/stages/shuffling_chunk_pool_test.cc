@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <set>
@@ -294,6 +295,7 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   EXPECT_EQ(chunk.frames.size(), 1);
   EXPECT_EQ(chunk.frames.front().version,
             static_cast<uint32_t>(chunk.index_within_sort_key));
+  EXPECT_EQ(chunk.reshuffle_count, 0u);
 }
 
 TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
@@ -304,7 +306,7 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
   input_producer_->Put(std::move(invalid_source));
   MarkInitialScanComplete();
 
-  auto config = MakeConfig(1, /*startup_threads=*/1, /*indexing_threads=*/1,
+  auto config = MakeConfig(2, /*startup_threads=*/1, /*indexing_threads=*/1,
                            /*loading_threads=*/1, /*queue_capacity=*/10);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
@@ -319,8 +321,29 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
 
   EXPECT_EQ(chunk.sort_key, "invalid_source");
   EXPECT_EQ(chunk.index_within_sort_key, 1);
+  EXPECT_EQ(chunk.reshuffle_count, 0u);
   ASSERT_EQ(chunk.frames.size(), 1);
   EXPECT_EQ(chunk.frames.front().version, 42);
+
+  double dropped_latest = 0.0;
+  bool found_dropped = false;
+  for (int attempt = 0; attempt < 50 && !found_dropped; ++attempt) {
+    auto metrics = shuffling_chunk_pool.FlushMetrics();
+    if (!metrics.has_shuffling_chunk_pool()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+    const auto& pool_metrics = metrics.shuffling_chunk_pool();
+    if (!pool_metrics.has_dropped_chunks() ||
+        pool_metrics.dropped_chunks().count() == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+    dropped_latest = pool_metrics.dropped_chunks().latest();
+    found_dropped = true;
+  }
+  ASSERT_TRUE(found_dropped) << "dropped chunk metrics should be reported";
+  EXPECT_GE(dropped_latest, 1.0);
 }
 
 TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
@@ -459,18 +482,29 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Collect chunks continuously and count total chunks received
-  std::vector<std::pair<std::string, size_t>> all_chunks_received;
+  struct ChunkRecord {
+    std::string sort_key;
+    size_t index;
+    uint32_t reshuffle_count;
+  };
+  std::vector<ChunkRecord> all_chunks_received;
 
   // Wait for and collect chunks to test shuffler reset
   for (size_t i = 0; i < 8; ++i) {
     output_queue->WaitForSizeAtLeast(1);
     auto chunk = output_queue->Get();
-    all_chunks_received.emplace_back(chunk.sort_key,
-                                     chunk.index_within_sort_key);
+    all_chunks_received.push_back(
+        {chunk.sort_key, chunk.index_within_sort_key, chunk.reshuffle_count});
   }
 
-  std::set<std::pair<std::string, size_t>> unique_chunks(
-      all_chunks_received.begin(), all_chunks_received.end());
+  std::set<std::pair<std::string, size_t>> unique_chunks;
+  bool seen_reshuffle = false;
+  for (const auto& record : all_chunks_received) {
+    unique_chunks.emplace(record.sort_key, record.index);
+    if (record.reshuffle_count > 0) {
+      seen_reshuffle = true;
+    }
+  }
 
   // Close input queue to clean up
   try {
@@ -487,6 +521,8 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   EXPECT_GT(all_chunks_received.size(), 3)
       << "Should get more than 3 chunks total due to shuffler reset, got "
       << all_chunks_received.size() << " chunks";
+  EXPECT_TRUE(seen_reshuffle)
+      << "Expect at least one chunk to report a reshuffle count";
 }
 
 TEST_F(ShufflingChunkPoolTest, ExplicitClose) {

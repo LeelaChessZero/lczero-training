@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
@@ -53,6 +54,8 @@ class ShufflingChunkPool
   struct ChunkSourceItem {
     size_t start_chunk_index;
     std::unique_ptr<ChunkSource> source;
+    absl::flat_hash_set<size_t> dropped_chunks;
+    uint32_t reshuffle_count = 0;
   };
 
   struct IndexingThreadContext {
@@ -79,6 +82,8 @@ class ShufflingChunkPool
   ThreadPool indexing_pool_;
   ThreadPool chunk_loading_pool_;
   Queue<TrainingChunk> output_queue_;
+
+  std::atomic<int64_t> dropped_chunks_metric_{0};
 
   absl::Mutex chunk_sources_mutex_;
   std::deque<ChunkSourceItem> chunk_sources_

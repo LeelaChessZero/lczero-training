@@ -57,6 +57,7 @@ void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
   UpdateFrom(*dest.mutable_chunk_loading_load(), src.chunk_loading_load());
   UpdateFrom(*dest.mutable_queue(), src.queue());
   UpdateFrom(*dest.mutable_chunk_sources_count(), src.chunk_sources_count());
+  UpdateFrom(*dest.mutable_dropped_chunks(), src.dropped_chunks());
   if (src.has_current_chunks()) dest.set_current_chunks(src.current_chunks());
   if (src.has_pool_capacity()) dest.set_pool_capacity(src.pool_capacity());
   if (src.has_chunks_since_anchor())

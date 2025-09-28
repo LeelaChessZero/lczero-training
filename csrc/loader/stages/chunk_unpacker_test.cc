@@ -52,10 +52,12 @@ class ChunkUnpackerTest : public ::testing::Test {
   }
 
   TrainingChunk MakeChunk(std::vector<V6TrainingData> frames,
-                          std::string sort_key = "source", size_t index = 0) {
+                          std::string sort_key = "source", size_t index = 0,
+                          uint32_t reshuffle = 0) {
     TrainingChunk chunk;
     chunk.sort_key = std::move(sort_key);
     chunk.index_within_sort_key = index;
+    chunk.reshuffle_count = reshuffle;
     chunk.frames = std::move(frames);
     return chunk;
   }

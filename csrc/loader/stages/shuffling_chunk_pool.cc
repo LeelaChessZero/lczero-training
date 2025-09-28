@@ -202,7 +202,9 @@ void ShufflingChunkPool::ProcessInputFiles(
         uninitialized_sources.rbegin(), uninitialized_sources.rend(),
         [this, &start_chunk_index](auto& source) {
           chunk_sources_.push_back({.start_chunk_index = start_chunk_index,
-                                    .source = std::move(source)});
+                                    .source = std::move(source),
+                                    .dropped_chunks = {},
+                                    .reshuffle_count = 0});
           start_chunk_index += chunk_sources_.back().source->GetChunkCount();
         });
 
@@ -269,70 +271,93 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
 }
 
 std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
-  std::optional<std::string> chunk_data;
-  std::string sort_key;
-  size_t local_index = 0;
+  while (true) {
+    std::string data;
+    std::string sort_key;
+    size_t local_index = 0;
+    uint32_t reshuffle_count = 0;
 
-  {
-    absl::MutexLock lock(&chunk_sources_mutex_);
-    std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
+    {
+      absl::MutexLock lock(&chunk_sources_mutex_);
+      std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
 
-    if (!chunk_index && !chunk_sources_.empty()) {
-      size_t total_chunks = chunk_sources_.back().start_chunk_index +
-                            chunk_sources_.back().source->GetChunkCount();
-      size_t lower_bound = total_chunks > chunk_pool_size_
-                               ? total_chunks - chunk_pool_size_
-                               : chunk_sources_.front().start_chunk_index;
-      stream_shuffler_.Reset(lower_bound, total_chunks);
-      chunk_index = stream_shuffler_.GetNextItem();
+      if (!chunk_index && !chunk_sources_.empty()) {
+        size_t total_chunks = chunk_sources_.back().start_chunk_index +
+                              chunk_sources_.back().source->GetChunkCount();
+        size_t lower_bound = total_chunks > chunk_pool_size_
+                                 ? total_chunks - chunk_pool_size_
+                                 : chunk_sources_.front().start_chunk_index;
+        stream_shuffler_.Reset(lower_bound, total_chunks);
+        for (auto& item : chunk_sources_) {
+          ++item.reshuffle_count;
+        }
+        chunk_index = stream_shuffler_.GetNextItem();
+      }
+
+      if (!chunk_index) {
+        return std::nullopt;
+      }
+
+      auto it = absl::c_lower_bound(
+          chunk_sources_, *chunk_index,
+          [](const auto& source_item, size_t chunk_idx) {
+            return source_item.start_chunk_index +
+                       source_item.source->GetChunkCount() <=
+                   chunk_idx;
+          });
+
+      if (ABSL_PREDICT_FALSE(it == chunk_sources_.end() ||
+                             *chunk_index < it->start_chunk_index)) {
+        LOG(WARNING) << "Chunk index " << *chunk_index
+                     << " out of range for available chunk sources.";
+        continue;
+      }
+
+      local_index = *chunk_index - it->start_chunk_index;
+      if (it->dropped_chunks.contains(local_index)) {
+        continue;
+      }
+
+      std::optional<std::string> chunk_data =
+          it->source->GetChunkData(local_index);
+      if (!chunk_data) {
+        it->dropped_chunks.insert(local_index);
+        dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
+        continue;
+      }
+
+      if (chunk_data->size() % sizeof(FrameType) != 0) {
+        LOG(WARNING) << "Chunk size " << chunk_data->size()
+                     << " is not a multiple of V6TrainingData size "
+                     << sizeof(FrameType) << ", skipping chunk from sort key "
+                     << it->source->GetChunkSortKey() << " at index "
+                     << local_index;
+        it->dropped_chunks.insert(local_index);
+        dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
+        continue;
+      }
+
+      data = std::move(*chunk_data);
+      sort_key = it->source->GetChunkSortKey();
+      reshuffle_count = it->reshuffle_count;
     }
 
-    assert(chunk_index && "No chunk sources available after initialization");
+    TrainingChunk chunk;
+    chunk.sort_key = std::move(sort_key);
+    chunk.index_within_sort_key = local_index;
+    chunk.reshuffle_count = reshuffle_count;
 
-    auto it =
-        absl::c_lower_bound(chunk_sources_, *chunk_index,
-                            [](const auto& source_item, size_t chunk_idx) {
-                              return source_item.start_chunk_index +
-                                         source_item.source->GetChunkCount() <=
-                                     chunk_idx;
-                            });
+    const size_t num_frames = data.size() / sizeof(FrameType);
+    chunk.frames.reserve(num_frames);
+    const char* raw = data.data();
+    for (size_t i = 0; i < num_frames; ++i) {
+      FrameType frame;
+      std::memcpy(&frame, raw + i * sizeof(FrameType), sizeof(FrameType));
+      chunk.frames.push_back(frame);
+    }
 
-    assert(it != chunk_sources_.end() &&
-           *chunk_index >= it->start_chunk_index &&
-           "Chunk index should be within available chunk sources");
-
-    local_index = *chunk_index - it->start_chunk_index;
-    chunk_data = it->source->GetChunkData(local_index);
-    sort_key = it->source->GetChunkSortKey();
+    return chunk;
   }
-
-  if (!chunk_data) {
-    return std::nullopt;
-  }
-
-  std::string data = std::move(*chunk_data);
-  if (data.size() % sizeof(FrameType) != 0) {
-    LOG(WARNING) << "Chunk size " << data.size()
-                 << " is not a multiple of V6TrainingData size "
-                 << sizeof(FrameType) << ", skipping chunk from sort key "
-                 << sort_key << " at index " << local_index;
-    return std::nullopt;
-  }
-
-  size_t num_frames = data.size() / sizeof(FrameType);
-  TrainingChunk chunk;
-  chunk.sort_key = std::move(sort_key);
-  chunk.index_within_sort_key = local_index;
-  chunk.frames.reserve(num_frames);
-
-  const char* raw = data.data();
-  for (size_t i = 0; i < num_frames; ++i) {
-    FrameType frame;
-    std::memcpy(&frame, raw + i * sizeof(FrameType), sizeof(FrameType));
-    chunk.frames.push_back(frame);
-  }
-
-  return chunk;
 }
 
 void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
@@ -345,8 +370,10 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
         last_source.start_chunk_index + last_source.source->GetChunkCount();
   }
 
-  chunk_sources_.push_back(
-      {.start_chunk_index = old_upper_bound, .source = std::move(source)});
+  chunk_sources_.push_back({.start_chunk_index = old_upper_bound,
+                            .source = std::move(source),
+                            .dropped_chunks = {},
+                            .reshuffle_count = 0});
 
   // Calculate current window bounds.
   size_t new_upper_bound = chunk_sources_.back().start_chunk_index +
@@ -411,6 +438,9 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     metrics->set_chunks_since_anchor(chunks_since_anchor_);
     metrics->set_anchor(anchor_);
   }
+
+  AddSample(*metrics->mutable_dropped_chunks(),
+            dropped_chunks_metric_.load(std::memory_order_acquire));
 
   *stage_metric.add_output_queue_metrics() =
       MetricsFromQueue("output", output_queue_);
