@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "loader/stages/chunk_rescorer.h"
 #include "loader/stages/chunk_source_loader.h"
 #include "loader/stages/chunk_unpacker.h"
 #include "loader/stages/file_path_provider.h"
@@ -19,6 +20,7 @@ int CountStageConfigs(const StageConfig& config) {
   return static_cast<int>(config.has_file_path_provider()) +
          static_cast<int>(config.has_chunk_source_loader()) +
          static_cast<int>(config.has_shuffling_chunk_pool()) +
+         static_cast<int>(config.has_chunk_rescorer()) +
          static_cast<int>(config.has_chunk_unpacker()) +
          static_cast<int>(config.has_shuffling_frame_sampler()) +
          static_cast<int>(config.has_tensor_generator());
@@ -44,6 +46,10 @@ std::unique_ptr<Stage> CreateStage(const StageConfig& config,
   if (config.has_shuffling_chunk_pool()) {
     return std::make_unique<ShufflingChunkPool>(config.shuffling_chunk_pool(),
                                                 existing_stages);
+  }
+  if (config.has_chunk_rescorer()) {
+    return std::make_unique<ChunkRescorer>(config.chunk_rescorer(),
+                                           existing_stages);
   }
   if (config.has_chunk_unpacker()) {
     return std::make_unique<ChunkUnpacker>(config.chunk_unpacker(),

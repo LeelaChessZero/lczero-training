@@ -92,6 +92,9 @@ std::string DataLoader::ResolveStageName(
   if (stage_config.has_shuffling_chunk_pool()) {
     return "shuffling_chunk_pool";
   }
+  if (stage_config.has_chunk_rescorer()) {
+    return "chunk_rescorer";
+  }
   if (stage_config.has_chunk_unpacker()) {
     return "chunk_unpacker";
   }

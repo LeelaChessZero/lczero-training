@@ -65,6 +65,12 @@ message ShufflingChunkPoolMetricsProto {
   optional StatisticsProtoInt64 dropped_chunks = 9;
 }
 
+// Metrics for ChunkRescorer performance monitoring.
+message ChunkRescorerMetricsProto {
+  optional LoadMetricProto load = 1;
+  optional QueueMetricProto queue = 2;
+}
+
 // Metrics for ChunkUnpacker performance monitoring.
 message ChunkUnpackerMetricsProto {
   optional LoadMetricProto load = 1;
@@ -95,6 +101,7 @@ message StageMetricProto {
   optional ChunkUnpackerMetricsProto chunk_unpacker = 5;
   optional ShufflingFrameSamplerMetricsProto shuffling_frame_sampler = 6;
   optional TensorGeneratorMetricsProto tensor_generator = 7;
+  optional ChunkRescorerMetricsProto chunk_rescorer = 8;
   repeated QueueMetricProto output_queue_metrics = 10;
 }
 

@@ -32,9 +32,22 @@ data_loader {
     }
   }
   stage {
+    name: "chunk_rescorer"
+    chunk_rescorer {
+      input: "shuffling_chunk_pool"
+      threads: 1            # Threads for chunk rescoring
+      queue_capacity: 16    # Output queue for rescored chunks
+      syzygy_paths: "/path/to/tb"  # Tablebase search paths (comma-separated)
+      dist_temp: 1.0        # Policy temperature applied during rescoring
+      dist_offset: 0.0      # Policy offset applied during rescoring
+      dtz_boost: 0.0        # DTZ boost for endgame policy tuning
+      new_input_format: -1  # Keep original input format (-1 disables change)
+    }
+  }
+  stage {
     name: "chunk_unpacker"
     chunk_unpacker {
-      input: "shuffling_chunk_pool"
+      input: "chunk_rescorer"
       threads: 1          # Threads for unpacking chunks
       queue_capacity: 16  # Output queue for unpacked frames
     }

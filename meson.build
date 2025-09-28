@@ -78,11 +78,44 @@ proto_gen = generator(compile_proto, output: ['@BASENAME@.pb.h'],
     '--cpp_out=@BUILD_DIR@',
     '@INPUT@'])
 
+lc0_proto_gen = generator(compile_proto, output: ['@BASENAME@.pb.h'],
+  arguments : [
+    '--proto_path=' + join_paths(meson.current_source_dir(), 'libs/lc0'),
+    '--cpp_out=@BUILD_DIR@',
+    '@INPUT@'])
+
 includes = include_directories('csrc', 'libs/lc0/src')
+
+add_project_arguments('-DNO_PEXT', language : 'cpp')
+
+rescorer_files = [
+  'libs/lc0/src/chess/board.cc',
+  'libs/lc0/src/chess/gamestate.cc',
+  'libs/lc0/src/chess/position.cc',
+  'libs/lc0/src/neural/decoder.cc',
+  'libs/lc0/src/neural/encoder.cc',
+  'libs/lc0/src/trainingdata/reader.cc',
+  'libs/lc0/src/trainingdata/trainingdata.cc',
+  'libs/lc0/src/trainingdata/writer.cc',
+  'libs/lc0/src/utils/commandline.cc',
+  'libs/lc0/src/utils/configfile.cc',
+  'libs/lc0/src/utils/esc_codes.cc',
+  'libs/lc0/src/utils/optionsdict.cc',
+  'libs/lc0/src/utils/optionsparser.cc',
+  'libs/lc0/src/utils/random.cc',
+  'libs/lc0/src/utils/string.cc',
+]
+
+if host_machine.system() == 'windows'
+  rescorer_files += 'libs/lc0/src/utils/filesystem.win32.cc'
+else
+  rescorer_files += 'libs/lc0/src/utils/filesystem.posix.cc'
+endif
 
 files = [
   'csrc/loader/stages/shuffling_chunk_pool.cc',
   'csrc/loader/stages/chunk_source_loader.cc',
+  'csrc/loader/stages/chunk_rescorer.cc',
   'csrc/loader/stages/chunk_unpacker.cc',
   'csrc/loader/stages/file_path_provider.cc',
   'csrc/loader/stages/stage_factory.cc',
@@ -94,10 +127,12 @@ files = [
   'csrc/loader/data_loader_metrics.cc',
   'csrc/utils/gz.cc',
   'csrc/utils/stream_shuffler.cc',
+  'libs/lc0/src/syzygy/syzygy.cc',
+  'libs/lc0/src/trainingdata/rescorer.cc',
   'libs/lc0/src/utils/files.cc',
   'libs/lc0/src/utils/logging.cc',
   'libs/lc0/src/utils/protomessage.cc',
-]
+] + rescorer_files
 
 # Process protobuf files for C++
 proto_files = [
@@ -106,7 +141,13 @@ proto_files = [
   proto_gen.process('proto/training_metrics.proto',
     preserve_path_from : meson.current_source_dir()),
   proto_gen.process('proto/stage_control.proto',
-    preserve_path_from : meson.current_source_dir())
+    preserve_path_from : meson.current_source_dir()),
+  lc0_proto_gen.process('libs/lc0/proto/net.proto',
+    preserve_path_from : join_paths(meson.current_source_dir(), 'libs/lc0')),
+  lc0_proto_gen.process('libs/lc0/proto/onnx.proto',
+    preserve_path_from : join_paths(meson.current_source_dir(), 'libs/lc0')),
+  lc0_proto_gen.process('libs/lc0/proto/hlo.proto',
+    preserve_path_from : join_paths(meson.current_source_dir(), 'libs/lc0'))
 ]
 
 # Create a dependency for protobuf files that tests can use
@@ -165,6 +206,14 @@ chunk_source_loader_test = executable(
 shuffling_chunk_pool_test = executable(
   'shuffling_chunk_pool_test',
   'csrc/loader/stages/shuffling_chunk_pool_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
+
+chunk_rescorer_test = executable(
+  'chunk_rescorer_test',
+  'csrc/loader/stages/chunk_rescorer_test.cc',
   include_directories : includes,
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
@@ -237,6 +286,7 @@ test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
 test('chunk_source_loader_test', chunk_source_loader_test)
 test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
+test('chunk_rescorer_test', chunk_rescorer_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
 test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
 test('tensor_test', tensor_test)

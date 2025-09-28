@@ -20,6 +20,8 @@ void UpdateFrom(ChunkSourceLoaderMetricsProto& dest,
                 const ChunkSourceLoaderMetricsProto& src);
 void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
                 const ShufflingChunkPoolMetricsProto& src);
+void UpdateFrom(ChunkRescorerMetricsProto& dest,
+                const ChunkRescorerMetricsProto& src);
 void UpdateFrom(ChunkUnpackerMetricsProto& dest,
                 const ChunkUnpackerMetricsProto& src);
 void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,

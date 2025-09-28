@@ -42,6 +42,28 @@ message ShufflingChunkPoolConfig {
   optional uint64 queue_capacity = 6 [default = 16];
 }
 
+// Configuration for chunk rescorer that adjusts chunk metadata using
+// tablebases. Maps to ChunkRescorerOptions in
+// csrc/loader/stages/chunk_rescorer.h
+message ChunkRescorerConfig {
+  // Name of the stage providing input to this rescorer.
+  optional string input = 1;
+  // Number of worker threads for rescoring.
+  optional uint64 threads = 2 [default = 1];
+  // Size of the output queue.
+  optional uint64 queue_capacity = 3 [default = 16];
+  // Comma-separated list of Syzygy tablebase directories.
+  optional string syzygy_paths = 4;
+  // Policy reshaping temperature.
+  optional float dist_temp = 5 [default = 1.0];
+  // Policy offset applied during rescoring.
+  optional float dist_offset = 6 [default = 0.0];
+  // DTZ boost factor when policy adjustments apply.
+  optional float dtz_boost = 7 [default = 0.0];
+  // Optional conversion target for input format (-1 keeps original).
+  optional int32 new_input_format = 8 [default = -1];
+}
+
 // Configuration for chunk unpacker that extracts frames from packed chunks.
 // Maps to ChunkUnpackerOptions in csrc/loader/chunk_feed/chunk_unpacker.h
 message ChunkUnpackerConfig {
@@ -89,6 +111,7 @@ message StageConfig {
   optional ChunkUnpackerConfig chunk_unpacker = 5;
   optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 6;
   optional TensorGeneratorConfig tensor_generator = 7;
+  optional ChunkRescorerConfig chunk_rescorer = 8;
 }
 
 // Main configuration class for the DataLoader containing all component

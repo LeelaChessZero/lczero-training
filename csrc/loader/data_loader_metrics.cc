@@ -65,6 +65,12 @@ void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
   if (src.has_anchor()) dest.set_anchor(src.anchor());
 }
 
+void UpdateFrom(ChunkRescorerMetricsProto& dest,
+                const ChunkRescorerMetricsProto& src) {
+  UpdateFrom(*dest.mutable_load(), src.load());
+  UpdateFrom(*dest.mutable_queue(), src.queue());
+}
+
 void UpdateFrom(ChunkUnpackerMetricsProto& dest,
                 const ChunkUnpackerMetricsProto& src) {
   UpdateFrom(*dest.mutable_load(), src.load());
@@ -100,6 +106,9 @@ void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
   if (src.has_shuffling_chunk_pool()) {
     UpdateFrom(*dest.mutable_shuffling_chunk_pool(),
                src.shuffling_chunk_pool());
+  }
+  if (src.has_chunk_rescorer()) {
+    UpdateFrom(*dest.mutable_chunk_rescorer(), src.chunk_rescorer());
   }
   if (src.has_chunk_unpacker()) {
     UpdateFrom(*dest.mutable_chunk_unpacker(), src.chunk_unpacker());

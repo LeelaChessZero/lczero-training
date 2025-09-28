@@ -33,8 +33,8 @@ The Data Loader consists of the following stages connected through a
   ones, and outputting them in shuffled order.
 * (skip for now) [ChunkValidator](../csrc/loader/chunk_feed/chunk_validator.h) —
   Filters the chunk stream, filtering out invalid chunks.
-* (skip for now) [ChunkRescorer](../csrc/loader/chunk_feed/chunk_rescorer.h) —
-  Rescores chunks based on tablebase or intentional blunders.
+* [ChunkRescorer](../csrc/loader/stages/chunk_rescorer.h) — Rescores chunks
+  using Syzygy tablebases and configurable policy adjustments.
 * [ChunkUnpacker](../csrc/loader/chunk_feed/chunk_unpacker.h) — Unpacks
   chunks into frames, which are then processed by the next stages.
 * [ShufflingFrameSampler](../csrc/loader/shuffling_frame_sampler.h) — Takes a
