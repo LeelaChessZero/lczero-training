@@ -8,11 +8,15 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
-#include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include "loader/stages/training_chunk.h"
 
 namespace lczero {
 namespace training {
@@ -41,11 +45,8 @@ class PassthroughStage : public Stage {
 // Mock ChunkSource for testing
 class MockChunkSource : public ChunkSource {
  public:
-  MockChunkSource(const std::string& sort_key, size_t chunk_count,
-                  const std::string& chunk_prefix = "chunk")
-      : sort_key_(sort_key),
-        chunk_count_(chunk_count),
-        chunk_prefix_(chunk_prefix) {}
+  MockChunkSource(const std::string& sort_key, size_t chunk_count)
+      : sort_key_(sort_key), chunk_count_(chunk_count) {}
 
   std::string GetChunkSortKey() const override { return sort_key_; }
 
@@ -65,7 +66,12 @@ class MockChunkSource : public ChunkSource {
     if (index >= chunk_count_) {
       throw std::out_of_range("Chunk index out of range");
     }
-    return chunk_prefix_ + "_" + sort_key_ + "_" + std::to_string(index);
+    FrameType frame{};
+    frame.version = static_cast<uint32_t>(index);
+    frame.input_format = 3;
+    std::string chunk(sizeof(FrameType), '\0');
+    std::memcpy(chunk.data(), &frame, sizeof(FrameType));
+    return chunk;
   }
 
   bool is_indexed() const { return indexed_; }
@@ -73,7 +79,44 @@ class MockChunkSource : public ChunkSource {
  private:
   std::string sort_key_;
   size_t chunk_count_;
-  std::string chunk_prefix_;
+  bool indexed_ = false;
+};
+
+class InvalidChunkSource : public ChunkSource {
+ public:
+  explicit InvalidChunkSource(std::string sort_key)
+      : sort_key_(std::move(sort_key)) {}
+
+  std::string GetChunkSortKey() const override { return sort_key_; }
+
+  void Index() override { indexed_ = true; }
+
+  size_t GetChunkCount() const override {
+    if (!indexed_) {
+      throw std::runtime_error("Index() must be called before GetChunkCount()");
+    }
+    return 2;
+  }
+
+  std::optional<std::string> GetChunkData(size_t index) override {
+    if (!indexed_) {
+      throw std::runtime_error("Index() must be called before GetChunkData()");
+    }
+    if (index >= 2) {
+      throw std::out_of_range("Chunk index out of range");
+    }
+    if (index == 0) {
+      return std::string(sizeof(FrameType) + 1, 'x');
+    }
+    FrameType frame{};
+    frame.version = 42;
+    std::string chunk(sizeof(FrameType), '\0');
+    std::memcpy(chunk.data(), &frame, sizeof(FrameType));
+    return chunk;
+  }
+
+ private:
+  std::string sort_key_;
   bool indexed_ = false;
 };
 
@@ -96,11 +139,9 @@ class ShufflingChunkPoolTest : public ::testing::Test {
   void AddMockChunkSourceToQueue(const std::string& sort_key,
                                  size_t chunk_count,
                                  FilePathProvider::MessageType message_type =
-                                     FilePathProvider::MessageType::kFile,
-                                 const std::string& chunk_prefix = "data") {
+                                     FilePathProvider::MessageType::kFile) {
     ChunkSourceWithPhase item;
-    item.source =
-        std::make_unique<MockChunkSource>(sort_key, chunk_count, chunk_prefix);
+    item.source = std::make_unique<MockChunkSource>(sort_key, chunk_count);
     item.message_type = message_type;
     input_producer_->Put(std::move(item));
   }
@@ -124,6 +165,21 @@ class ShufflingChunkPoolTest : public ::testing::Test {
     config->set_input("source");
   }
 
+  ShufflingChunkPoolConfig MakeConfig(int chunk_pool_size,
+                                      int startup_threads = 1,
+                                      int indexing_threads = 1,
+                                      int loading_threads = 1,
+                                      int queue_capacity = 100) const {
+    ShufflingChunkPoolConfig config;
+    config.set_chunk_pool_size(chunk_pool_size);
+    config.set_startup_indexing_threads(startup_threads);
+    config.set_indexing_threads(indexing_threads);
+    config.set_chunk_loading_threads(loading_threads);
+    config.set_queue_capacity(queue_capacity);
+    SetInputProvider(&config);
+    return config;
+  }
+
   std::unique_ptr<Queue<ChunkSourceWithPhase>> input_queue_;
   std::unique_ptr<Queue<ChunkSourceWithPhase>::Producer> input_producer_;
   std::unique_ptr<PassthroughStage<ChunkSourceWithPhase>> input_stage_;
@@ -135,13 +191,7 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
   AddMockChunkSourceToQueue("source2", 60);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
 
@@ -167,16 +217,11 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   // Only mark scan complete, no chunk sources
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   // Constructor should now succeed (initialization is asynchronous)
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
 
   // The initialization thread should handle the error case
   auto* output_queue = shuffling_chunk_pool.output();
@@ -203,17 +248,12 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   // Test that constructor completes and processes mock chunk sources
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+    shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -225,21 +265,16 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
 
 TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   // Create mock chunk sources
-  AddMockChunkSourceToQueue("source1", 10, FilePathProvider::MessageType::kFile,
-                            "test");
-  AddMockChunkSourceToQueue("source2", 15, FilePathProvider::MessageType::kFile,
-                            "data");
+  AddMockChunkSourceToQueue("source1", 10,
+                            FilePathProvider::MessageType::kFile);
+  AddMockChunkSourceToQueue("source2", 15,
+                            FilePathProvider::MessageType::kFile);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(20);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
@@ -254,10 +289,38 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
 
   // Get a chunk and verify it's from our mock sources
   auto chunk = output_queue->Get();
-  EXPECT_FALSE(chunk.empty());
-  // Should contain either "test_source1_" or "data_source2_"
-  EXPECT_TRUE(chunk.find("source1") != std::string::npos ||
-              chunk.find("source2") != std::string::npos);
+  EXPECT_FALSE(chunk.frames.empty());
+  EXPECT_TRUE(chunk.sort_key == "source1" || chunk.sort_key == "source2");
+  EXPECT_EQ(chunk.frames.size(), 1);
+  EXPECT_EQ(chunk.frames.front().version,
+            static_cast<uint32_t>(chunk.index_within_sort_key));
+}
+
+TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
+  ChunkSourceWithPhase invalid_source;
+  invalid_source.source =
+      std::make_unique<InvalidChunkSource>("invalid_source");
+  invalid_source.message_type = FilePathProvider::MessageType::kFile;
+  input_producer_->Put(std::move(invalid_source));
+  MarkInitialScanComplete();
+
+  auto config = MakeConfig(1, /*startup_threads=*/1, /*indexing_threads=*/1,
+                           /*loading_threads=*/1, /*queue_capacity=*/10);
+
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
+
+  // Close input queue to stop input worker from waiting
+  CloseInputQueue();
+
+  auto* output_queue = shuffling_chunk_pool.output();
+  output_queue->WaitForSizeAtLeast(1);
+  auto chunk = output_queue->Get();
+
+  EXPECT_EQ(chunk.sort_key, "invalid_source");
+  EXPECT_EQ(chunk.index_within_sort_key, 1);
+  ASSERT_EQ(chunk.frames.size(), 1);
+  EXPECT_EQ(chunk.frames.front().version, 42);
 }
 
 TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
@@ -266,15 +329,10 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
   AddMockChunkSourceToQueue("initial", 120);  // More chunks than window
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
 
   // Verify chunks are being produced from initial sources
   auto* output_queue = shuffling_chunk_pool.output();
@@ -301,17 +359,12 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   AddMockChunkSourceToQueue("source3", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(50);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(50);
 
   // Should only keep sources that fit in the window
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+    shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -355,17 +408,12 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   AddMockChunkSourceToQueue("source_c", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(70);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(70);
 
   // ShufflingChunkPool should handle sorting internally (newest first)
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+    shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
@@ -382,13 +430,7 @@ TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
   AddMockChunkSourceToQueue("source3", 50);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(3);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(100, /*startup_threads=*/3);
 
   // Should work without hanging or crashing
   EXPECT_NO_THROW({
@@ -407,31 +449,28 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   AddMockChunkSourceToQueue("source1", 3);  // Only 3 chunks for faster testing
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(3);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);  // Large enough to hold all chunks
-  SetInputProvider(&config);
+  auto config = MakeConfig(3, /*startup_threads=*/1, /*indexing_threads=*/1,
+                           /*loading_threads=*/1,
+                           /*queue_capacity=*/100);  // Large enough
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
 
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Collect chunks continuously and count total chunks received
-  std::vector<std::string> all_chunks_received;
+  std::vector<std::pair<std::string, size_t>> all_chunks_received;
 
   // Wait for and collect chunks to test shuffler reset
   for (size_t i = 0; i < 8; ++i) {
     output_queue->WaitForSizeAtLeast(1);
     auto chunk = output_queue->Get();
-    all_chunks_received.push_back(chunk);
+    all_chunks_received.emplace_back(chunk.sort_key,
+                                     chunk.index_within_sort_key);
   }
 
-  // Debug output
-  std::unordered_set<std::string> unique_chunks(all_chunks_received.begin(),
-                                                all_chunks_received.end());
+  std::set<std::pair<std::string, size_t>> unique_chunks(
+      all_chunks_received.begin(), all_chunks_received.end());
 
   // Close input queue to clean up
   try {
@@ -456,15 +495,10 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
   AddMockChunkSourceToQueue("source2", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(40);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(40);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
@@ -492,15 +526,11 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
   AddMockChunkSourceToQueue("source1", 15);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(15);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(2);
-  config.set_queue_capacity(50);
-  SetInputProvider(&config);
+  auto config = MakeConfig(15, /*startup_threads=*/1, /*indexing_threads=*/1,
+                           /*loading_threads=*/2, /*queue_capacity=*/50);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce chunks
@@ -530,15 +560,10 @@ TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(20);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
 
   // Stop multiple times - should not crash or cause issues
   EXPECT_NO_THROW(shuffling_chunk_pool.Stop());
@@ -553,17 +578,12 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(20);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   // Test that destructor calls Close() and properly shuts down
   {
     ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+    shuffling_chunk_pool.Start();
     auto* output_queue = shuffling_chunk_pool.output();
 
     // Wait for workers to produce some chunks
@@ -586,15 +606,10 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
   AddMockChunkSourceToQueue("source1", 30);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(30);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(30);
 
   ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+  shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output();
 
   // Wait for workers to produce some chunks
@@ -618,15 +633,10 @@ TEST_F(ShufflingChunkPoolTest, BasicAnchorFunctionality) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(20);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool pool(config, StageListForInput());
+  pool.Start();
 
   // Test initial state
   EXPECT_EQ(pool.ChunksSinceAnchor(), 0);
@@ -648,15 +658,10 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(20);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   ShufflingChunkPool pool(config, StageListForInput());
+  pool.Start();
 
   // Wait for initialization to complete
   pool.output()->WaitForSizeAtLeast(1);
@@ -673,19 +678,14 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
 TEST_F(ShufflingChunkPoolTest, AnchorCounterIncrement) {
   // Don't mark initial scan complete yet - we'll add sources one by one
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(20);
 
   // Start with some initial sources and complete scan
   AddMockChunkSourceToQueue("source1", 20);
   MarkInitialScanComplete();
 
   ShufflingChunkPool pool(config, StageListForInput());
+  pool.Start();
 
   // Set anchor to a key that won't match our new sources
   pool.SetAnchor("non_matching_key");
@@ -714,15 +714,10 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
   AddMockChunkSourceToQueue("source_b", 15);  // middle
   AddMockChunkSourceToQueue("source_a", 20);  // oldest
 
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(100);
-  config.set_startup_indexing_threads(1);
-  config.set_indexing_threads(1);
-  config.set_chunk_loading_threads(1);
-  config.set_queue_capacity(100);
-  SetInputProvider(&config);
+  auto config = MakeConfig(45);
 
   ShufflingChunkPool pool(config, StageListForInput());
+  pool.Start();
 
   // Set anchor to middle source before marking scan complete
   pool.SetAnchor("source_b");
@@ -735,9 +730,9 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
 
   int final_count = pool.ChunksSinceAnchor();
 
-  // Should only count chunks from source_c (10 chunks) since it's newer than
-  // anchor When source_b (anchor) is encountered, counter should reset to 0
-  EXPECT_EQ(final_count, 0);  // Counter reset when anchor encountered
+  // Should only count chunks from source_c (10 chunks) since it is newer than
+  // the anchor.
+  EXPECT_EQ(final_count, 10);
   EXPECT_EQ(pool.CurrentAnchor(), "source_b");
 
   CloseInputQueue();

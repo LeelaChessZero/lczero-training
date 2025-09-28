@@ -236,11 +236,9 @@ test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
 test('chunk_source_loader_test', chunk_source_loader_test)
-# TODO: Re-enable when fixed
-# test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
+test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
-# TODO: Re-enable when fixed
-# test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
+test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
 test('tensor_test', tensor_test)
 test('tensor_generator_test', tensor_generator_test)
 test('stats_test', stats_test)

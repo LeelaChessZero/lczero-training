@@ -4,12 +4,12 @@
 
 #include <atomic>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
 #include "loader/stages/stage.h"
+#include "loader/stages/training_chunk.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
@@ -21,12 +21,12 @@ namespace training {
 using FrameType = V6TrainingData;
 
 // Worker pool that unpacks chunks into frames.
-// Takes std::string chunks containing packed V6TrainingData as input and
-// outputs individual V6TrainingData frames.
+// Takes parsed TrainingChunk objects as input and outputs individual
+// V6TrainingData frames.
 class ChunkUnpacker
-    : public SingleInputStage<ChunkUnpackerConfig, std::string> {
+    : public SingleInputStage<ChunkUnpackerConfig, TrainingChunk> {
  public:
-  using InputType = std::string;
+  using InputType = TrainingChunk;
   using OutputType = FrameType;
 
   ChunkUnpacker(const ChunkUnpackerConfig& config,

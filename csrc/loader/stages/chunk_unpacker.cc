@@ -1,7 +1,5 @@
 #include "loader/stages/chunk_unpacker.h"
 
-#include <cstring>
-
 #include "absl/log/log.h"
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
@@ -68,22 +66,7 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
         return input_queue()->Get();
       }();
 
-      // Check if chunk size is valid for V6TrainingData frames.
-      if (chunk.size() % sizeof(V6TrainingData) != 0) {
-        LOG(WARNING) << "Chunk size " << chunk.size()
-                     << " is not a multiple of V6TrainingData size "
-                     << sizeof(V6TrainingData) << ", skipping chunk";
-        continue;
-      }
-
-      size_t num_frames = chunk.size() / sizeof(V6TrainingData);
-      const char* data = chunk.data();
-
-      // Unpack each frame from the chunk.
-      for (size_t i = 0; i < num_frames; ++i) {
-        V6TrainingData frame;
-        std::memcpy(&frame, data + i * sizeof(V6TrainingData),
-                    sizeof(V6TrainingData));
+      for (auto& frame : chunk.frames) {
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(frame));
       }

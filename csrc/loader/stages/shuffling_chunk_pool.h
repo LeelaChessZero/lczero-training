@@ -3,6 +3,7 @@
 #include <atomic>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -13,6 +14,7 @@
 #include "loader/data_loader_metrics.h"
 #include "loader/stages/chunk_source_loader.h"
 #include "loader/stages/stage.h"
+#include "loader/stages/training_chunk.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/stage_control.pb.h"
 #include "proto/training_metrics.pb.h"
@@ -31,7 +33,7 @@ class ShufflingChunkPool
                      const StageList& existing_stages);
   ~ShufflingChunkPool();
 
-  Queue<std::string>* output();
+  Queue<TrainingChunk>* output();
   void Start() override;
   void Stop() override;
 
@@ -69,14 +71,14 @@ class ShufflingChunkPool
   void OutputWorker(ChunkLoadingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  std::optional<std::string> GetNextChunkData()
+  std::optional<TrainingChunk> GetNextChunkData()
       ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
 
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
   ThreadPool indexing_pool_;
   ThreadPool chunk_loading_pool_;
-  Queue<std::string> output_queue_;
+  Queue<TrainingChunk> output_queue_;
 
   absl::Mutex chunk_sources_mutex_;
   std::deque<ChunkSourceItem> chunk_sources_

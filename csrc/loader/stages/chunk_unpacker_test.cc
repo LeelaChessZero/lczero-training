@@ -1,11 +1,12 @@
 #include "loader/stages/chunk_unpacker.h"
 
-#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
+#include "loader/stages/training_chunk.h"
 #include "proto/data_loader_config.pb.h"
 #include "utils/queue.h"
 
@@ -36,7 +37,7 @@ class PassthroughStage : public Stage {
 class ChunkUnpackerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    input_queue_ = std::make_unique<Queue<std::string>>(10);
+    input_queue_ = std::make_unique<Queue<TrainingChunk>>(10);
     config_.set_threads(1);
     config_.set_queue_capacity(10);
     config_.set_input("source");
@@ -50,32 +51,28 @@ class ChunkUnpackerTest : public ::testing::Test {
     return frame;
   }
 
-  std::string PackFrames(const std::vector<V6TrainingData>& frames) {
-    std::string chunk;
-    chunk.resize(frames.size() * sizeof(V6TrainingData));
-    char* data = chunk.data();
-    for (size_t i = 0; i < frames.size(); ++i) {
-      std::memcpy(data + i * sizeof(V6TrainingData), &frames[i],
-                  sizeof(V6TrainingData));
-    }
+  TrainingChunk MakeChunk(std::vector<V6TrainingData> frames,
+                          std::string sort_key = "source", size_t index = 0) {
+    TrainingChunk chunk;
+    chunk.sort_key = std::move(sort_key);
+    chunk.index_within_sort_key = index;
+    chunk.frames = std::move(frames);
     return chunk;
   }
 
-  std::unique_ptr<Queue<std::string>> input_queue_;
+  std::unique_ptr<Queue<TrainingChunk>> input_queue_;
   ChunkUnpackerConfig config_;
 };
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
+  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
   Stage::StageList stages{{"source", &source_stage}};
   ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   V6TrainingData test_frame = CreateTestFrame(6);
-  std::string chunk = PackFrames({test_frame});
-
   auto producer = input_queue_->CreateProducer();
-  producer.Put(chunk);
+  producer.Put(MakeChunk({test_frame}));
   producer.Close();
 
   auto output_frame = unpacker.output()->Get();
@@ -85,17 +82,15 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
+  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
   Stage::StageList stages{{"source", &source_stage}};
   ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   std::vector<V6TrainingData> test_frames = {
       CreateTestFrame(6), CreateTestFrame(7), CreateTestFrame(8)};
-  std::string chunk = PackFrames(test_frames);
-
   auto producer = input_queue_->CreateProducer();
-  producer.Put(chunk);
+  producer.Put(MakeChunk(test_frames));
   producer.Close();
 
   for (size_t i = 0; i < test_frames.size(); ++i) {
@@ -107,7 +102,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
+  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
   Stage::StageList stages{{"source", &source_stage}};
   ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
@@ -117,11 +112,11 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
   // Send first chunk with 2 frames
   std::vector<V6TrainingData> chunk1_frames = {CreateTestFrame(10),
                                                CreateTestFrame(11)};
-  producer.Put(PackFrames(chunk1_frames));
+  producer.Put(MakeChunk(chunk1_frames, "source", 0));
 
   // Send second chunk with 1 frame
   std::vector<V6TrainingData> chunk2_frames = {CreateTestFrame(12)};
-  producer.Put(PackFrames(chunk2_frames));
+  producer.Put(MakeChunk(chunk2_frames, "source", 1));
 
   producer.Close();
 
@@ -134,29 +129,16 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
+  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
   Stage::StageList stages{{"source", &source_stage}};
   ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
-  producer.Put(std::string());  // Empty chunk
-  producer.Close();
-
-  // Should not produce any output frames, queue should close
-  EXPECT_THROW(unpacker.output()->Get(), QueueClosedException);
-}
-
-TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
-  unpacker.Start();
-
-  auto producer = input_queue_->CreateProducer();
-  // Create chunk with invalid size (not multiple of sizeof(V6TrainingData))
-  std::string invalid_chunk(sizeof(V6TrainingData) + 1, 'x');
-  producer.Put(invalid_chunk);
+  TrainingChunk empty_chunk;
+  empty_chunk.sort_key = "source";
+  empty_chunk.index_within_sort_key = 0;
+  producer.Put(std::move(empty_chunk));
   producer.Close();
 
   // Should not produce any output frames, queue should close
@@ -164,7 +146,7 @@ TEST_F(ChunkUnpackerTest, SkipsInvalidSizeChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
-  PassthroughStage<std::string> source_stage(input_queue_.get());
+  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
   Stage::StageList stages{{"source", &source_stage}};
   ChunkUnpacker unpacker(config_, stages);
   unpacker.Start();

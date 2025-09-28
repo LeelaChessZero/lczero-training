@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <thread>
 
@@ -34,7 +35,7 @@ ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
 
 ShufflingChunkPool::~ShufflingChunkPool() { Stop(); }
 
-Queue<std::string>* ShufflingChunkPool::output() { return &output_queue_; }
+Queue<TrainingChunk>* ShufflingChunkPool::output() { return &output_queue_; }
 
 QueueBase* ShufflingChunkPool::GetOutput(std::string_view name) {
   (void)name;
@@ -254,10 +255,10 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
 
   try {
     while (true) {
-      auto chunk_data = GetNextChunkData();
-      if (!chunk_data) continue;
+      auto chunk = GetNextChunkData();
+      if (!chunk) continue;
       LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(*chunk_data));
+      producer.Put(std::move(*chunk));
     }
   } catch (const QueueClosedException&) {
     LOG(INFO) << "ShufflingChunkPool output worker stopping, queue closed.";
@@ -267,38 +268,71 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   }
 }
 
-std::optional<std::string> ShufflingChunkPool::GetNextChunkData() {
-  absl::MutexLock lock(&chunk_sources_mutex_);
-  std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
+std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
+  std::optional<std::string> chunk_data;
+  std::string sort_key;
+  size_t local_index = 0;
 
-  // If shuffler is exhausted, reset it to current window.
-  if (!chunk_index && !chunk_sources_.empty()) {
-    size_t total_chunks = chunk_sources_.back().start_chunk_index +
-                          chunk_sources_.back().source->GetChunkCount();
-    size_t lower_bound = total_chunks > chunk_pool_size_
-                             ? total_chunks - chunk_pool_size_
-                             : chunk_sources_.front().start_chunk_index;
-    stream_shuffler_.Reset(lower_bound, total_chunks);
-    chunk_index = stream_shuffler_.GetNextItem();
+  {
+    absl::MutexLock lock(&chunk_sources_mutex_);
+    std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
+
+    if (!chunk_index && !chunk_sources_.empty()) {
+      size_t total_chunks = chunk_sources_.back().start_chunk_index +
+                            chunk_sources_.back().source->GetChunkCount();
+      size_t lower_bound = total_chunks > chunk_pool_size_
+                               ? total_chunks - chunk_pool_size_
+                               : chunk_sources_.front().start_chunk_index;
+      stream_shuffler_.Reset(lower_bound, total_chunks);
+      chunk_index = stream_shuffler_.GetNextItem();
+    }
+
+    assert(chunk_index && "No chunk sources available after initialization");
+
+    auto it =
+        absl::c_lower_bound(chunk_sources_, *chunk_index,
+                            [](const auto& source_item, size_t chunk_idx) {
+                              return source_item.start_chunk_index +
+                                         source_item.source->GetChunkCount() <=
+                                     chunk_idx;
+                            });
+
+    assert(it != chunk_sources_.end() &&
+           *chunk_index >= it->start_chunk_index &&
+           "Chunk index should be within available chunk sources");
+
+    local_index = *chunk_index - it->start_chunk_index;
+    chunk_data = it->source->GetChunkData(local_index);
+    sort_key = it->source->GetChunkSortKey();
   }
-  // If no chunk index after reset, it means no chunk sources are
-  // available.
-  assert(chunk_index && "No chunk sources available after initialization");
 
-  // Find which source contains this chunk index using binary search.
-  auto it =
-      absl::c_lower_bound(chunk_sources_, *chunk_index,
-                          [](const auto& source_item, size_t chunk_idx) {
-                            return source_item.start_chunk_index +
-                                       source_item.source->GetChunkCount() <=
-                                   chunk_idx;
-                          });
+  if (!chunk_data) {
+    return std::nullopt;
+  }
 
-  assert(it != chunk_sources_.end() && *chunk_index >= it->start_chunk_index &&
-         "Chunk index should be within available chunk sources");
+  std::string data = std::move(*chunk_data);
+  if (data.size() % sizeof(FrameType) != 0) {
+    LOG(WARNING) << "Chunk size " << data.size()
+                 << " is not a multiple of V6TrainingData size "
+                 << sizeof(FrameType) << ", skipping chunk from sort key "
+                 << sort_key << " at index " << local_index;
+    return std::nullopt;
+  }
 
-  size_t local_index = *chunk_index - it->start_chunk_index;
-  return it->source->GetChunkData(local_index);
+  size_t num_frames = data.size() / sizeof(FrameType);
+  TrainingChunk chunk;
+  chunk.sort_key = std::move(sort_key);
+  chunk.index_within_sort_key = local_index;
+  chunk.frames.reserve(num_frames);
+
+  const char* raw = data.data();
+  for (size_t i = 0; i < num_frames; ++i) {
+    FrameType frame;
+    std::memcpy(&frame, raw + i * sizeof(FrameType), sizeof(FrameType));
+    chunk.frames.push_back(frame);
+  }
+
+  return chunk;
 }
 
 void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
