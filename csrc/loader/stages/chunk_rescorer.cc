@@ -3,7 +3,9 @@
 #include <stdexcept>
 #include <utility>
 
+#include "absl/base/call_once.h"
 #include "absl/log/log.h"
+#include "chess/board.h"
 #include "loader/data_loader_metrics.h"
 
 namespace lczero {
@@ -24,6 +26,8 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
   if (!rescore_fn_) {
     throw std::invalid_argument("ChunkRescorer requires rescore function");
   }
+  static absl::once_flag bitboards_initialized_flag;
+  absl::call_once(bitboards_initialized_flag, InitializeMagicBitboards);
 
   LOG(INFO) << "Initializing ChunkRescorer with " << config.threads()
             << " worker thread(s) and queue capacity "
@@ -95,36 +99,21 @@ void ChunkRescorer::Worker(ThreadContext* context) {
         return input_queue()->Get();
       }();
 
-      bool rescored_successfully = true;
       std::vector<V6TrainingData> rescored_frames;
       try {
-        rescored_frames =
-            rescore_fn_(chunk.frames, &tablebase_, dist_temp_, dist_offset_,
-                        dtz_boost_, new_input_format_);
+        chunk.frames = rescore_fn_(chunk.frames, &tablebase_, dist_temp_,
+                                   dist_offset_, dtz_boost_, new_input_format_);
       } catch (const std::exception& exception) {
-        rescored_successfully = false;
         LOG(ERROR) << "ChunkRescorer failed to rescore chunk: "
                    << exception.what();
-      } catch (...) {
-        rescored_successfully = false;
-        LOG(ERROR) << "ChunkRescorer encountered unknown error during "
-                      "rescoring.";
+        continue;
       }
 
-      if (rescored_successfully) {
-        chunk.frames = std::move(rescored_frames);
-      }
-
-      try {
-        LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(chunk));
-      } catch (const QueueClosedException&) {
-        LOG(INFO) << "ChunkRescorer worker exiting, output queue closed.";
-        return;
-      }
+      LoadMetricPauser pauser(context->load_metric_updater);
+      producer.Put(std::move(chunk));
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "ChunkRescorer worker stopping, input queue closed.";
+    LOG(INFO) << "ChunkRescorer worker stopping, queue closed.";
   }
 }
 
