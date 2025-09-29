@@ -1,16 +1,54 @@
 #include "loader/stages/chunk_unpacker.h"
 
-#include "absl/log/log.h"
+#include <absl/log/log.h>
+#include <absl/random/random.h>
+
+#include <algorithm>
+#include <numeric>
+#include <random>
+#include <vector>
+
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 
 namespace lczero {
 namespace training {
+namespace {
+// Deal the i-th block of size k from a shuffled 0..n−1, rotating leftovers
+// forward and reshuffling the rest between rounds.
+std::vector<uint32_t> ShuffledBlock(uint32_t n, uint32_t k, uint64_t seed,
+                                    uint32_t i) {
+  if (!n || !k) return {};
+  std::vector<uint32_t> v(n);
+  std::iota(v.begin(), v.end(), 0u);
+
+  std::seed_seq ss{static_cast<uint32_t>(seed),
+                   static_cast<uint32_t>(seed >> 32)};
+  absl::BitGen gen(ss);
+  std::shuffle(v.begin(), v.end(), gen);
+
+  const uint32_t per = n / k;    // full K-blocks per round
+  const uint32_t cut = per * k;  // position after dealing one round
+  const uint32_t rem = n - cut;  // leftovers kept at front
+
+  // Jump over whole rounds: rotate leftovers to front, reshuffle the tail each
+  // time.
+  for (uint32_t r = i / per; r--;) {
+    std::rotate(v.begin(), v.begin() + cut, v.end());
+    std::shuffle(v.begin() + rem, v.end(), gen);  // reshuffle suffix
+  }
+
+  const uint32_t off = (i % per) * k;  // block offset within the current round
+  return {v.begin() + off, v.begin() + off + k};
+}
+
+}  // namespace
 
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
                              const StageList& existing_stages)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
+      position_sampling_rate_(config.position_sampling_rate()),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkUnpacker with " << config.threads()
@@ -66,9 +104,16 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
         return input_queue()->Get();
       }();
 
-      for (auto& frame : chunk.frames) {
+      size_t positions_to_sample =
+          round(chunk.frames.size() * position_sampling_rate_);
+      if (positions_to_sample == 0) positions_to_sample = 1;
+      std::vector<uint32_t> positions =
+          ShuffledBlock(chunk.frames.size(), positions_to_sample,
+                        chunk.global_index, chunk.reshuffle_count);
+
+      for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(frame));
+        producer.Put(std::move(chunk.frames[pos]));
       }
     }
   } catch (const QueueClosedException&) {

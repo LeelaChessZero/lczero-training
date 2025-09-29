@@ -49,6 +49,8 @@ data_loader {
     chunk_unpacker {
       input: "chunk_rescorer"
       threads: 1          # Threads for unpacking chunks
+      # Probability of sampling each position within a chunk.
+      position_sampling_rate: 0.03
       queue_capacity: 16  # Output queue for unpacked frames
     }
   }

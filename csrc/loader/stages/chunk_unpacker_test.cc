@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "gtest/gtest.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/stages/training_chunk.h"
@@ -95,12 +96,24 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
   producer.Put(MakeChunk(test_frames));
   producer.Close();
 
+  std::vector<uint32_t> actual_versions;
+  actual_versions.reserve(test_frames.size());
   for (size_t i = 0; i < test_frames.size(); ++i) {
     auto output_frame = unpacker.output()->Get();
-    EXPECT_EQ(output_frame.version, test_frames[i].version);
+    actual_versions.push_back(output_frame.version);
     EXPECT_EQ(output_frame.input_format, 3);
     EXPECT_EQ(output_frame.root_q, 0.5f);
   }
+
+  std::vector<uint32_t> expected_versions;
+  expected_versions.reserve(test_frames.size());
+  for (const auto& frame : test_frames) {
+    expected_versions.push_back(frame.version);
+  }
+
+  absl::c_sort(actual_versions);
+  absl::c_sort(expected_versions);
+  EXPECT_EQ(actual_versions, expected_versions);
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
@@ -124,10 +137,18 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 
   // Verify all frames are output
   std::vector<uint32_t> expected_versions = {10, 11, 12};
-  for (auto expected_version : expected_versions) {
+  std::vector<uint32_t> actual_versions;
+  actual_versions.reserve(expected_versions.size());
+  for (size_t i = 0; i < expected_versions.size(); ++i) {
     auto output_frame = unpacker.output()->Get();
-    EXPECT_EQ(output_frame.version, expected_version);
+    actual_versions.push_back(output_frame.version);
+    EXPECT_EQ(output_frame.input_format, 3);
+    EXPECT_EQ(output_frame.root_q, 0.5f);
   }
+
+  absl::c_sort(actual_versions);
+  absl::c_sort(expected_versions);
+  EXPECT_EQ(actual_versions, expected_versions);
 }
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
