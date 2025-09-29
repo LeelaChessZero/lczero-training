@@ -32,7 +32,9 @@ in the `builddir/`.
 * We use Google C++ style guide.
   * That means 80 columns.
   * That means comments should be in full sentences with periods in the end.
-  * When conditional or loop fits one line, we prefere form without braces.
+  * When conditional or loop fits one line, it must be written as one line
+    without braces, for example:
+      `if (condition) return value;`
   * Prefer `absl` to `std` (e.g. `absl::c_` algorithms, `absl::Mutex`,
     `absl::StrCat`, etc.)
 * We use `uv` for Python package and venv management, and to running the

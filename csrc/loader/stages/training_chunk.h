@@ -16,6 +16,7 @@ struct TrainingChunk {
   std::vector<FrameType> frames;
   std::string sort_key;
   size_t index_within_sort_key = 0;
+  size_t global_index = 0;
   uint32_t reshuffle_count = 0;
 };
 
