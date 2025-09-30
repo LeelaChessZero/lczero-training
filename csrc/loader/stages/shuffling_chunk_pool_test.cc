@@ -325,25 +325,19 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
   ASSERT_EQ(chunk.frames.size(), 1);
   EXPECT_EQ(chunk.frames.front().version, 42);
 
-  double dropped_latest = 0.0;
+  uint64_t dropped_latest = 0;
   bool found_dropped = false;
   for (int attempt = 0; attempt < 50 && !found_dropped; ++attempt) {
     auto metrics = shuffling_chunk_pool.FlushMetrics();
-    if (!metrics.has_shuffling_chunk_pool()) {
+    if (!metrics.has_dropped() || metrics.dropped() == 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
-    const auto& pool_metrics = metrics.shuffling_chunk_pool();
-    if (!pool_metrics.has_dropped_chunks() ||
-        pool_metrics.dropped_chunks().count() == 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      continue;
-    }
-    dropped_latest = pool_metrics.dropped_chunks().latest();
+    dropped_latest = metrics.dropped();
     found_dropped = true;
   }
   ASSERT_TRUE(found_dropped) << "dropped chunk metrics should be reported";
-  EXPECT_GE(dropped_latest, 1.0);
+  EXPECT_GE(dropped_latest, 1u);
 }
 
 TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {

@@ -203,6 +203,12 @@ message ChunkUnpackerConfig {
 `proto/training_metrics.proto`:
 
 ```proto
+message LoadMetricProto {
+  optional string name = 1;
+  optional double load_seconds = 2 [default = 0.0];
+  optional double total_seconds = 3 [default = 0.0];
+}
+
 message QueueMetricProto {
   optional string name = 1;
   optional uint64 put_count = 2 [default = 0];
@@ -212,15 +218,23 @@ message QueueMetricProto {
   optional uint64 queue_capacity = 6 [default = 0];
 }
 
+message CountMetricProto {
+  optional string name = 1;
+  optional uint64 count = 2 [default = 0];
+  optional uint64 capacity = 3;
+}
+
 message StageMetricProto {
   optional string name = 1;
-  optional FilePathProviderMetricsProto file_path_provider = 2;
-  optional ChunkSourceLoaderMetricsProto chunk_source_loader = 3;
-  optional ShufflingChunkPoolMetricsProto shuffling_chunk_pool = 4;
-  optional ChunkUnpackerMetricsProto chunk_unpacker = 5;
-  optional ShufflingFrameSamplerMetricsProto shuffling_frame_sampler = 6;
-  optional TensorGeneratorMetricsProto tensor_generator = 7;
-  repeated QueueMetricProto output_queue_metrics = 10;
+  optional string stage_type = 2;
+  repeated LoadMetricProto load_metrics = 3;
+  repeated QueueMetricProto queue_metrics = 4;
+  repeated CountMetricProto count_metrics = 5;
+  optional uint64 dropped = 6 [default = 0];
+  optional uint64 skipped_files_count = 7 [default = 0];
+  optional string last_chunk_key = 8;
+  optional string anchor = 9;
+  optional uint64 chunks_since_anchor = 10 [default = 0];
 }
 
 message DataLoaderMetricsProto {

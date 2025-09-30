@@ -79,6 +79,7 @@ class LoadMetricUpdater {
 
 // UpdateFrom function for LoadMetricProto - simple additive behavior
 inline void UpdateFrom(LoadMetricProto& dest, const LoadMetricProto& src) {
+  if (src.has_name()) dest.set_name(src.name());
   dest.set_load_seconds(dest.load_seconds() + src.load_seconds());
   dest.set_total_seconds(dest.total_seconds() + src.total_seconds());
 }

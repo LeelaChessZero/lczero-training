@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -209,13 +210,14 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
 
 StageMetricProto TensorGenerator::FlushMetrics() {
   StageMetricProto stage_metric;
-  auto* metrics = stage_metric.mutable_tensor_generator();
+  stage_metric.set_stage_type("tensor_generator");
+  LoadMetricProto aggregated_load;
+  aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*metrics->mutable_load(),
-               context->load_metric_updater.FlushMetrics());
+    UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
-  *stage_metric.add_output_queue_metrics() =
-      MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_load_metrics() = std::move(aggregated_load);
+  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
   return stage_metric;
 }
 

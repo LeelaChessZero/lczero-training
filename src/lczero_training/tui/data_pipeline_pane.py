@@ -9,14 +9,7 @@ from textual.containers import Container
 
 import proto.training_metrics_pb2 as training_metrics_pb2
 
-from .dataloader_widgets import (
-    ChunkRescorerStageWidget,
-    ChunkSourceLoaderStageWidget,
-    MetricsStageWidget,
-    QueueWidget,
-    ShufflingChunkPoolStageWidget,
-    StageWidget,
-)
+from .dataloader_widgets import QueueWidget, StageWidget
 
 FRIENDLY_STAGE_NAMES = {
     "file_path_provider": "File discovery",
@@ -30,25 +23,14 @@ FRIENDLY_STAGE_NAMES = {
 }
 
 
-ITEM_NAMES = {
-    "file_path_provider": "Files",
-    "chunk_source_loader": "Files",
-    "shuffling_chunk_pool": "Chunks",
-    "chunk_rescorer": "Chunks",
-    "chunk_splitter": "Frames",
-    "chunk_unpacker": "Frames",
-    "shuffling_frame_sampler": "Frames",
-    "tensor_generator": "Tensors",
-}
-
-
 class DataPipelinePane(Container):
     """Main pane showing data pipeline flow and statistics as a grid."""
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._stage_widgets: dict[str, StageWidget] = {}
-        self._queue_widgets: dict[str, QueueWidget] = {}
+        self._queue_widgets: dict[str, dict[str, QueueWidget]] = {}
+        self._queue_order: dict[str, list[str]] = {}
         self._stage_order: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -60,45 +42,57 @@ class DataPipelinePane(Container):
             stage_key, stage_key.replace("_", " ").title()
         )
 
-    @staticmethod
-    def _detect_metrics_field(
-        stage_metric: training_metrics_pb2.StageMetricProto,
-    ) -> str | None:
-        for descriptor, _ in stage_metric.ListFields():
-            if descriptor.name not in {"name", "output_queue_metrics"}:
-                return descriptor.name
-        return None
-
-    def _build_stage_widget(
+    def _ensure_stage_widget(
         self,
         stage_key: str,
-        metrics_field: str,
-        item_name: str,
-    ) -> StageWidget:
-        friendly = self._friendly_title(stage_key)
-        if metrics_field == "shuffling_chunk_pool":
-            return ShufflingChunkPoolStageWidget(
-                stage_name=friendly,
-                metrics_field_name=metrics_field,
-                item_name=item_name,
+        stage_type: str,
+    ) -> tuple[StageWidget, bool]:
+        created = False
+        if stage_key not in self._stage_widgets:
+            stage_widget = StageWidget(
+                stage_key=stage_key,
+                fallback_name=self._friendly_title(stage_type),
             )
-        if metrics_field == "chunk_source_loader":
-            return ChunkSourceLoaderStageWidget(
-                stage_name=friendly,
-                metrics_field_name=metrics_field,
-                item_name=item_name,
+            self._stage_widgets[stage_key] = stage_widget
+            self._queue_widgets[stage_key] = {}
+            self._queue_order[stage_key] = []
+            self._stage_order.append(stage_key)
+            created = True
+        else:
+            stage_widget = self._stage_widgets[stage_key]
+
+        return stage_widget, created
+
+    def _ensure_queue_widgets(
+        self,
+        stage_key: str,
+        stage_type: str,
+        stage_metric: training_metrics_pb2.StageMetricProto,
+    ) -> list[QueueWidget]:
+        stage_queue_widgets = self._queue_widgets.setdefault(stage_key, {})
+        queue_order = self._queue_order.setdefault(stage_key, [])
+        new_widgets: list[QueueWidget] = []
+
+        friendly = self._friendly_title(stage_type)
+        for index, queue_metric in enumerate(stage_metric.queue_metrics):
+            queue_identifier = queue_metric.name or f"__index__{index}"
+            if queue_identifier in stage_queue_widgets:
+                continue
+            label_suffix = (
+                f" {queue_metric.name}"
+                if queue_metric.name
+                else f" #{index + 1}"
             )
-        if metrics_field == "chunk_rescorer":
-            return ChunkRescorerStageWidget(
-                stage_name=friendly,
-                metrics_field_name=metrics_field,
-                item_name=item_name,
+            queue_widget = QueueWidget(
+                stage_key=stage_key,
+                stage_name=f"{friendly} queue{label_suffix}",
+                queue_name=queue_identifier,
             )
-        return MetricsStageWidget(
-            stage_name=friendly,
-            metrics_field_name=metrics_field,
-            item_name=item_name,
-        )
+            stage_queue_widgets[queue_identifier] = queue_widget
+            queue_order.append(queue_identifier)
+            new_widgets.append(queue_widget)
+
+        return new_widgets
 
     def _mount_widgets(
         self, widgets: Iterable[StageWidget | QueueWidget]
@@ -115,29 +109,20 @@ class DataPipelinePane(Container):
         new_widgets: list[StageWidget | QueueWidget] = []
         for stage_metric in metrics.stage_metrics:
             stage_key = stage_metric.name
-            if not stage_key or stage_key in self._stage_widgets:
+            if not stage_key:
                 continue
 
-            metrics_field = (
-                self._detect_metrics_field(stage_metric) or stage_key
+            stage_type = stage_metric.stage_type or stage_key
+            stage_widget, created = self._ensure_stage_widget(
+                stage_key, stage_type
             )
-            item_name = ITEM_NAMES.get(metrics_field, "Items")
+            if created:
+                new_widgets.append(stage_widget)
 
-            stage_widget = self._build_stage_widget(
-                stage_key=stage_key,
-                metrics_field=metrics_field,
-                item_name=item_name,
+            queue_widgets = self._ensure_queue_widgets(
+                stage_key, stage_type, stage_metric
             )
-            queue_widget = QueueWidget(
-                item_name=item_name,
-                stage_key=stage_key,
-                stage_name=f"{self._friendly_title(stage_key)} queue",
-            )
-
-            self._stage_widgets[stage_key] = stage_widget
-            self._queue_widgets[stage_key] = queue_widget
-            self._stage_order.append(stage_key)
-            new_widgets.extend([stage_widget, queue_widget])
+            new_widgets.extend(queue_widgets)
 
         if new_widgets:
             self._mount_widgets(new_widgets)
@@ -160,8 +145,9 @@ class DataPipelinePane(Container):
                     dataloader_1_second, dataloader_total
                 )
 
-            queue_widget = self._queue_widgets.get(stage_key)
-            if queue_widget:
-                queue_widget.update_metrics(
-                    dataloader_1_second, dataloader_total
-                )
+            for queue_key in self._queue_order.get(stage_key, []):
+                queue_widget = self._queue_widgets[stage_key].get(queue_key)
+                if queue_widget:
+                    queue_widget.update_metrics(
+                        dataloader_1_second, dataloader_total
+                    )
