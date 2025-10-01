@@ -98,8 +98,8 @@ model {
 }
 training {
   schedule {
-   steps_per_network: 250
-   chunks_per_network: 50000
+    steps_per_network: 250
+    chunks_per_network: 50000
   }
   checkpoint {
     path: "/home/crem/tmp/2025-09/lc0_training/checkpoint"
@@ -108,6 +108,17 @@ training {
   optimizer {
     nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
     constant_lr { lr: 0.001 }
+    # linear_warmup_lr {
+    #   step: 0
+    #   lr: 0.0           # Start at zero to warm up.
+    #   step: 1500
+    #   lr: 0.0005        # Ramp linearly from 0 to 0.0005.
+    #   step: 2000
+    #   lr: 0.0005        # Hold the same rate after warmup.
+    #   # Steps before the first entry use lr[0]; after the last entry use
+    #   # lr[last]. For pretrained networks, set the first step to the
+    #   # network's existing global step.
+    # }
   }
   max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {
