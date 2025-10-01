@@ -67,6 +67,16 @@ message PolicyLossWeightsConfig {
     MASK = 1;
   }
   IllegalMoveHandling illegal_moves = 3;
+  enum LossType {
+    LOSS_TYPE_UNSPECIFIED = 0;
+    CROSS_ENTROPY = 1;
+    KL = 2;
+  }
+  // Selects which policy loss implementation to use. Must be specified.
+  LossType type = 4;
+  // Soft policy temperature applied before normalizing targets for KL loss.
+  // Values <= 0 disable the adjustment and keep raw targets.
+  float temperature = 5;
 }
 
 message ValueLossWeightsConfig {
