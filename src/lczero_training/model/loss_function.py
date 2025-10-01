@@ -1,71 +1,45 @@
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Dict, Protocol, Sequence, Tuple, TypeVar
 
 import jax
 import jax.numpy as jnp
 import optax
+from jax import tree_util
 from jax.scipy.special import xlogy
 
 from proto.training_config_pb2 import (
     LossWeightsConfig,
-    PolicyKLLossWeightsConfig,
     PolicyLossWeightsConfig,
 )
 
 from .model import LczeroModel
 
 
-@dataclass
-class _WeightedLoss:
-    """Callable loss along with the metric key and scalar weight.
+class Named(Protocol):
+    name: str
 
-    The callable must accept the model predictions and targets for a given head
-    and return a per-example loss array whose shape matches the batch
-    dimensions of the inputs.
-    """
 
-    key: str
-    weight: float
-    fn: Callable[[jax.Array, jax.Array], jax.Array]
+T = TypeVar("T", bound=Named)
+
+
+def _find_head(field: Sequence[T], name: str) -> T:
+    return next(head for head in field if head.name == name)
 
 
 class LczeroLoss:
     def __init__(self, config: LossWeightsConfig):
         self.config = config
-        self._policy_losses: List[_WeightedLoss] = [
-            _WeightedLoss(
-                key=f"policy_crossentropy_{cfg.name}",
-                weight=cfg.weight,
-                fn=PolicyCrossEntropyLoss(cfg),
-            )
-            for cfg in config.policy_crossentropy
-        ]
-        self._policy_losses.extend(
-            _WeightedLoss(
-                key=f"policy_kl_{cfg.name}",
-                weight=cfg.weight,
-                fn=PolicyKLLoss(cfg),
-            )
-            for cfg in config.policy_kl
-        )
+        main_policy_config = _find_head(config.policy, "main")
+        winner_value_config = _find_head(config.value, "winner")
+        main_movesleft_config = _find_head(config.movesleft, "main")
 
-        self._value_losses: List[_WeightedLoss] = [
-            _WeightedLoss(
-                key=f"value_{cfg.name}",
-                weight=cfg.weight,
-                fn=ValueLoss(),
-            )
-            for cfg in config.value
-        ]
-
-        self._movesleft_losses: List[_WeightedLoss] = [
-            _WeightedLoss(
-                key=f"movesleft_{cfg.name}",
-                weight=cfg.weight,
-                fn=MovesLeftLoss(),
-            )
-            for cfg in config.movesleft
-        ]
+        self.weights = {
+            "policy": main_policy_config.weight,
+            "value": winner_value_config.weight,
+            "movesleft": main_movesleft_config.weight,
+        }
+        self.policy_loss = PolicyLoss(main_policy_config)
+        self.value_loss = ValueLoss()
+        self.movesleft_loss = MovesLeftLoss()
 
     def __call__(
         self,
@@ -77,24 +51,16 @@ class LczeroLoss:
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
         value_pred, policy_pred, movesleft_pred = model(inputs)
 
-        weighted_losses: List[jax.Array] = []
-        unweighted_losses: Dict[str, jax.Array] = {}
+        unweighted_losses = {
+            "value": self.value_loss(value_pred, value_targets),
+            "policy": self.policy_loss(policy_pred, policy_targets),
+            "movesleft": self.movesleft_loss(movesleft_pred, movesleft_targets),
+        }
 
-        def accumulate(
-            specs: Sequence[_WeightedLoss],
-            predictions: jax.Array,
-            targets: jax.Array,
-        ) -> None:
-            for spec in specs:
-                loss = spec.fn(predictions, targets)
-                unweighted_losses[spec.key] = loss
-                weighted_losses.append(spec.weight * loss)
-
-        accumulate(self._policy_losses, policy_pred, policy_targets)
-        accumulate(self._value_losses, value_pred, value_targets)
-        accumulate(self._movesleft_losses, movesleft_pred, movesleft_targets)
-
-        data_loss = jnp.sum(jnp.stack(weighted_losses, axis=0), axis=0)
+        data_loss = tree_util.tree_reduce(
+            jnp.add,
+            tree_util.tree_map(jnp.multiply, self.weights, unweighted_losses),
+        )
 
         return data_loss, unweighted_losses
 
@@ -113,32 +79,13 @@ class ValueLoss:
         return value_cross_entropy
 
 
-class PolicyCrossEntropyLoss:
+class PolicyLoss:
     def __init__(self, config: PolicyLossWeightsConfig):
         self.config = config
-
-    def __call__(
-        self,
-        policy_pred: jax.Array,
-        policy_targets: jax.Array,
-    ) -> jax.Array:
-        if self.config.illegal_moves == PolicyLossWeightsConfig.MASK:
-            policy_pred = jnp.where(policy_targets >= 0, policy_pred, -jnp.inf)
-
-        # Zero out negative targets for illegal moves.
-        policy_targets = jax.nn.relu(policy_targets)
-
-        # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
-        loss = optax.safe_softmax_cross_entropy(
-            logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
-        )
-        assert isinstance(loss, jax.Array)
-        return loss
-
-
-class PolicyKLLoss:
-    def __init__(self, config: PolicyKLLossWeightsConfig):
-        self.config = config
+        loss_type = config.type
+        if loss_type == PolicyLossWeightsConfig.LOSS_TYPE_UNSPECIFIED:
+            loss_type = PolicyLossWeightsConfig.CROSS_ENTROPY
+        self._loss_type = loss_type
         temperature = config.temperature
         if temperature <= 0:
             temperature = 1.0
@@ -153,26 +100,34 @@ class PolicyKLLoss:
         if self.config.illegal_moves == PolicyLossWeightsConfig.MASK:
             policy_pred = jnp.where(policy_targets >= 0, policy_pred, -jnp.inf)
 
+        # Zero out negative targets for illegal moves.
         policy_targets = jax.nn.relu(policy_targets)
 
-        if self._temperature != 1.0:
-            policy_targets = jnp.power(policy_targets, 1.0 / self._temperature)
+        if self._loss_type == PolicyLossWeightsConfig.KL:
+            if self._temperature != 1.0:
+                policy_targets = jnp.power(
+                    policy_targets, 1.0 / self._temperature
+                )
 
-        target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
-        safe_sum = jnp.where(
-            target_sum > 0, target_sum, jnp.ones_like(target_sum)
-        )
-        policy_targets = policy_targets / safe_sum
+            target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
+            safe_sum = jnp.where(
+                target_sum > 0, target_sum, jnp.ones_like(target_sum)
+            )
+            normalized_targets = policy_targets / safe_sum
+            safe_targets = jax.lax.stop_gradient(normalized_targets)
 
-        safe_targets = jax.lax.stop_gradient(policy_targets)
-
-        cross_entropy = optax.safe_softmax_cross_entropy(
-            logits=policy_pred, labels=safe_targets
-        )
-        target_entropy = -jnp.sum(
-            xlogy(policy_targets, policy_targets), axis=-1
-        )
-        loss = cross_entropy - target_entropy
+            cross_entropy = optax.safe_softmax_cross_entropy(
+                logits=policy_pred, labels=safe_targets
+            )
+            target_entropy = -jnp.sum(
+                xlogy(normalized_targets, normalized_targets), axis=-1
+            )
+            loss = cross_entropy - target_entropy
+        else:
+            # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
+            loss = optax.safe_softmax_cross_entropy(
+                logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
+            )
         assert isinstance(loss, jax.Array)
         return loss
 
