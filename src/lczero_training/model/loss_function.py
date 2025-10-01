@@ -82,10 +82,11 @@ class ValueLoss:
 class PolicyLoss:
     def __init__(self, config: PolicyLossWeightsConfig):
         self.config = config
-        loss_type = config.type
-        if loss_type == PolicyLossWeightsConfig.LOSS_TYPE_UNSPECIFIED:
-            loss_type = PolicyLossWeightsConfig.CROSS_ENTROPY
-        self._loss_type = loss_type
+        if config.type == PolicyLossWeightsConfig.LOSS_TYPE_UNSPECIFIED:
+            raise ValueError(
+                f"Policy loss type must be specified for head '{config.name}'."
+            )
+        self._loss_type = config.type
         temperature = config.temperature
         if temperature <= 0:
             temperature = 1.0
@@ -104,32 +105,44 @@ class PolicyLoss:
         policy_targets = jax.nn.relu(policy_targets)
 
         if self._loss_type == PolicyLossWeightsConfig.KL:
-            if self._temperature != 1.0:
-                policy_targets = jnp.power(
-                    policy_targets, 1.0 / self._temperature
-                )
-
-            target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
-            safe_sum = jnp.where(
-                target_sum > 0, target_sum, jnp.ones_like(target_sum)
-            )
-            normalized_targets = policy_targets / safe_sum
-            safe_targets = jax.lax.stop_gradient(normalized_targets)
-
-            cross_entropy = optax.safe_softmax_cross_entropy(
-                logits=policy_pred, labels=safe_targets
-            )
-            target_entropy = -jnp.sum(
-                xlogy(normalized_targets, normalized_targets), axis=-1
-            )
-            loss = cross_entropy - target_entropy
+            loss = self._kl_loss(policy_pred, policy_targets)
+        elif self._loss_type == PolicyLossWeightsConfig.CROSS_ENTROPY:
+            loss = self._cross_entropy_loss(policy_pred, policy_targets)
         else:
-            # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
-            loss = optax.safe_softmax_cross_entropy(
-                logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
+            raise AssertionError(
+                f"Unsupported policy loss type: {self._loss_type}."
             )
         assert isinstance(loss, jax.Array)
         return loss
+
+    def _cross_entropy_loss(
+        self, policy_pred: jax.Array, policy_targets: jax.Array
+    ) -> jax.Array:
+        # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
+        return optax.safe_softmax_cross_entropy(
+            logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
+        )
+
+    def _kl_loss(
+        self, policy_pred: jax.Array, policy_targets: jax.Array
+    ) -> jax.Array:
+        if self._temperature != 1.0:
+            policy_targets = jnp.power(policy_targets, 1.0 / self._temperature)
+
+        target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
+        safe_sum = jnp.where(
+            target_sum > 0, target_sum, jnp.ones_like(target_sum)
+        )
+        normalized_targets = policy_targets / safe_sum
+        safe_targets = jax.lax.stop_gradient(normalized_targets)
+
+        cross_entropy = optax.safe_softmax_cross_entropy(
+            logits=policy_pred, labels=safe_targets
+        )
+        target_entropy = -jnp.sum(
+            xlogy(normalized_targets, normalized_targets), axis=-1
+        )
+        return cross_entropy - target_entropy
 
 
 class MovesLeftLoss:

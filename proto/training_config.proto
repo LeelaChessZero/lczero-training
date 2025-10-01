@@ -62,8 +62,7 @@ message PolicyLossWeightsConfig {
     CROSS_ENTROPY = 1;
     KL = 2;
   }
-  // Selects which policy loss implementation to use. Defaults to CROSS_ENTROPY
-  // when left unspecified.
+  // Selects which policy loss implementation to use. Must be specified.
   LossType type = 4;
   // Soft policy temperature applied before normalizing targets for KL loss.
   // Values <= 0 disable the adjustment and keep raw targets.
