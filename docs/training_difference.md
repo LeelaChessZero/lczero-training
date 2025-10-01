@@ -2,15 +2,15 @@
 
 ## Context Summary
 - Legacy training used TensorFlow (`tf/tfprocess.py`) driven by YAML configs such as `/home/crem/Downloads/BT4-init1.yaml`. The rewrite runs on JAX with proto configs (`docs/example.textproto`, `src/lczero_training/training/training.py`).
-- Several behaviours only exist on the historical `daniel/tf-214` branch (fetch via `git fetch daniel tf-214` and checkout to inspect). These are flagged below.
+- Several behaviours only exist on the historical `daniel/tf-214` branch (add the remote with `git remote add daniel https://github.com/daniel-monroe/lczero-training.git` if it's missing, then fetch via `git fetch daniel tf-214` and checkout to inspect). These are flagged below.
 - Goal: stabilise the current transformer configuration; active phases are ordered by how strongly they can destabilise training if left unimplemented.
 
 ## Active Phases for Current Config (ordered by suspected impact)
 1. **Phase A – Gradient Clipping** *(present on `daniel/tf-214`)*
    - TensorFlow clips gradients using `max_grad_norm` before applying updates (`tf/tfprocess.py:806-808`). JAX applies raw Optax updates (`src/lczero_training/training/training.py:111-117`), so large batches are no longer bounded.
 
-2. **Phase B – Training Schedule & Warmup** *(present on `daniel/tf-214`)*
-   - Legacy training uses `lr_values`/`lr_boundaries`, warmup, and cadence controls (`tf/tfprocess.py:597-980`). The JAX code only supports a constant LR and fixed `steps_per_network`, forcing very low LRs to avoid divergence.
+2. **Phase B – Training Schedule & Warmup** *(present on `daniel/tf-214`, now implemented)*
+   - The JAX training pipeline now honours piecewise-linear warmup schedules defined in `training.optimizer.linear_warmup_lr`, matching the TensorFlow helper's multi-stage curves (`tf/tfprocess.py:597-980`). Pretrained runs can anchor the schedule by setting the first step to the network's existing global step.
 
 3. **Phase C – Policy Loss Objective (KL vs CE)** *(present on `daniel/tf-214`)*
    - The TensorFlow helper normalises targets, applies temperature, and subtracts target entropy, yielding `KL(target || policy)` (`tf/tfprocess.py:493-525`). The JAX loss keeps raw cross-entropy with masked negatives (`src/lczero_training/model/loss_function.py:70-84`), changing both gradient scale and objective.

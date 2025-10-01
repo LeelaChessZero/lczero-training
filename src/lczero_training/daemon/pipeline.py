@@ -128,9 +128,8 @@ class TrainingPipeline:
         )
 
         logger.info("Restoring checkpoint")
-        optimizer_tx = make_gradient_transformation(
-            self._config.training.optimizer
-        )
+        optimizer_config = self._config.training.optimizer
+        optimizer_tx = make_gradient_transformation(optimizer_config)
         jit_state = JitTrainingState(
             step=0,
             model_state=nnx.state(self._model),

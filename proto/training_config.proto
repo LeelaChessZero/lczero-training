@@ -23,12 +23,22 @@ message OptimizerConfig {
   }
   oneof lr_schedule {
     ConstantLRSchedule constant_lr = 2;
+    LinearWarmupLRSchedule linear_warmup_lr = 4;
   }
   float momentum = 3;
 }
 
 message ConstantLRSchedule {
   float lr = 1;
+}
+
+message LinearWarmupLRSchedule {
+  // Optimizer steps that define the piecewise-linear learning-rate curve.
+  // The learning rate stays at lr[0] for steps before the first entry and
+  // at lr[last] for steps after the last entry.
+  repeated int32 step = 1;
+  // Learning-rate values paired with each step entry.
+  repeated float lr = 2;
 }
 
 message NadamwOptimizerConfig {
