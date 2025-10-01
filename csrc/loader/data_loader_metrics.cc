@@ -1,11 +1,9 @@
 // ABOUTME: Implementation of UpdateFrom functions for data loader metric
-// protobuf messages. ABOUTME: Handles aggregation of FilePathProvider metrics
-// and top-level DataLoader metrics.
+// protobuf messages. ABOUTME: Handles aggregation of generic stage metrics.
 
 #include "loader/data_loader_metrics.h"
 
 #include <algorithm>
-#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "utils/metrics/statistics_metric.h"
@@ -38,99 +36,60 @@ void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
   if (src.has_queue_capacity()) dest.set_queue_capacity(src.queue_capacity());
 }
 
-void UpdateFrom(FilePathProviderMetricsProto& dest,
-                const FilePathProviderMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-}
-
-void UpdateFrom(ChunkSourceLoaderMetricsProto& dest,
-                const ChunkSourceLoaderMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-  if (src.has_last_chunk_key()) dest.set_last_chunk_key(src.last_chunk_key());
-}
-
-void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
-                const ShufflingChunkPoolMetricsProto& src) {
-  UpdateFrom(*dest.mutable_indexing_load(), src.indexing_load());
-  UpdateFrom(*dest.mutable_chunk_loading_load(), src.chunk_loading_load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-  UpdateFrom(*dest.mutable_chunk_sources_count(), src.chunk_sources_count());
-  UpdateFrom(*dest.mutable_dropped_chunks(), src.dropped_chunks());
-  if (src.has_current_chunks()) dest.set_current_chunks(src.current_chunks());
-  if (src.has_pool_capacity()) dest.set_pool_capacity(src.pool_capacity());
-  if (src.has_chunks_since_anchor())
-    dest.set_chunks_since_anchor(src.chunks_since_anchor());
-  if (src.has_anchor()) dest.set_anchor(src.anchor());
-}
-
-void UpdateFrom(ChunkRescorerMetricsProto& dest,
-                const ChunkRescorerMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-}
-
-void UpdateFrom(ChunkUnpackerMetricsProto& dest,
-                const ChunkUnpackerMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-}
-
-void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,
-                const ShufflingFrameSamplerMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
-  if (src.has_reservoir_capacity()) {
-    dest.set_reservoir_capacity(src.reservoir_capacity());
-  }
-  if (src.has_current_reservoir_size()) {
-    dest.set_current_reservoir_size(src.current_reservoir_size());
-  }
-}
-
-void UpdateFrom(TensorGeneratorMetricsProto& dest,
-                const TensorGeneratorMetricsProto& src) {
-  UpdateFrom(*dest.mutable_load(), src.load());
-  UpdateFrom(*dest.mutable_queue(), src.queue());
+void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src) {
+  if (src.has_name()) dest.set_name(src.name());
+  if (src.has_count()) dest.set_count(src.count());
+  if (src.has_capacity()) dest.set_capacity(src.capacity());
 }
 
 void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
   if (src.has_name()) dest.set_name(src.name());
-  if (src.has_file_path_provider()) {
-    UpdateFrom(*dest.mutable_file_path_provider(), src.file_path_provider());
-  }
-  if (src.has_chunk_source_loader()) {
-    UpdateFrom(*dest.mutable_chunk_source_loader(), src.chunk_source_loader());
-  }
-  if (src.has_shuffling_chunk_pool()) {
-    UpdateFrom(*dest.mutable_shuffling_chunk_pool(),
-               src.shuffling_chunk_pool());
-  }
-  if (src.has_chunk_rescorer()) {
-    UpdateFrom(*dest.mutable_chunk_rescorer(), src.chunk_rescorer());
-  }
-  if (src.has_chunk_unpacker()) {
-    UpdateFrom(*dest.mutable_chunk_unpacker(), src.chunk_unpacker());
-  }
-  if (src.has_shuffling_frame_sampler()) {
-    UpdateFrom(*dest.mutable_shuffling_frame_sampler(),
-               src.shuffling_frame_sampler());
-  }
-  if (src.has_tensor_generator()) {
-    UpdateFrom(*dest.mutable_tensor_generator(), src.tensor_generator());
+  if (src.has_stage_type()) dest.set_stage_type(src.stage_type());
+
+  for (const auto& load_metrics : src.load_metrics()) {
+    LoadMetricProto* dest_load =
+        load_metrics.has_name()
+            ? FindByName(dest.mutable_load_metrics(), load_metrics.name())
+            : nullptr;
+    if (dest_load == nullptr) {
+      dest_load = dest.add_load_metrics();
+    }
+    UpdateFrom(*dest_load, load_metrics);
   }
 
-  for (const auto& queue_metrics : src.output_queue_metrics()) {
+  for (const auto& queue_metrics : src.queue_metrics()) {
     QueueMetricProto* dest_queue =
         queue_metrics.has_name()
-            ? FindByName(dest.mutable_output_queue_metrics(),
-                         queue_metrics.name())
+            ? FindByName(dest.mutable_queue_metrics(), queue_metrics.name())
             : nullptr;
     if (dest_queue == nullptr) {
-      dest_queue = dest.add_output_queue_metrics();
+      dest_queue = dest.add_queue_metrics();
     }
     UpdateFrom(*dest_queue, queue_metrics);
+  }
+
+  for (const auto& count_metrics : src.count_metrics()) {
+    CountMetricProto* dest_count =
+        count_metrics.has_name()
+            ? FindByName(dest.mutable_count_metrics(), count_metrics.name())
+            : nullptr;
+    if (dest_count == nullptr) {
+      dest_count = dest.add_count_metrics();
+    }
+    UpdateFrom(*dest_count, count_metrics);
+  }
+
+  if (src.has_dropped()) {
+    dest.set_dropped(dest.dropped() + src.dropped());
+  }
+  if (src.has_skipped_files_count()) {
+    dest.set_skipped_files_count(dest.skipped_files_count() +
+                                 src.skipped_files_count());
+  }
+  if (src.has_last_chunk_key()) dest.set_last_chunk_key(src.last_chunk_key());
+  if (src.has_anchor()) dest.set_anchor(src.anchor());
+  if (src.has_chunks_since_anchor()) {
+    dest.set_chunks_since_anchor(src.chunks_since_anchor());
   }
 }
 

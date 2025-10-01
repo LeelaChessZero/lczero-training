@@ -1,6 +1,7 @@
 #include "loader/stages/chunk_source_loader.h"
 
 #include <filesystem>
+#include <utility>
 
 #include "absl/log/log.h"
 #include "loader/chunk_source/rawfile_chunk_source.h"
@@ -139,25 +140,26 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
 
 StageMetricProto ChunkSourceLoader::FlushMetrics() {
   StageMetricProto stage_metric;
-  auto* metrics = stage_metric.mutable_chunk_source_loader();
+  stage_metric.set_stage_type("chunk_source_loader");
+  LoadMetricProto aggregated_load;
+  aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*metrics->mutable_load(),
-               context->load_metric_updater.FlushMetrics());
+    UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
+  *stage_metric.add_load_metrics() = std::move(aggregated_load);
 
   // Atomically get and reset skipped files count.
-  metrics->set_skipped_files_count(skipped_files_count_.exchange(0));
+  stage_metric.set_skipped_files_count(skipped_files_count_.exchange(0));
 
   // Get the last chunk key.
   {
     absl::MutexLock lock(&last_chunk_key_mutex_);
     if (!last_chunk_key_.empty()) {
-      metrics->set_last_chunk_key(last_chunk_key_);
+      stage_metric.set_last_chunk_key(last_chunk_key_);
     }
   }
 
-  *stage_metric.add_output_queue_metrics() =
-      MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
   return stage_metric;
 }
 

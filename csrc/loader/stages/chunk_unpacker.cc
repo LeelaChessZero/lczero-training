@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <numeric>
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "loader/data_loader_metrics.h"
@@ -126,13 +127,14 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
 
 StageMetricProto ChunkUnpacker::FlushMetrics() {
   StageMetricProto stage_metric;
-  auto* metrics = stage_metric.mutable_chunk_unpacker();
+  stage_metric.set_stage_type("chunk_unpacker");
+  LoadMetricProto aggregated_load;
+  aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {
-    UpdateFrom(*metrics->mutable_load(),
-               context->load_metric_updater.FlushMetrics());
+    UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
-  *stage_metric.add_output_queue_metrics() =
-      MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_load_metrics() = std::move(aggregated_load);
+  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
   return stage_metric;
 }
 

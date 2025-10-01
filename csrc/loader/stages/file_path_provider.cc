@@ -94,10 +94,11 @@ void FilePathProvider::Stop() {
 
 StageMetricProto FilePathProvider::FlushMetrics() {
   StageMetricProto stage_metric;
-  auto* metrics = stage_metric.mutable_file_path_provider();
-  *metrics->mutable_load() = load_metric_updater_.FlushMetrics();
-  *stage_metric.add_output_queue_metrics() =
-      MetricsFromQueue("output", output_queue_);
+  stage_metric.set_stage_type("file_path_provider");
+  auto load_metrics = load_metric_updater_.FlushMetrics();
+  load_metrics.set_name("load");
+  *stage_metric.add_load_metrics() = std::move(load_metrics);
+  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
   return stage_metric;
 }
 

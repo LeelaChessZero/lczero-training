@@ -14,20 +14,7 @@ namespace lczero {
 namespace training {
 
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src);
-void UpdateFrom(FilePathProviderMetricsProto& dest,
-                const FilePathProviderMetricsProto& src);
-void UpdateFrom(ChunkSourceLoaderMetricsProto& dest,
-                const ChunkSourceLoaderMetricsProto& src);
-void UpdateFrom(ShufflingChunkPoolMetricsProto& dest,
-                const ShufflingChunkPoolMetricsProto& src);
-void UpdateFrom(ChunkRescorerMetricsProto& dest,
-                const ChunkRescorerMetricsProto& src);
-void UpdateFrom(ChunkUnpackerMetricsProto& dest,
-                const ChunkUnpackerMetricsProto& src);
-void UpdateFrom(ShufflingFrameSamplerMetricsProto& dest,
-                const ShufflingFrameSamplerMetricsProto& src);
-void UpdateFrom(TensorGeneratorMetricsProto& dest,
-                const TensorGeneratorMetricsProto& src);
+void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src);
 void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src);
 void UpdateFrom(DataLoaderMetricsProto& dest,
                 const DataLoaderMetricsProto& src);

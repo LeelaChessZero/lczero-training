@@ -10,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <thread>
+#include <utility>
 
 #include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
@@ -407,25 +408,31 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
 
 StageMetricProto ShufflingChunkPool::FlushMetrics() {
   StageMetricProto stage_metric;
-  auto* metrics = stage_metric.mutable_shuffling_chunk_pool();
+  stage_metric.set_stage_type("shuffling_chunk_pool");
 
   // Aggregate indexing load metrics from all indexing threads.
+  LoadMetricProto indexing_load;
+  indexing_load.set_name("indexing");
   for (const auto& context : indexing_thread_contexts_) {
-    UpdateFrom(*metrics->mutable_indexing_load(),
-               context->load_metric_updater.FlushMetrics());
+    UpdateFrom(indexing_load, context->load_metric_updater.FlushMetrics());
   }
+  *stage_metric.add_load_metrics() = std::move(indexing_load);
 
   // Aggregate chunk loading load metrics from all chunk loading threads.
+  LoadMetricProto chunk_loading_load;
+  chunk_loading_load.set_name("chunk_loading");
   for (const auto& context : chunk_loading_thread_contexts_) {
-    UpdateFrom(*metrics->mutable_chunk_loading_load(),
-               context->load_metric_updater.FlushMetrics());
+    UpdateFrom(chunk_loading_load, context->load_metric_updater.FlushMetrics());
   }
+  *stage_metric.add_load_metrics() = std::move(chunk_loading_load);
 
   // Get chunk sources statistics and pool state.
   {
     absl::MutexLock lock(&chunk_sources_mutex_);
-    AddSample(*metrics->mutable_chunk_sources_count(),
-              static_cast<int64_t>(chunk_sources_.size()));
+    auto* chunk_sources_metric = stage_metric.add_count_metrics();
+    chunk_sources_metric->set_name("chunk_sources");
+    chunk_sources_metric->set_count(
+        static_cast<uint64_t>(chunk_sources_.size()));
 
     // Calculate current chunks and set pool capacity.
     size_t current_chunks = 0;
@@ -433,22 +440,23 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
       current_chunks = chunk_sources_.back().start_chunk_index +
                        chunk_sources_.back().source->GetChunkCount();
     }
-    metrics->set_current_chunks(current_chunks);
-    metrics->set_pool_capacity(chunk_pool_size_);
+    auto* chunk_count_metric = stage_metric.add_count_metrics();
+    chunk_count_metric->set_name("chunks");
+    chunk_count_metric->set_count(current_chunks);
+    chunk_count_metric->set_capacity(chunk_pool_size_);
   }
 
   // Get anchor-related metrics.
   {
     absl::MutexLock lock(&anchor_mutex_);
-    metrics->set_chunks_since_anchor(chunks_since_anchor_);
-    metrics->set_anchor(anchor_);
+    stage_metric.set_chunks_since_anchor(chunks_since_anchor_);
+    stage_metric.set_anchor(anchor_);
   }
 
-  AddSample(*metrics->mutable_dropped_chunks(),
-            dropped_chunks_metric_.load(std::memory_order_acquire));
+  stage_metric.set_dropped(
+      dropped_chunks_metric_.exchange(0, std::memory_order_acq_rel));
 
-  *stage_metric.add_output_queue_metrics() =
-      MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
   return stage_metric;
 }
 

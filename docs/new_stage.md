@@ -22,8 +22,9 @@ configurations.
   if the stage consumes upstream data.
 - Update `StageConfig` with an `optional <YourStage>Config` entry so the stage
   can be referenced from the `repeated stage` list.
-- If the stage emits custom metrics, add a corresponding message to
-  `proto/training_metrics.proto` and hang it off `StageMetricProto`.
+- If the stage emits custom metrics, extend `StageMetricProto` in
+  `proto/training_metrics.proto`. Prefer the existing `load_metrics`,
+  `queue_metrics`, and `count_metrics` collections when possible.
 - When the stage needs control requests or responses, extend
   `proto/stage_control.proto` so they can be carried through
   `StageControlRequest`/`StageControlResponse`.
@@ -60,9 +61,10 @@ configurations.
 - **Accumulate state** while workers run (e.g., load metrics, counters,
   queue statistics).
 - **`FlushMetrics()`** should snapshot the current values, reset internal
-  counters as needed, and populate the appropriate subsection of
-  `StageMetricProto`. Use helpers like `MetricsFromQueue("output", queue)` to
-  expose queue utilisation under `output_queue_metrics`.
+  counters as needed, and populate `StageMetricProto`. Set the
+  `stage_type` field so the UI can identify the stage kind. Use helpers like
+  `MetricsFromQueue("output", queue)` to expose queue utilisation under
+  `queue_metrics`, and append load information via `load_metrics`.
 - For multiple queues or distinct metric groups, add additional entries with
   meaningful names (`"output"`, `"prefetch"`, etc.) so downstream tooling can
   pick the right series.
