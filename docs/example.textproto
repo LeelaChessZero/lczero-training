@@ -111,7 +111,17 @@ training {
   }
   max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {
-    policy { name: "main" weight: 1.0 illegal_moves: MASK }
+    policy_crossentropy {
+      name: "main"
+      weight: 1.0
+      illegal_moves: MASK
+    }
+    policy_kl {
+      name: "main"
+      weight: 1.0
+      illegal_moves: MASK
+      temperature: 1.0  # Softmax temperature applied before KL evaluation
+    }
     value { name: "winner" weight: 1.0 }
     movesleft { name: "main" weight: 1.0 }
   }

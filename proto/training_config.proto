@@ -44,7 +44,8 @@ message CheckpointConfig {
 }
 
 message LossWeightsConfig {
-  repeated PolicyLossWeightsConfig policy = 1;
+  repeated PolicyLossWeightsConfig policy_crossentropy = 1;
+  repeated PolicyKLLossWeightsConfig policy_kl = 4;
   repeated ValueLossWeightsConfig value = 2;
   repeated MovesLeftLossWeightsConfig movesleft = 3;
 }
@@ -57,6 +58,15 @@ message PolicyLossWeightsConfig {
     MASK = 1;
   }
   IllegalMoveHandling illegal_moves = 3;
+}
+
+message PolicyKLLossWeightsConfig {
+  string name = 1;
+  float weight = 2;
+  PolicyLossWeightsConfig.IllegalMoveHandling illegal_moves = 3;
+  // Soft policy temperature applied before normalizing targets. Values <= 0
+  // disable the adjustment and keep raw targets.
+  float temperature = 4;
 }
 
 message ValueLossWeightsConfig {
