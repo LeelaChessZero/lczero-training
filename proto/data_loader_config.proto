@@ -62,6 +62,10 @@ message ChunkRescorerConfig {
   optional float dtz_boost = 7 [default = 0.0];
   // Optional conversion target for input format (-1 keeps original).
   optional int32 new_input_format = 8 [default = -1];
+  // Optional deblunder threshold for policy adjustments.
+  optional float deblunder_threshold = 9;
+  // Optional deblunder width controlling smoothing around the threshold.
+  optional float deblunder_width = 10;
 }
 
 // Configuration for chunk unpacker that extracts frames from packed chunks.

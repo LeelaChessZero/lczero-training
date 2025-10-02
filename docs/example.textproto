@@ -42,6 +42,8 @@ data_loader {
       dist_offset: 0.0      # Policy offset applied during rescoring
       dtz_boost: 0.0        # DTZ boost for endgame policy tuning
       new_input_format: -1  # Keep original input format (-1 disables change)
+      deblunder_threshold: 0.10  # Threshold for policy deblundering adjustments
+      deblunder_width: 0.06      # Width controlling smoothing around threshold
     }
   }
   stage {
