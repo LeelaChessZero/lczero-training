@@ -29,6 +29,11 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
   static absl::once_flag bitboards_initialized_flag;
   absl::call_once(bitboards_initialized_flag, InitializeMagicBitboards);
 
+  if (config.has_deblunder_threshold() && config.has_deblunder_width()) {
+    RescorerDeblunderSetup(config.deblunder_threshold(),
+                           config.deblunder_width());
+  }
+
   LOG(INFO) << "Initializing ChunkRescorer with " << config.threads()
             << " worker thread(s) and queue capacity "
             << config.queue_capacity();
