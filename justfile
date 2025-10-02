@@ -67,4 +67,4 @@ test: test-cpp test-python
 check: check-cpp check-proto check-python
 
 # Run all checks (formatting, build, and tests)
-pre-commit: check build-proto build test
+pre-commit: build-proto check build test
