@@ -114,6 +114,7 @@ def tune_lr(
     multiplier: float = 1.01,
     csv_output: str | None = None,
     plot_output: str | None = None,
+    num_test_batches: int = 1,
 ) -> None:
     if num_steps <= 0:
         logger.error("num_steps must be a positive integer")
@@ -167,15 +168,28 @@ def tune_lr(
     )
 
     datagen = from_dataloader(make_dataloader(config.data_loader))
-    logger.info("Fetching validation batch")
-    validation_batch = _prepare_batch(next(datagen))
-    validation_batch = tree_util.tree_map(
-        lambda x: jnp.asarray(x), validation_batch
-    )
+    logger.info("Fetching %d validation batches", num_test_batches)
+    validation_batches = []
+    for _ in range(num_test_batches):
+        batch = _prepare_batch(next(datagen))
+        batch = tree_util.tree_map(lambda x: jnp.asarray(x), batch)
+        validation_batches.append(batch)
 
     schedule = _make_geometric_schedule(start_lr, multiplier)
+
+    # The restored optimizer state has a step count from previous training.
+    # To start the geometric LR schedule from the beginning without resetting the
+    # whole optimizer state, we offset the step count passed to the schedule.
+    # The restored training state has a step count from previous training.
+    # To start the geometric LR schedule from the beginning without resetting the
+    # whole optimizer state, we offset the step count passed to the schedule.
+    initial_step = jit_state.step
+
+    def offset_schedule(count: jax.Array) -> jax.Array:
+        return schedule(count - initial_step)
+
     optimizer_tx = _make_optimizer_with_schedule(
-        training_state, config, schedule
+        training_state, config, offset_schedule
     )
 
     loss_fn = LczeroLoss(config=config.training.losses)
@@ -205,7 +219,10 @@ def tune_lr(
             train_batch,
         )
 
-        val_loss = eval_step(jit_state.model_state, validation_batch)
+        total_val_loss = 0.0
+        for val_batch in validation_batches:
+            total_val_loss += eval_step(jit_state.model_state, val_batch)
+        val_loss = total_val_loss / num_test_batches
         results.append((current_lr, float(val_loss)))
         logger.info(
             "Validation loss at lr %.8f: %.6f", current_lr, float(val_loss)

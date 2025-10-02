@@ -124,6 +124,12 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Optional path to save a matplotlib plot of the sweep.",
     )
+    tune_lr_parser.add_argument(
+        "--num-test-batches",
+        type=int,
+        default=1,
+        help="Number of validation batches to use for computing the loss.",
+    )
     tune_lr_parser.set_defaults(func=run)
 
     # Describe command
@@ -193,6 +199,7 @@ def run(args: argparse.Namespace) -> None:
             multiplier=getattr(args, "multiplier", 1.01),
             csv_output=getattr(args, "csv_output", None),
             plot_output=getattr(args, "plot_output", None),
+            num_test_batches=getattr(args, "num_test_batches", 1),
         )
     elif args.subcommand == "describe":
         describe(
