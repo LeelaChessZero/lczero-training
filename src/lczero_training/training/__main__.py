@@ -5,6 +5,7 @@ from .describe import describe
 from .eval import eval
 from .init import init
 from .training import train
+from .tune_lr import tune_lr
 
 
 def configure_parser(parser: argparse.ArgumentParser) -> None:
@@ -85,6 +86,46 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     eval_parser.set_defaults(func=run)
 
+    # Tune LR command
+    tune_lr_parser = subparsers.add_parser(
+        "tune_lr", help="Run a learning rate tuning sweep."
+    )
+    tune_lr_parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the training config file.",
+    )
+    tune_lr_parser.add_argument(
+        "--start-lr",
+        type=float,
+        required=True,
+        help="Starting learning rate for the sweep.",
+    )
+    tune_lr_parser.add_argument(
+        "--num-steps",
+        type=int,
+        required=True,
+        help="Number of training steps to evaluate.",
+    )
+    tune_lr_parser.add_argument(
+        "--multiplier",
+        type=float,
+        default=1.01,
+        help="Multiplier applied to the learning rate after each step.",
+    )
+    tune_lr_parser.add_argument(
+        "--csv-output",
+        type=str,
+        help="Optional path to write CSV results (lr, loss).",
+    )
+    tune_lr_parser.add_argument(
+        "--plot-output",
+        type=str,
+        help="Optional path to save a matplotlib plot of the sweep.",
+    )
+    tune_lr_parser.set_defaults(func=run)
+
     # Describe command
     describe_parser = subparsers.add_parser(
         "describe", help="Describe a trained model."
@@ -143,6 +184,15 @@ def run(args: argparse.Namespace) -> None:
             dump_to_file=getattr(args, "dump_file", None),
             dump_to_shelve=getattr(args, "dump_shelve", None),
             dump_to_json=getattr(args, "dump_json", None),
+        )
+    elif args.subcommand == "tune_lr":
+        tune_lr(
+            config_filename=args.config,
+            start_lr=args.start_lr,
+            num_steps=args.num_steps,
+            multiplier=getattr(args, "multiplier", 1.01),
+            csv_output=getattr(args, "csv_output", None),
+            plot_output=getattr(args, "plot_output", None),
         )
     elif args.subcommand == "describe":
         describe(
