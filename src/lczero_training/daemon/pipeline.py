@@ -3,6 +3,7 @@ import datetime
 import gzip
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import cast
@@ -114,6 +115,7 @@ class TrainingPipeline:
         self._num_steps_per_epoch = self._schedule.steps_per_network
         self._chunks_to_wait = self._chunks_per_network
         self._cycle_state = _TrainingCycleState()
+        self._force_training_event = threading.Event()
         logger.info("Creating empty model")
         self._model = LczeroModel(self._config.model, rngs=nnx.Rngs(params=42))
         logger.info(
@@ -163,6 +165,12 @@ class TrainingPipeline:
         self._set_chunk_anchor(self._training_state.last_chunk_source)
 
         _log_jax_system_info()
+
+    def start_training_immediately(self) -> None:
+        """Request the next training cycle to start without waiting for chunks."""
+
+        logger.info("Received request to start training immediately.")
+        self._force_training_event.set()
 
     def run(self) -> None:
         logging.info("Starting DataLoader")
@@ -308,9 +316,20 @@ class TrainingPipeline:
             f"Waiting for {self._chunks_to_wait} chunks. "
             f"got {current_chunks} so far"
         )
-        while self._chunks_since_anchor() < self._chunks_to_wait:
+        while True:
+            if self._force_training_event.is_set():
+                logger.info(
+                    "Force start requested; skipping remaining chunk wait."
+                )
+                self._force_training_event.clear()
+                self._chunks_to_wait = self._chunks_since_anchor()
+                return
+
+            if self._chunks_since_anchor() >= self._chunks_to_wait:
+                logger.info("Done waiting for enough chunks")
+                return
+
             time.sleep(1)
-        logger.info("Done waiting for enough chunks")
 
     def get_training_schedule_data(
         self, daemon_start_time: float
