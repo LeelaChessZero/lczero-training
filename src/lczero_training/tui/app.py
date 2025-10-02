@@ -5,16 +5,18 @@ import argparse
 import signal
 import subprocess
 import sys
-from typing import Optional
+from typing import Iterable, Optional
 
 import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.containers import Horizontal
+from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from ..daemon.protocol.communicator import AsyncCommunicator
 from ..daemon.protocol.messages import (
+    StartTrainingImmediatelyPayload,
     StartTrainingPayload,
     TrainingStatusPayload,
 )
@@ -154,6 +156,13 @@ class TrainingTuiApp(App):
         payload = StartTrainingPayload(config_filepath=self._config_file)
         await self._communicator.send(payload)
 
+    async def _command_start_training_immediately(self) -> None:
+        """Trigger immediate training without waiting for additional chunks."""
+
+        payload = StartTrainingImmediatelyPayload()
+        await self._communicator.send(payload)
+        self.notify("Requested immediate training start.")
+
     async def action_quit(self) -> None:  # type: ignore
         """Handle quit action."""
         self._daemon_process.send_signal(signal.SIGINT)
@@ -162,6 +171,16 @@ class TrainingTuiApp(App):
         if scope.cancelled_caught:
             self._daemon_process.terminate()
         self.exit()
+
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        """Add application-specific commands to the command palette."""
+
+        yield from super().get_system_commands(screen)
+        yield SystemCommand(
+            "Start training immediately",
+            "Begin the next training cycle without waiting for chunks.",
+            self._command_start_training_immediately,
+        )
 
     async def on_training_status(self, payload: TrainingStatusPayload) -> None:
         """Handle training status updates."""

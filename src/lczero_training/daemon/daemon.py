@@ -10,7 +10,11 @@ import proto.training_metrics_pb2 as training_metrics_pb2
 
 from .pipeline import TrainingPipeline
 from .protocol.communicator import Communicator
-from .protocol.messages import StartTrainingPayload, TrainingStatusPayload
+from .protocol.messages import (
+    StartTrainingImmediatelyPayload,
+    StartTrainingPayload,
+    TrainingStatusPayload,
+)
 
 
 class TrainingDaemon:
@@ -119,3 +123,14 @@ class TrainingDaemon:
 
     def on_start_training(self, payload: StartTrainingPayload) -> None:
         self._config_filepath = payload.config_filepath
+
+    def on_start_training_immediately(
+        self, payload: StartTrainingImmediatelyPayload
+    ) -> None:
+        if not self._training_pipeline:
+            logging.warning(
+                "Received immediate training request before pipeline initialization."
+            )
+            return
+
+        self._training_pipeline.start_training_immediately()

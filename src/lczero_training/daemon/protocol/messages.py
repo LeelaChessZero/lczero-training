@@ -37,6 +37,12 @@ class StartTrainingPayload:
     config_filepath: str
 
 
+@register("start_training_immediately")
+@dataclass
+class StartTrainingImmediatelyPayload:
+    pass
+
+
 # --- Notifications from Trainer (Child) to UI (Parent) ---
 
 
