@@ -4,6 +4,7 @@ from .dataloader_probe import probe_dataloader
 from .describe import describe
 from .eval import eval
 from .init import init
+from .overfit import overfit
 from .training import train
 from .tune_lr import tune_lr
 
@@ -132,6 +133,24 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     tune_lr_parser.set_defaults(func=run)
 
+    # Overfit command
+    overfit_parser = subparsers.add_parser(
+        "overfit", help="Run an overfitting test on a single batch."
+    )
+    overfit_parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the training config file.",
+    )
+    overfit_parser.add_argument(
+        "--num-steps",
+        type=int,
+        required=True,
+        help="Number of training steps to run on the fixed batch.",
+    )
+    overfit_parser.set_defaults(func=run)
+
     # Describe command
     describe_parser = subparsers.add_parser(
         "describe", help="Describe a trained model."
@@ -200,6 +219,11 @@ def run(args: argparse.Namespace) -> None:
             csv_output=getattr(args, "csv_output", None),
             plot_output=getattr(args, "plot_output", None),
             num_test_batches=getattr(args, "num_test_batches", 1),
+        )
+    elif args.subcommand == "overfit":
+        overfit(
+            config_filename=args.config,
+            num_steps=args.num_steps,
         )
     elif args.subcommand == "describe":
         describe(
