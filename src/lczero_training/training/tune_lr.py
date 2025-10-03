@@ -16,7 +16,7 @@ from jax import tree_util
 from lczero_training.dataloader import make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import JitTrainingState, TrainingState
+from lczero_training.training.state import TrainingState
 from proto.root_config_pb2 import RootConfig
 
 from .training import Training, from_dataloader
@@ -161,8 +161,6 @@ def tune_lr(
 
     assert isinstance(training_state, TrainingState)
 
-    jit_state: JitTrainingState = training_state.jit_state
-
     model, _ = nnx.split(
         LczeroModel(config=config.model, rngs=nnx.Rngs(params=42))
     )
@@ -183,7 +181,7 @@ def tune_lr(
     # The restored training state has a step count from previous training.
     # To start the geometric LR schedule from the beginning without resetting the
     # whole optimizer state, we offset the step count passed to the schedule.
-    initial_step = jit_state.step
+    initial_step = training_state.jit_state.step
 
     def offset_schedule(count: jax.Array) -> jax.Array:
         return schedule(count - initial_step)
@@ -213,15 +211,18 @@ def tune_lr(
 
         train_batch = _prepare_batch(next(datagen))
         train_batch = tree_util.tree_map(lambda x: jnp.asarray(x), train_batch)
-        jit_state, _ = training.train_step(
+        new_jit_state, _ = training.train_step(
             optimizer_tx,
-            jit_state,
+            training_state.jit_state,
             train_batch,
         )
+        training_state = training_state.replace(jit_state=new_jit_state)
 
         total_val_loss = 0.0
         for val_batch in validation_batches:
-            total_val_loss += eval_step(jit_state.model_state, val_batch)
+            total_val_loss += eval_step(
+                training_state.jit_state.model_state, val_batch
+            )
         val_loss = total_val_loss / num_test_batches
         results.append((current_lr, float(val_loss)))
         logger.info(
