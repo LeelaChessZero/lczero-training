@@ -97,9 +97,10 @@ def overfit(*, config_filename: str, num_steps: int) -> None:
         unweighted_host = tree_util.tree_map(
             lambda x: float(np.asarray(x)), unweighted_host
         )
+        step_value = int(np.asarray(jax.device_get(jit_state.step)).flat[0])
         logger.info(
             "Step %d: loss=%f, unweighted_losses=%s",
-            jit_state.step,
+            step_value,
             loss_value,
             unweighted_host,
         )
