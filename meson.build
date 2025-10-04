@@ -119,6 +119,7 @@ files = [
   'csrc/loader/stages/chunk_unpacker.cc',
   'csrc/loader/stages/file_path_provider.cc',
   'csrc/loader/stages/stage_factory.cc',
+  'csrc/loader/chunk_source/debug_chunk_source.cc',
   'csrc/loader/chunk_source/rawfile_chunk_source.cc',
   'csrc/loader/chunk_source/tar_chunk_source.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
