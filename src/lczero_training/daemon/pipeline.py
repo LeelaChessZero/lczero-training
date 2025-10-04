@@ -131,7 +131,11 @@ class TrainingPipeline:
 
         logger.info("Restoring checkpoint")
         optimizer_config = self._config.training.optimizer
-        optimizer_tx = make_gradient_transformation(optimizer_config)
+        max_grad_norm = getattr(self._config.training, "max_grad_norm", 0.0)
+        optimizer_tx = make_gradient_transformation(
+            optimizer_config,
+            max_grad_norm=max_grad_norm,
+        )
         jit_state = JitTrainingState(
             step=0,
             model_state=nnx.state(self._model),
@@ -154,7 +158,8 @@ class TrainingPipeline:
         logger.info("Creating training session")
         self._training = Training(
             optimizer_tx=make_gradient_transformation(
-                self._config.training.optimizer
+                self._config.training.optimizer,
+                max_grad_norm=max_grad_norm,
             ),
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),
