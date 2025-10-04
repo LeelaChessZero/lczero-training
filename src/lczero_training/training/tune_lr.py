@@ -200,41 +200,52 @@ def tune_lr(
 
     results: List[Tuple[float, float]] = []
 
-    for step_idx in range(num_steps):
-        current_lr = start_lr * (multiplier**step_idx)
-        logger.info(
-            "Running step %d/%d with learning rate %.8f",
-            step_idx + 1,
-            num_steps,
-            current_lr,
-        )
-
-        train_batch = _prepare_batch(next(datagen))
-        train_batch = tree_util.tree_map(lambda x: jnp.asarray(x), train_batch)
-        new_jit_state, _ = training.train_step(
-            optimizer_tx,
-            training_state.jit_state,
-            train_batch,
-        )
-        training_state = training_state.replace(jit_state=new_jit_state)
-
-        total_val_loss = 0.0
-        for val_batch in validation_batches:
-            total_val_loss += eval_step(
-                training_state.jit_state.model_state, val_batch
-            )
-        val_loss = total_val_loss / num_test_batches
-        results.append((current_lr, float(val_loss)))
-        logger.info(
-            "Validation loss at lr %.8f: %.6f", current_lr, float(val_loss)
-        )
-
+    csvfile = None
+    csv_writer: Any | None = None
     if csv_output:
-        logger.info("Writing results to %s", csv_output)
-        with open(csv_output, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(["lr", "loss"])
-            writer.writerows(results)
+        logger.info("Writing learning-rate sweep results to %s", csv_output)
+        csvfile = open(csv_output, "w", newline="")
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerow(["lr", "loss"])
+        csvfile.flush()
+
+    try:
+        for step_idx in range(num_steps):
+            current_lr = start_lr * (multiplier**step_idx)
+            logger.info(
+                "Running step %d/%d with learning rate %.8f",
+                step_idx + 1,
+                num_steps,
+                current_lr,
+            )
+
+            train_batch = _prepare_batch(next(datagen))
+            train_batch = tree_util.tree_map(
+                lambda x: jnp.asarray(x), train_batch
+            )
+            new_jit_state, _ = training.train_step(
+                optimizer_tx,
+                training_state.jit_state,
+                train_batch,
+            )
+            training_state = training_state.replace(jit_state=new_jit_state)
+
+            total_val_loss = 0.0
+            for val_batch in validation_batches:
+                total_val_loss += eval_step(
+                    training_state.jit_state.model_state, val_batch
+                )
+            val_loss = total_val_loss / num_test_batches
+            results.append((current_lr, float(val_loss)))
+            if csv_writer is not None and csvfile is not None:
+                csv_writer.writerow([current_lr, float(val_loss)])
+                csvfile.flush()
+            logger.info(
+                "Validation loss at lr %.8f: %.6f", current_lr, float(val_loss)
+            )
+    finally:
+        if csvfile is not None:
+            csvfile.close()
 
     if plot_output:
         logger.info("Saving plot to %s", plot_output)
