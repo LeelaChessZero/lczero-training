@@ -305,6 +305,13 @@ file_path_provider_main = executable(
   link_with : loader_lib,
 )
 
+dump_chunk = executable(
+  'dump_chunk',
+  'csrc/tools/dump_chunk_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps + [zlib_dep],
+)
+
 # Python extension module
 python3.extension_module(
   '_lczero_training',
