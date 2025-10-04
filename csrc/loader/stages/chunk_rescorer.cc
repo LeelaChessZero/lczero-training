@@ -104,18 +104,16 @@ void ChunkRescorer::Worker(ThreadContext* context) {
         return input_queue()->Get();
       }();
 
-      std::vector<V6TrainingData> rescored_frames;
       try {
         chunk.frames = rescore_fn_(chunk.frames, &tablebase_, dist_temp_,
                                    dist_offset_, dtz_boost_, new_input_format_);
+        LoadMetricPauser pauser(context->load_metric_updater);
+        producer.Put(std::move(chunk));
       } catch (const std::exception& exception) {
         LOG(ERROR) << "ChunkRescorer failed to rescore chunk: "
                    << exception.what();
         continue;
       }
-
-      LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(chunk));
     }
   } catch (const QueueClosedException&) {
     LOG(INFO) << "ChunkRescorer worker stopping, queue closed.";
