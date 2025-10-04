@@ -149,6 +149,19 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="Number of training steps to run on the fixed batch.",
     )
+    overfit_parser.add_argument(
+        "--coin-flip",
+        action="store_true",
+        help=(
+            "Train on two batches: first train batch A while evaluating batch B, "
+            "then vice versa."
+        ),
+    )
+    overfit_parser.add_argument(
+        "--csv-file",
+        type=str,
+        help="Optional path to write step-by-step overfit results.",
+    )
     overfit_parser.set_defaults(func=run)
 
     # Describe command
@@ -224,6 +237,8 @@ def run(args: argparse.Namespace) -> None:
         overfit(
             config_filename=args.config,
             num_steps=args.num_steps,
+            coin_flip=getattr(args, "coin_flip", False),
+            csv_file=getattr(args, "csv_file", None),
         )
     elif args.subcommand == "describe":
         describe(
