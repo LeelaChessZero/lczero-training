@@ -68,6 +68,11 @@ configurations.
 - For multiple queues or distinct metric groups, add additional entries with
   meaningful names (`"output"`, `"prefetch"`, etc.) so downstream tooling can
   pick the right series.
+- If you rename or split a metric, document the change and update dashboards.
+  For example, `ShufflingChunkPool` now emits `chunks_current` (window size)
+  and `chunks_total` (total indexed chunks) instead of a single `chunks`
+  series; the Grafana panels consuming the old series were repointed to
+  `chunks_current` so the graphs remain accurate.
 
 ## 6. Register the Stage
 
