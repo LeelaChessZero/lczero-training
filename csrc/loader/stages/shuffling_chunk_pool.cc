@@ -441,7 +441,7 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
       const auto& first = chunk_sources_.front();
       const auto& last = chunk_sources_.back();
       upper = last.start_chunk_index + last.source->GetChunkCount();
-      current = std::min(chunk_pool_size_, upper - first.start_chunk_index);
+      current = upper - first.start_chunk_index;
     }
 
     auto* current_chunks_metric = stage_metric.add_count_metrics();

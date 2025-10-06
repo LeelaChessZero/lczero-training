@@ -307,7 +307,7 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsReportsWindowAndTotalCounts) {
 
   ASSERT_TRUE(found_metrics)
       << "FlushMetrics should report both chunks_current and chunks_total.";
-  EXPECT_EQ(current_count, static_cast<uint64_t>(chunk_pool_size));
+  EXPECT_EQ(current_count, 30u);
   EXPECT_EQ(current_capacity, static_cast<uint64_t>(chunk_pool_size));
   EXPECT_EQ(total_count, 30u);
 
