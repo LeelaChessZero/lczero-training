@@ -1,10 +1,11 @@
 #include "loader/stages/chunk_unpacker.h"
 
+#include <absl/algorithm/container.h>
 #include <absl/log/log.h>
 #include <absl/random/random.h>
+#include <absl/random/seed_sequences.h>
 
 #include <algorithm>
-#include <numeric>
 #include <random>
 #include <utility>
 #include <vector>
@@ -18,15 +19,16 @@ namespace training {
 namespace {
 // Deal the i-th block of size k from a shuffled 0..n−1, rotating leftovers
 // forward and reshuffling the rest between rounds.
-std::vector<uint32_t> ShuffledBlock(uint32_t n, uint32_t k, uint64_t seed,
-                                    uint32_t i) {
+std::vector<uint32_t> ShuffledBlock(uint32_t n, uint32_t k, uint64_t run_seed,
+                                    uint64_t chunk_seed, uint32_t i) {
   if (!n || !k) return {};
   std::vector<uint32_t> v(n);
-  std::iota(v.begin(), v.end(), 0u);
+  absl::c_iota(v, 0u);
 
-  std::seed_seq ss{static_cast<uint32_t>(seed),
-                   static_cast<uint32_t>(seed >> 32)};
-  absl::BitGen gen(ss);
+  absl::BitGen gen(std::seed_seq{static_cast<uint32_t>(run_seed),
+                                 static_cast<uint32_t>(run_seed >> 32),
+                                 static_cast<uint32_t>(chunk_seed),
+                                 static_cast<uint32_t>(chunk_seed >> 32)});
   std::shuffle(v.begin(), v.end(), gen);
 
   const uint32_t per = n / k;    // full K-blocks per round
@@ -44,12 +46,18 @@ std::vector<uint32_t> ShuffledBlock(uint32_t n, uint32_t k, uint64_t seed,
   return {v.begin() + off, v.begin() + off + k};
 }
 
+uint64_t GenerateRunSeed() {
+  absl::BitGen gen(absl::MakeSeedSeq());
+  return absl::Uniform<uint64_t>(gen);
+}
+
 }  // namespace
 
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
                              const StageList& existing_stages)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
       position_sampling_rate_(config.position_sampling_rate()),
+      run_seed_(GenerateRunSeed()),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkUnpacker with " << config.threads()
@@ -108,9 +116,9 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
       size_t positions_to_sample =
           round(chunk.frames.size() * position_sampling_rate_);
       if (positions_to_sample == 0) positions_to_sample = 1;
-      std::vector<uint32_t> positions =
-          ShuffledBlock(chunk.frames.size(), positions_to_sample,
-                        chunk.global_index, chunk.reshuffle_count);
+      std::vector<uint32_t> positions = ShuffledBlock(
+          chunk.frames.size(), positions_to_sample, run_seed_,
+          static_cast<uint64_t>(chunk.global_index), chunk.reshuffle_count);
 
       for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);

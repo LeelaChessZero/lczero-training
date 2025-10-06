@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -48,6 +49,7 @@ class ChunkUnpacker
   void Worker(ThreadContext* context);
 
   const float position_sampling_rate_;
+  const uint64_t run_seed_;
   Queue<OutputType> output_queue_;
   // thread_contexts_ must be declared before thread_pool_ to ensure
   // thread_pool_ is destroyed first (stopping threads before contexts).
