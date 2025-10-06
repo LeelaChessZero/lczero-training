@@ -242,6 +242,78 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   EXPECT_THROW(output_queue->Get(), QueueClosedException);
 }
 
+TEST_F(ShufflingChunkPoolTest, FlushMetricsHandlesEmptyChunkSources) {
+  const int chunk_pool_size = 32;
+  auto config = MakeConfig(chunk_pool_size);
+
+  ShufflingChunkPool shuffling_chunk_pool(config, StageListForInput());
+
+  auto metrics = shuffling_chunk_pool.FlushMetrics();
+  bool found_current = false;
+  bool found_total = false;
+  for (const auto& metric : metrics.count_metrics()) {
+    if (metric.name() == "chunks_current") {
+      found_current = true;
+      EXPECT_EQ(metric.count(), 0u);
+      EXPECT_EQ(metric.capacity(), static_cast<uint64_t>(chunk_pool_size));
+    } else if (metric.name() == "chunks_total") {
+      found_total = true;
+      EXPECT_EQ(metric.count(), 0u);
+    }
+  }
+
+  EXPECT_TRUE(found_current)
+      << "FlushMetrics should emit chunks_current metric when empty.";
+  EXPECT_TRUE(found_total)
+      << "FlushMetrics should emit chunks_total metric when empty.";
+}
+
+TEST_F(ShufflingChunkPoolTest, FlushMetricsReportsWindowAndTotalCounts) {
+  AddMockChunkSourceToQueue("initial", 30);
+  MarkInitialScanComplete();
+
+  const int chunk_pool_size = 20;
+  ShufflingChunkPool shuffling_chunk_pool(MakeConfig(chunk_pool_size),
+                                          StageListForInput());
+  shuffling_chunk_pool.Start();
+
+  auto* output_queue = shuffling_chunk_pool.output();
+  output_queue->WaitForSizeAtLeast(1);
+
+  uint64_t current_count = 0;
+  uint64_t total_count = 0;
+  uint64_t current_capacity = 0;
+  bool found_metrics = false;
+  for (int attempt = 0; attempt < 50 && !found_metrics; ++attempt) {
+    auto metrics = shuffling_chunk_pool.FlushMetrics();
+    bool has_current = false;
+    bool has_total = false;
+    for (const auto& metric : metrics.count_metrics()) {
+      if (metric.name() == "chunks_current") {
+        has_current = true;
+        current_count = metric.count();
+        current_capacity = metric.capacity();
+      } else if (metric.name() == "chunks_total") {
+        has_total = true;
+        total_count = metric.count();
+      }
+    }
+    if (has_current && has_total) {
+      found_metrics = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_TRUE(found_metrics)
+      << "FlushMetrics should report both chunks_current and chunks_total.";
+  EXPECT_EQ(current_count, static_cast<uint64_t>(chunk_pool_size));
+  EXPECT_EQ(current_capacity, static_cast<uint64_t>(chunk_pool_size));
+  EXPECT_EQ(total_count, 30u);
+
+  CloseInputQueue();
+}
+
 TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   // Create mock chunk sources with enough chunks
   AddMockChunkSourceToQueue("source1", 30);

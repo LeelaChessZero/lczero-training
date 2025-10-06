@@ -5,6 +5,7 @@
 #include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -434,16 +435,24 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     chunk_sources_metric->set_count(
         static_cast<uint64_t>(chunk_sources_.size()));
 
-    // Calculate current chunks and set pool capacity.
-    size_t current_chunks = 0;
+    size_t upper = 0;
+    size_t current = 0;
     if (!chunk_sources_.empty()) {
-      current_chunks = chunk_sources_.back().start_chunk_index +
-                       chunk_sources_.back().source->GetChunkCount();
+      const auto& first = chunk_sources_.front();
+      const auto& last = chunk_sources_.back();
+      upper = last.start_chunk_index + last.source->GetChunkCount();
+      current = std::min(chunk_pool_size_, upper - first.start_chunk_index);
     }
-    auto* chunk_count_metric = stage_metric.add_count_metrics();
-    chunk_count_metric->set_name("chunks");
-    chunk_count_metric->set_count(current_chunks);
-    chunk_count_metric->set_capacity(chunk_pool_size_);
+
+    auto* current_chunks_metric = stage_metric.add_count_metrics();
+    current_chunks_metric->set_name("chunks_current");
+    current_chunks_metric->set_count(static_cast<uint64_t>(current));
+    current_chunks_metric->set_capacity(
+        static_cast<uint64_t>(chunk_pool_size_));
+
+    auto* total_chunks_metric = stage_metric.add_count_metrics();
+    total_chunks_metric->set_name("chunks_total");
+    total_chunks_metric->set_count(static_cast<uint64_t>(upper));
   }
 
   // Get anchor-related metrics.
