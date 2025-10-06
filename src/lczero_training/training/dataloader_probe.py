@@ -3,7 +3,10 @@
 import logging
 import time
 from contextlib import suppress
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
 
+import numpy as np
 from google.protobuf import text_format
 
 from lczero_training.dataloader import DataLoader, make_dataloader
@@ -17,12 +20,29 @@ def _stop_loader(loader: DataLoader) -> None:
         loader.stop()
 
 
-def probe_dataloader(config_filename: str, num_batches: int) -> None:
+def _materialize_batch(batch: Sequence[np.ndarray]) -> Tuple[np.ndarray, ...]:
+    return tuple(np.asarray(tensor).copy() for tensor in batch)
+
+
+def _store_batches(path: str, batches: List[Tuple[np.ndarray, ...]]) -> None:
+    output = Path(path)
+    if output.parent:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Writing %d batches to %s", len(batches), output)
+    container = np.empty(len(batches), dtype=object)
+    container[:] = batches
+    np.savez(output, batches=container)
+
+
+def probe_dataloader(
+    config_filename: str, num_batches: int, npz_output: Optional[str] = None
+) -> None:
     """Measure latency and throughput for the configured data loader.
 
     Args:
         config_filename: Path to the root configuration proto file.
         num_batches: Total number of batches to fetch from the loader.
+        npz_output: Optional path to store fetched batches as an .npz archive.
     """
 
     if num_batches < 1:
@@ -36,12 +56,16 @@ def probe_dataloader(config_filename: str, num_batches: int) -> None:
     logger.info("Creating data loader")
     loader = make_dataloader(config.data_loader)
 
+    collected_batches: List[Tuple[np.ndarray, ...]] = []
+    collect_enabled = npz_output is not None
     first_batch_time = 0.0
     remaining_batches = num_batches - 1
     try:
         logger.info("Fetching first batch")
         start_time = time.perf_counter()
-        loader.get_next()
+        first_batch = loader.get_next()
+        if collect_enabled:
+            collected_batches.append(_materialize_batch(first_batch))
         first_batch_time = time.perf_counter() - start_time
         logger.info("Time to first batch: %.3f seconds", first_batch_time)
 
@@ -55,7 +79,9 @@ def probe_dataloader(config_filename: str, num_batches: int) -> None:
         )
         throughput_start = time.perf_counter()
         for _ in range(remaining_batches):
-            loader.get_next()
+            batch = loader.get_next()
+            if collect_enabled:
+                collected_batches.append(_materialize_batch(batch))
         throughput_duration = time.perf_counter() - throughput_start
 
         if throughput_duration <= 0:
@@ -72,4 +98,6 @@ def probe_dataloader(config_filename: str, num_batches: int) -> None:
             throughput_duration,
         )
     finally:
+        if collect_enabled and npz_output is not None and collected_batches:
+            _store_batches(npz_output, collected_batches)
         _stop_loader(loader)
