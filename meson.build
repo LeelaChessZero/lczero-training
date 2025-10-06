@@ -312,6 +312,14 @@ dump_chunk = executable(
   dependencies : cli_deps + [zlib_dep],
 )
 
+startpos_policy_distribution = executable(
+  'startpos_policy_distribution',
+  'csrc/tools/startpos_policy_distribution_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps,
+  link_with : loader_lib,
+)
+
 # Python extension module
 python3.extension_module(
   '_lczero_training',
