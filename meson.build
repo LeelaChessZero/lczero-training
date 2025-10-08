@@ -312,11 +312,27 @@ dump_chunk = executable(
   dependencies : cli_deps + [zlib_dep],
 )
 
+filter_chunks = executable(
+  'filter_chunks',
+  'csrc/tools/filter_chunks_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps + [zlib_dep],
+  link_with : loader_lib,
+)
+
 startpos_policy_distribution = executable(
   'startpos_policy_distribution',
   'csrc/tools/startpos_policy_distribution_main.cc',
   include_directories : includes,
   dependencies : cli_deps,
+  link_with : loader_lib,
+)
+
+rescore_chunk = executable(
+  'rescore_chunk',
+  'csrc/tools/rescore_chunk_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps + [proto_dep],
   link_with : loader_lib,
 )
 
