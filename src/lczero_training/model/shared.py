@@ -1,5 +1,3 @@
-import math
-
 import jax
 from flax import nnx
 from flax.linen import initializers as flax_initializers
@@ -15,26 +13,27 @@ class Ffn(nnx.Module):
         in_features: int,
         hidden_features: int,
         hidden_activation: net_pb2.NetworkFormat.ActivationFunction,
+        deepnorm_beta: float,
         *,
         rngs: nnx.Rngs,
     ):
-        out_features = in_features
-        beta = math.pow(8.0 * out_features, -0.25)
-        kernel_init = flax_initializers.variance_scaling(
-            scale=beta, mode="fan_avg", distribution="truncated_normal"
+        deepnorm_init = flax_initializers.variance_scaling(
+            scale=deepnorm_beta,
+            mode="fan_avg",
+            distribution="truncated_normal",
         )
-
+        out_features = in_features
         self.linear1 = nnx.Linear(
             in_features=in_features,
             out_features=hidden_features,
-            kernel_init=kernel_init,
+            kernel_init=deepnorm_init,
             rngs=rngs,
         )
         self.activation = hidden_activation
         self.linear2 = nnx.Linear(
             in_features=hidden_features,
             out_features=out_features,
-            kernel_init=kernel_init,
+            kernel_init=deepnorm_init,
             rngs=rngs,
         )
 
