@@ -233,13 +233,11 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   // Close input queue to clean up
   CloseInputQueue();
 
-  // Output queue should exist but should be closed due to initialization
-  // failure
+  // Output queue should exist but be closed to signal startup failure when no
+  // chunks were found.
   EXPECT_NE(output_queue, nullptr);
-
-  // Trying to get from the output queue should throw because it was closed due
-  // to init failure
-  EXPECT_THROW(output_queue->Get(), QueueClosedException);
+  EXPECT_TRUE(output_queue->IsClosed());
+  EXPECT_EQ(output_queue->Size(), 0u);
 }
 
 TEST_F(ShufflingChunkPoolTest, FlushMetricsHandlesEmptyChunkSources) {
