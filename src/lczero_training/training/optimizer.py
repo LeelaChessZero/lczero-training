@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import optax
+from flax import nnx
 
 from proto.training_config_pb2 import LinearWarmupLRSchedule, OptimizerConfig
 
@@ -42,6 +43,27 @@ def _make_linear_warmup_schedule(
     return schedule
 
 
+def _make_nadamw_weight_decay_mask(params: nnx.State) -> nnx.State:
+    """Creates a mask that excludes bias and LayerNorm parameters from decay."""
+
+    def is_layer_norm(path: tuple[object, ...]) -> bool:
+        for segment in path:
+            name = str(segment).lower()
+            if "ln" in name or "layernorm" in name or name.endswith("norm"):
+                return True
+        return False
+
+    def mask_fn(path: tuple[object, ...], variable: nnx.Variable) -> bool:
+        leaf_name = str(path[-1]).lower() if path else ""
+        if leaf_name == "bias":
+            return False
+        if leaf_name == "scale" and is_layer_norm(path[:-1]):
+            return False
+        return True
+
+    return nnx.map_state(mask_fn, params)
+
+
 def make_lr_schedule(config: OptimizerConfig) -> optax.Schedule:
     if config.HasField("constant_lr"):
         return optax.constant_schedule(config.constant_lr.lr)
@@ -69,6 +91,7 @@ def make_gradient_transformation(
             b2=conf.beta_2,
             eps=conf.epsilon,
             weight_decay=conf.weight_decay,
+            mask=_make_nadamw_weight_decay_mask,
         )
         if max_grad_norm is not None and max_grad_norm > 0:
             tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
