@@ -1,8 +1,14 @@
+from functools import partial
+
 import jax.numpy as jnp
 import optax
 from flax import nnx
 
-from proto.training_config_pb2 import LinearWarmupLRSchedule, OptimizerConfig
+from proto.training_config_pb2 import (
+    LinearWarmupLRSchedule,
+    NadamwOptimizerConfig,
+    OptimizerConfig,
+)
 
 
 def _make_linear_warmup_schedule(
@@ -43,21 +49,26 @@ def _make_linear_warmup_schedule(
     return schedule
 
 
-def _make_nadamw_weight_decay_mask(params: nnx.State) -> nnx.State:
+def _make_nadamw_weight_decay_mask(
+    config: NadamwOptimizerConfig, params: nnx.State
+) -> nnx.State:
     """Creates a mask that excludes bias and LayerNorm parameters from decay."""
 
     def is_layer_norm(path: tuple[object, ...]) -> bool:
-        for segment in path:
-            name = str(segment).lower()
-            if "ln" in name or "layernorm" in name or name.endswith("norm"):
-                return True
-        return False
+        return any(str(s).startswith("ln") for s in path)
+
+    def is_embedding(path: tuple[object, ...]) -> bool:
+        return ("embedding", "embedding") in zip(path, path[1:])
+
+    def is_bias(path: tuple[object, ...]) -> bool:
+        return str(path[-1]).lower() == "bias"
 
     def mask_fn(path: tuple[object, ...], variable: nnx.Variable) -> bool:
-        leaf_name = str(path[-1]).lower() if path else ""
-        if leaf_name == "bias":
+        if is_bias(path) and not config.decay_biases:
             return False
-        if leaf_name == "scale" and is_layer_norm(path[:-1]):
+        if is_layer_norm(path) and not config.decay_layer_norms:
+            return False
+        if is_embedding(path) and not config.decay_embedding:
             return False
         return True
 
@@ -91,7 +102,7 @@ def make_gradient_transformation(
             b2=conf.beta_2,
             eps=conf.epsilon,
             weight_decay=conf.weight_decay,
-            mask=_make_nadamw_weight_decay_mask,
+            mask=partial(_make_nadamw_weight_decay_mask, conf),
         )
         if max_grad_norm is not None and max_grad_norm > 0:
             tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)

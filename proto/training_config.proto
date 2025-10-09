@@ -46,6 +46,9 @@ message NadamwOptimizerConfig {
   float beta_2 = 2;
   float epsilon = 3;
   float weight_decay = 4;
+  bool decay_embedding = 5;
+  bool decay_biases = 6;
+  bool decay_layer_norms = 7;
 }
 
 message CheckpointConfig {
