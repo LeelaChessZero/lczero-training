@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import jax.random
 from flax import nnx
+from flax.linen import initializers as flax_initializers
 
 from proto import model_config_pb2, net_pb2
 from proto.hlo_pb2 import XlaShapeProto
@@ -22,11 +23,18 @@ class LczeroModel(nnx.Module):
         self.config = config
         self._input_channels = 112
 
+        deepnorm_init = flax_initializers.variance_scaling(
+            scale=math.pow(8.0 * config.encoder.num_blocks, -0.25),
+            mode="fan_avg",
+            distribution="truncated_normal",
+        )
+
         self.embedding = Embedding(
             input_channels=self._input_channels,
             config=config.embedding,
             defaults=config.defaults,
             alpha=math.pow(2.0 * config.encoder.num_blocks, -0.25),
+            deepnorm_init=deepnorm_init,
             rngs=rngs,
         )
 
@@ -36,6 +44,7 @@ class LczeroModel(nnx.Module):
             in_features=config.embedding.embedding_size,
             config=config.encoder,
             defaults=config.defaults,
+            deepnorm_init=deepnorm_init,
             rngs=rngs,
         )
 

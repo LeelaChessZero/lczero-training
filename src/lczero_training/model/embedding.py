@@ -1,3 +1,5 @@
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -18,6 +20,7 @@ class Embedding(nnx.Module):
         config: model_config_pb2.EmbeddingConfig,
         defaults: model_config_pb2.DefaultsConfig,
         alpha: float,
+        deepnorm_init: Callable[..., jax.Array],
         rngs: nnx.Rngs,
     ):
         self._input_channels = input_channels
@@ -45,6 +48,7 @@ class Embedding(nnx.Module):
             in_features=embedding_size,
             hidden_features=config.dff,
             hidden_activation=defaults.ffn_activation,
+            kernel_init=deepnorm_init,
             rngs=rngs,
         )
         self.out_norm = nnx.LayerNorm(embedding_size, epsilon=1e-3, rngs=rngs)
