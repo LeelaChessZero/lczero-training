@@ -1,7 +1,6 @@
-from typing import Callable
-
 import jax
 from flax import nnx
+from flax.linen import initializers as flax_initializers
 
 from proto import net_pb2
 
@@ -14,22 +13,27 @@ class Ffn(nnx.Module):
         in_features: int,
         hidden_features: int,
         hidden_activation: net_pb2.NetworkFormat.ActivationFunction,
-        kernel_init: Callable[..., jax.Array],
+        deepnorm_beta: float,
         *,
         rngs: nnx.Rngs,
     ):
+        deepnorm_init = flax_initializers.variance_scaling(
+            scale=deepnorm_beta,
+            mode="fan_avg",
+            distribution="truncated_normal",
+        )
         out_features = in_features
         self.linear1 = nnx.Linear(
             in_features=in_features,
             out_features=hidden_features,
-            kernel_init=kernel_init,
+            kernel_init=deepnorm_init,
             rngs=rngs,
         )
         self.activation = hidden_activation
         self.linear2 = nnx.Linear(
             in_features=hidden_features,
             out_features=out_features,
-            kernel_init=kernel_init,
+            kernel_init=deepnorm_init,
             rngs=rngs,
         )
 

@@ -1,9 +1,10 @@
 import math
-from typing import Callable, Optional
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
+from flax.linen import initializers as flax_initializers
 
 from proto import model_config_pb2
 
@@ -18,7 +19,7 @@ class EncoderTower(nnx.Module):
         in_features: int,
         config: model_config_pb2.EncoderConfig,
         defaults: model_config_pb2.DefaultsConfig,
-        deepnorm_init: Callable[..., jax.Array],
+        deepnorm_beta: float,
         rngs: nnx.Rngs,
     ):
         smolgen_shared_gen_dense = None
@@ -38,7 +39,7 @@ class EncoderTower(nnx.Module):
                     config=config,
                     defaults=defaults,
                     smol_gen_dense=smolgen_shared_gen_dense,
-                    deepnorm_init=deepnorm_init,
+                    deepnorm_beta=deepnorm_beta,
                     rngs=rngs,
                 )
                 for _ in range(config.num_blocks)
@@ -59,7 +60,7 @@ class EncoderBlock(nnx.Module):
         config: model_config_pb2.EncoderConfig,
         defaults: model_config_pb2.DefaultsConfig,
         smol_gen_dense: Optional[nnx.Linear],
-        deepnorm_init: Callable[..., jax.Array],
+        deepnorm_beta: float,
         rngs: nnx.Rngs,
     ):
         assert (smol_gen_dense is not None) == config.HasField("smolgen")
@@ -68,7 +69,7 @@ class EncoderBlock(nnx.Module):
             config=config,
             defaults=defaults,
             smol_gen_dense=smol_gen_dense,
-            deepnorm_init=deepnorm_init,
+            deepnorm_beta=deepnorm_beta,
             rngs=rngs,
         )
 
@@ -78,7 +79,7 @@ class EncoderBlock(nnx.Module):
             in_features=in_features,
             hidden_features=config.dff,
             hidden_activation=defaults.ffn_activation,
-            kernel_init=deepnorm_init,
+            deepnorm_beta=deepnorm_beta,
             rngs=rngs,
         )
         self.ln2 = nnx.LayerNorm(in_features, epsilon=1e-3, rngs=rngs)
@@ -99,7 +100,7 @@ class MultiHeadAttention(nnx.Module):
         config: model_config_pb2.EncoderConfig,
         defaults: model_config_pb2.DefaultsConfig,
         smol_gen_dense: Optional[nnx.Linear],
-        deepnorm_init: Callable[..., jax.Array],
+        deepnorm_beta: float,
         *,
         rngs: nnx.Rngs,
     ):
@@ -116,6 +117,12 @@ class MultiHeadAttention(nnx.Module):
         self.k = nnx.Linear(
             in_features=in_features, out_features=depth, rngs=rngs
         )
+        deepnorm_init = flax_initializers.variance_scaling(
+            scale=deepnorm_beta,
+            mode="fan_avg",
+            distribution="truncated_normal",
+        )
+
         self.v = nnx.Linear(
             in_features=in_features,
             out_features=depth,
