@@ -179,11 +179,8 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
             << " source(s) during startup.";
 
   if (total_chunks < chunk_pool_size_ && !output_queue_.IsClosed()) {
-    LOG(INFO) << "ShufflingChunkPool startup chunk requirement not met: "
-              << total_chunks.load() << " < " << chunk_pool_size_;
-    throw std::runtime_error(
-        absl::StrCat("Not enough chunks to initialize ShufflingChunkPool: ",
-                     total_chunks.load(), " < ", chunk_pool_size_));
+    LOG(ERROR) << "ShufflingChunkPool startup chunk requirement not met: "
+               << total_chunks.load() << " < " << chunk_pool_size_;
   }
 
   // Trim the vector to only keep the sources we need.
@@ -260,7 +257,10 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   try {
     while (true) {
       auto chunk = GetNextChunkData();
-      if (!chunk) continue;
+      if (!chunk) {
+        if (output_queue_.IsClosed()) break;
+        continue;
+      }
       LoadMetricPauser pauser(context->load_metric_updater);
       producer.Put(std::move(*chunk));
     }
