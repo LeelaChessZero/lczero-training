@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -224,6 +225,11 @@ void ShufflingChunkPool::ProcessInputFiles(
   LOG(INFO) << "ShufflingChunkPool initial window ready with "
             << initial_window_sources << " source(s) totaling "
             << initial_total_chunks << " chunk(s).";
+
+  if (initial_total_chunks == 0) {
+    throw std::runtime_error(
+        "ShufflingChunkPool requires at least one chunk during startup.");
+  }
 }
 
 void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
