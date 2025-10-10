@@ -14,8 +14,25 @@ from proto import net_pb2
 
 logger = logging.getLogger(__name__)
 
+_EMBEDDING_PLANE_TO_SCALE = 109
+_EMBEDDING_SCALE = 99.0
+
 
 class JaxToLeela(LeelaPytreeWeightsVisitor):
+    def embedding_block(
+        self, nnx_dict: nnx.State, weights: net_pb2.Weights
+    ) -> None:
+        embedding_kernel = cast(nnx.Param, nnx_dict["embedding"]["kernel"])
+        original_values = embedding_kernel.value
+        scaled_values = original_values.at[_EMBEDDING_PLANE_TO_SCALE].set(
+            original_values[_EMBEDDING_PLANE_TO_SCALE] / _EMBEDDING_SCALE
+        )
+        embedding_kernel.value = scaled_values
+        try:
+            super().embedding_block(nnx_dict=nnx_dict, weights=weights)
+        finally:
+            embedding_kernel.value = original_values
+
     def tensor(
         self,
         param: nnx.Param,
