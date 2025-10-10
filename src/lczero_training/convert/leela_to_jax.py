@@ -2,7 +2,7 @@ import dataclasses
 import gzip
 import logging
 import math
-from typing import Optional
+from typing import Optional, cast
 
 import jax.numpy as jnp
 from flax import nnx, serialization
@@ -15,6 +15,10 @@ from .leela_pytree_visitor import LeelaPytreeWeightsVisitor
 from .leela_to_modelconfig import leela_to_modelconfig
 
 logger = logging.getLogger(__name__)
+
+
+_EMBEDDING_PLANE_TO_SCALE = 109
+_EMBEDDING_SCALE = 99.0
 
 
 @dataclasses.dataclass
@@ -78,6 +82,17 @@ def fix_older_weights_file(file: net_pb2.Net) -> None:
 
 
 class LeelaToJax(LeelaPytreeWeightsVisitor):
+    def embedding_block(
+        self, nnx_dict: nnx.State, weights: net_pb2.Weights
+    ) -> None:
+        super().embedding_block(nnx_dict=nnx_dict, weights=weights)
+        embedding_kernel = cast(nnx.Param, nnx_dict["embedding"]["kernel"])
+        values = embedding_kernel.value
+        scaled_values = values.at[_EMBEDDING_PLANE_TO_SCALE].set(
+            values[_EMBEDDING_PLANE_TO_SCALE] * _EMBEDDING_SCALE
+        )
+        embedding_kernel.value = scaled_values
+
     def tensor(
         self,
         param: nnx.Param,
