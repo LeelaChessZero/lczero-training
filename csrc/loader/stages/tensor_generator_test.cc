@@ -198,9 +198,9 @@ class TensorGeneratorTest : public ::testing::Test {
         EXPECT_FLOAT_EQ(planes_slice[square], 0.0f);
       }
 
-      // Plane 109: rule50_count = 50, should be 50/100 = 0.5
+      // Plane 109: rule50_count = 50, should be 50/99
       for (ssize_t square = 109 * 64; square < 110 * 64; ++square) {
-        EXPECT_FLOAT_EQ(planes_slice[square], 0.5f);
+        EXPECT_FLOAT_EQ(planes_slice[square], 50.0f / 99.0f);
       }
 
       // Plane 110: all ones
@@ -358,9 +358,9 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
         << "Mismatch at square " << square;
   }
 
-  // Verify rule50_count conversion: 75/100 = 0.75.
+  // Verify rule50_count conversion: 75/99.
   for (ssize_t square = 109 * 64; square < 110 * 64; ++square) {
-    EXPECT_FLOAT_EQ(planes_slice[square], 0.75f);
+    EXPECT_FLOAT_EQ(planes_slice[square], 75.0f / 99.0f);
   }
 }
 

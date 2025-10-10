@@ -5,6 +5,7 @@ from .describe import describe
 from .eval import eval
 from .init import init
 from .overfit import overfit
+from .statediff import state_diff
 from .training import train
 from .tune_lr import tune_lr
 
@@ -181,6 +182,49 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     describe_parser.set_defaults(func=run)
 
+    # State diff command
+    statediff_parser = subparsers.add_parser(
+        "statediff", help="Compare training state structures."
+    )
+    statediff_parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the training config file.",
+    )
+    statediff_parser.add_argument(
+        "--old",
+        type=str,
+        default="checkpoint",
+        help=(
+            "State identifier to use as the baseline. Use 'model' for the empty "
+            "state from the config, 'checkpoint' for the latest checkpoint from "
+            "the config, or provide a checkpoint directory path."
+        ),
+    )
+    statediff_parser.add_argument(
+        "--new",
+        type=str,
+        default="model",
+        help=(
+            "State identifier to compare against. Use 'model', 'checkpoint', or a "
+            "checkpoint directory path."
+        ),
+    )
+    statediff_parser.add_argument(
+        "--values",
+        action="store_true",
+        help="Include actual values in the diff output instead of only shapes/types.",
+    )
+    statediff_parser.add_argument(
+        "--missing-root-only",
+        action="store_true",
+        help=(
+            "When set, report only the root of missing subtrees instead of every leaf."
+        ),
+    )
+    statediff_parser.set_defaults(func=run)
+
     # Data loader test command
     dataloader_parser = subparsers.add_parser(
         "test-dataloader",
@@ -249,6 +293,14 @@ def run(args: argparse.Namespace) -> None:
         describe(
             config_filename=args.config,
             shapes=getattr(args, "shapes", False),
+        )
+    elif args.subcommand == "statediff":
+        state_diff(
+            config_filename=args.config,
+            old=getattr(args, "old", "checkpoint"),
+            new=getattr(args, "new", "model"),
+            show_values=getattr(args, "values", False),
+            full_missing_subtrees=not getattr(args, "missing_root_only", False),
         )
     elif args.subcommand == "test-dataloader":
         probe_dataloader(
