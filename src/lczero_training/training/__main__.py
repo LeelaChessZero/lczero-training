@@ -236,10 +236,10 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         "migration rules.",
     )
     migrate_parser.add_argument(
-        "--no-serialized_model",
-        action="store_false",
-        dest="serialized_model",
-        help="By default, use serialized state for a model.",
+        "--serialized-model",
+        action="store_true",
+        default=False,
+        help="Use serialized state for a model.",
     )
     migrate_parser.add_argument(
         "--checkpoint_step",

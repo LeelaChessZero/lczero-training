@@ -23,9 +23,9 @@ called from `src/lczero_training/training/__main__.py`.
   the migration rules. See below for the format of this file. If not set, no
   migration rules will be applied (used for debugging, or to check that the
   old and new states are identical).
-* `--no-serialized_model`: By default, use serialized state for a model.
-  Checkpoint already loads serialized as we don't provide schema. This is needed
-  to avoid `GetAttrKey`s.
+* `--serialized-model`: If set, use serialized state for a model. Checkpoint
+  already loads serialized as we do not provide schema. This is needed to avoid
+  `GetAttrKey`s.
 * `--checkpoint_step`: If set, use this step when loading from old checkpoint
   instead of the latest.
 * `--new_checkpoint_step`: If set, use this step when saving the new checkpoint
@@ -47,8 +47,8 @@ Roughly, like this:
 ```
 
 The model state is created using `TrainingState.new_from_config`
-(`src/lczero_training/training/state.py`). Unless `--no-serialized_model` is
-passed, the model state is serialized using `flax.serialization.to_state_dict`.
+(`src/lczero_training/training/state.py`). If `--serialized-model` is passed,
+the model state is serialized using `flax.serialization.to_state_dict`.
 
 ## Migration rules format
 
