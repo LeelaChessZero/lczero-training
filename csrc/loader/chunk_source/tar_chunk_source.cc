@@ -2,7 +2,11 @@
 
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
+#include <zlib.h>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <stdexcept>
 
 #include "utils/gz.h"
@@ -38,6 +42,68 @@ uint64_t ParseOctal(const std::array<uint8_t, 12>& octal) {
     value = (value << 3) + (digit - '0');
   }
   return value;
+}
+
+std::optional<std::string> ReadGzipPrefix(FILE* file, long int offset,
+                                          long int size, size_t max_bytes) {
+  if (max_bytes == 0) return std::string();
+
+  if (fseek(file, offset, SEEK_SET) != 0) {
+    return std::nullopt;
+  }
+
+  z_stream strm = {};
+  if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) {
+    return std::nullopt;
+  }
+
+  constexpr size_t kChunkSize = 16384;
+  std::array<uint8_t, kChunkSize> input_buffer;
+  std::array<char, kChunkSize> output_buffer;
+
+  std::string output;
+  output.reserve(std::min<size_t>(max_bytes, kChunkSize));
+
+  long int remaining = size;
+  bool finished = false;
+
+  while (remaining > 0 && !finished && output.size() < max_bytes) {
+    const size_t to_read = static_cast<size_t>(
+        std::min<long int>(remaining, static_cast<long int>(kChunkSize)));
+    const size_t read = fread(input_buffer.data(), 1, to_read, file);
+    if (read != to_read) {
+      inflateEnd(&strm);
+      return std::nullopt;
+    }
+    remaining -= static_cast<long int>(read);
+
+    strm.next_in = reinterpret_cast<Bytef*>(input_buffer.data());
+    strm.avail_in = static_cast<uInt>(read);
+
+    while (strm.avail_in > 0 && output.size() < max_bytes) {
+      strm.next_out = reinterpret_cast<Bytef*>(output_buffer.data());
+      strm.avail_out = kChunkSize;
+
+      const int ret = inflate(&strm, Z_NO_FLUSH);
+      if (ret == Z_STREAM_ERROR || ret == Z_NEED_DICT || ret == Z_DATA_ERROR ||
+          ret == Z_MEM_ERROR) {
+        inflateEnd(&strm);
+        return std::nullopt;
+      }
+
+      const size_t produced = kChunkSize - strm.avail_out;
+      const size_t to_copy = std::min(produced, max_bytes - output.size());
+      output.append(output_buffer.data(), to_copy);
+
+      if (ret == Z_STREAM_END) {
+        finished = true;
+        break;
+      }
+    }
+  }
+
+  inflateEnd(&strm);
+  return output;
 }
 
 }  // namespace
@@ -110,6 +176,29 @@ std::optional<std::string> TarChunkSource::GetChunkData(size_t index) {
     } catch (const GunzipError& e) {
       return std::nullopt;
     }
+  }
+  return content;
+}
+
+std::optional<std::string> TarChunkSource::GetChunkPrefix(size_t index,
+                                                          size_t max_bytes) {
+  if (index >= files_.size()) {
+    throw std::out_of_range("File index out of range");
+  }
+  const auto& file_entry = files_[index];
+  if (file_entry.is_gzip) {
+    return ReadGzipPrefix(file_, file_entry.offset, file_entry.size, max_bytes);
+  }
+
+  const size_t to_read =
+      std::min(static_cast<size_t>(file_entry.size), max_bytes);
+  std::string content(to_read, '\0');
+  if (fseek(file_, file_entry.offset, SEEK_SET) != 0) {
+    return std::nullopt;
+  }
+  const size_t read = fread(content.data(), 1, to_read, file_);
+  if (read != to_read) {
+    return std::nullopt;
   }
   return content;
 }

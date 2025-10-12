@@ -320,6 +320,14 @@ filter_chunks = executable(
   link_with : loader_lib,
 )
 
+result_distribution = executable(
+  'result_distribution',
+  'csrc/tools/result_distribution_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps + [absl_deps['synchronization']],
+  link_with : loader_lib,
+)
+
 startpos_policy_distribution = executable(
   'startpos_policy_distribution',
   'csrc/tools/startpos_policy_distribution_main.cc',

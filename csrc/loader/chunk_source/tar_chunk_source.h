@@ -2,7 +2,6 @@
 
 #include <filesystem>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "loader/chunk_source/chunk_source.h"
@@ -15,7 +14,12 @@ namespace training {
 class TarChunkSource : public ChunkSource {
  public:
   TarChunkSource(const std::filesystem::path& filename);
-  ~TarChunkSource();
+  ~TarChunkSource() override;
+  std::string GetChunkSortKey() const override;
+  void Index() override;
+  size_t GetChunkCount() const override;
+  std::optional<std::string> GetChunkData(size_t index) override;
+  std::optional<std::string> GetChunkPrefix(size_t index, size_t max_bytes);
 
  private:
   struct FileEntry {
@@ -23,11 +27,6 @@ class TarChunkSource : public ChunkSource {
     long int size;
     bool is_gzip;
   };
-
-  std::string GetChunkSortKey() const override;
-  void Index() override;
-  size_t GetChunkCount() const override;
-  std::optional<std::string> GetChunkData(size_t index) override;
 
   FILE* file_ = nullptr;
   std::vector<FileEntry> files_;
