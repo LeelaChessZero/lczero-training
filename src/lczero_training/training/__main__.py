@@ -4,6 +4,7 @@ from .dataloader_probe import probe_dataloader
 from .describe import describe
 from .eval import eval
 from .init import init
+from .migrate_checkpoint import migrate_checkpoint
 from .overfit import overfit
 from .statediff import state_diff
 from .training import train
@@ -252,6 +253,52 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     dataloader_parser.set_defaults(func=run)
 
+    # Migrate checkpoint command
+    migrate_parser = subparsers.add_parser(
+        "migrate-checkpoint",
+        help="Migrate a checkpoint to a new training state.",
+    )
+    migrate_parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the RootConfig textproto config.",
+    )
+    migrate_parser.add_argument(
+        "--new_checkpoint",
+        help="Path to save the new checkpoint to. If not set, the tool only "
+        "checks whether the migration rules fully cover the differences.",
+    )
+    migrate_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="If set, allows overwriting existing checkpoint.",
+    )
+    migrate_parser.add_argument(
+        "--rules_file",
+        help="Path to a CheckpointMigrationConfig textproto file containing the "
+        "migration rules.",
+    )
+    migrate_parser.add_argument(
+        "--no-serialized_model",
+        action="store_false",
+        dest="serialized_model",
+        help="By default, use serialized state for a model.",
+    )
+    migrate_parser.add_argument(
+        "--checkpoint_step",
+        type=int,
+        help="If set, use this step when loading from old checkpoint instead of "
+        "the latest.",
+    )
+    migrate_parser.add_argument(
+        "--new_checkpoint_step",
+        type=int,
+        help="If set, use this step when saving the new checkpoint instead of "
+        "copying the old step.",
+    )
+    migrate_parser.set_defaults(func=run)
+
 
 def run(args: argparse.Namespace) -> None:
     if args.subcommand == "init":
@@ -301,6 +348,16 @@ def run(args: argparse.Namespace) -> None:
             new=getattr(args, "new", "model"),
             show_values=getattr(args, "values", False),
             full_missing_subtrees=not getattr(args, "missing_root_only", False),
+        )
+    elif args.subcommand == "migrate-checkpoint":
+        migrate_checkpoint(
+            config=args.config,
+            new_checkpoint=args.new_checkpoint,
+            overwrite=args.overwrite,
+            rules_file=args.rules_file,
+            serialized_model=args.serialized_model,
+            checkpoint_step=args.checkpoint_step,
+            new_checkpoint_step=args.new_checkpoint_step,
         )
     elif args.subcommand == "test-dataloader":
         probe_dataloader(

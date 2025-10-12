@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package lczero_training.proto;
+
+message CheckpointMigrationRule {
+  // Path in the old state pytree.
+  string from_path = 1;
+
+  // Path in the new state pytree.
+  string to_path = 2;
+}
+
+message CheckpointMigrationConfig {
+  repeated CheckpointMigrationRule rule = 1;
+}

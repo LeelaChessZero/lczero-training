@@ -44,6 +44,8 @@ in the `builddir/`.
 * Do not attempt to run TUI — it messes up the Agent interface and session has
   to be killed. Ask me to check it for you manually instead.
 
+* Do not commit unless explicitly asked.
+
 ## IMPORTANT
 
 * NEVER add `# type: ignore` or other ways to mask/silence errors instead of
