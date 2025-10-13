@@ -197,8 +197,8 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
         {107, static_cast<float>(frame.castling_them_oo)},
         {108, static_cast<float>(frame.side_to_move_or_enpassant)},
         {109, static_cast<float>(frame.rule50_count) / 99.0f},
-        {110, 1.0f},  // All ones (constant plane).
-        {111, 0.0f},  // All zeros (constant plane).
+        {110, 0.0f},  // All zeros (constant plane).
+        {111, 1.0f},  // All ones (constant plane).
     };
 
     for (const auto& [plane_num, value] : meta_planes) {

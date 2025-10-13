@@ -203,14 +203,14 @@ class TensorGeneratorTest : public ::testing::Test {
         EXPECT_FLOAT_EQ(planes_slice[square], 50.0f / 99.0f);
       }
 
-      // Plane 110: all ones
+      // Plane 110: all zeros
       for (ssize_t square = 110 * 64; square < 111 * 64; ++square) {
-        EXPECT_FLOAT_EQ(planes_slice[square], 1.0f);
+        EXPECT_FLOAT_EQ(planes_slice[square], 0.0f);
       }
 
-      // Plane 111: all zeros
+      // Plane 111: all ones
       for (ssize_t square = 111 * 64; square < 112 * 64; ++square) {
-        EXPECT_FLOAT_EQ(planes_slice[square], 0.0f);
+        EXPECT_FLOAT_EQ(planes_slice[square], 1.0f);
       }
     }
   }
