@@ -460,7 +460,14 @@ class Evaluation:
         }
 
         if onnx_comparator:
-            onnx_comparator.compare(outputs, np.asarray(inputs), sample_idx)
+            jax_outputs_for_onnx = {
+                "wdl": value_pred,
+                "policy": policy_pred,
+                "movesleft": movesleft_pred,
+            }
+            onnx_comparator.compare(
+                jax_outputs_for_onnx, np.asarray(inputs), sample_idx
+            )
             outputs.update(onnx_comparator.onnx_outputs)
 
         dumper.dump_tensors(outputs, "OUTPUT")
