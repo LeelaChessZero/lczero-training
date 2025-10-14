@@ -5,6 +5,9 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/random/random.h"
+#include "absl/random/seed_sequences.h"
 #include "gtest/gtest.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/stages/training_chunk.h"
@@ -179,6 +182,86 @@ TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
 
   // Output queue should eventually close
   EXPECT_THROW(unpacker.output()->Get(), QueueClosedException);
+}
+
+TEST(PickRandomPositionsTest, Deterministic) {
+  absl::BitGen gen1(absl::SeedSeq{42});
+  std::vector<uint32_t> result1 = PickRandomPositions(1000, 0.1, 5, gen1);
+
+  absl::BitGen gen2(absl::SeedSeq{42});
+  std::vector<uint32_t> result2 = PickRandomPositions(1000, 0.1, 5, gen2);
+
+  EXPECT_EQ(result1, result2);
+}
+
+TEST(PickRandomPositionsTest, FullBucketFirstRound) {
+  absl::BitGen gen(absl::SeedSeq{42});
+  const uint32_t n = 10000;
+  const double p = 0.1;
+  std::vector<uint32_t> result = PickRandomPositions(n, p, 0, gen);
+  // Expect size to be around n*p.
+  EXPECT_NEAR(result.size(), n * p, n * p * 0.25);
+}
+
+TEST(PickRandomPositionsTest, DisjointBuckets) {
+  absl::BitGen gen(absl::SeedSeq{42});
+  const uint32_t n = 1000;
+  const double p = 0.1;
+
+  std::vector<uint32_t> bucket1 = PickRandomPositions(n, p, 0, gen);
+  absl::c_sort(bucket1);
+
+  // The generator state is now changed. For the next bucket, we need a fresh
+  // one with the same seed to test the logic for a different iteration.
+  absl::BitGen gen2(absl::SeedSeq{42});
+  std::vector<uint32_t> bucket2 = PickRandomPositions(n, p, 1, gen2);
+  absl::c_sort(bucket2);
+
+  std::vector<uint32_t> intersection;
+  absl::c_set_intersection(bucket1, bucket2, std::back_inserter(intersection));
+
+  EXPECT_TRUE(intersection.empty());
+}
+
+TEST(PickRandomPositionsTest, PartialBucketElementsAreReturned) {
+  absl::BitGen gen(absl::SeedSeq{42});
+  const uint32_t n = 1000;
+  const double p = 0.8;  // remainder 0.2
+
+  // In round 1, elements with toss >= 0.8 are for iteration 1.
+  absl::BitGen gen1(absl::SeedSeq{42});
+  std::vector<uint32_t> expected_from_round1;
+  for (uint32_t i = 0; i < n; ++i) {
+    double toss = absl::Uniform<double>(gen1, 0.0, 1.0);
+    if (toss >= 0.8) {
+      expected_from_round1.push_back(i);
+    }
+  }
+  absl::c_sort(expected_from_round1);
+
+  std::vector<uint32_t> result = PickRandomPositions(n, p, 1, gen);
+  absl::c_sort(result);
+
+  // Check if all elements from round 1 are in the final result.
+  // This will fail with the current implementation because they are discarded.
+  std::vector<uint32_t> intersection;
+  absl::c_set_intersection(expected_from_round1, result,
+                           std::back_inserter(intersection));
+
+  EXPECT_GT(expected_from_round1.size(), 50);  // High probability for n=1000
+  EXPECT_EQ(intersection.size(), expected_from_round1.size());
+}
+
+TEST(PickRandomPositionsTest, PartialBucketCompletedSize) {
+  absl::BitGen gen(absl::SeedSeq{42});
+  const uint32_t n = 10000;
+  const double p = 0.8;  // remainder 0.2
+
+  std::vector<uint32_t> result = PickRandomPositions(n, p, 1, gen);
+
+  // Expect size to be around n*p.
+  // This will fail due to incorrect probability calculation for completion.
+  EXPECT_NEAR(result.size(), n * p, n * p * 0.25);
 }
 
 }  // namespace training

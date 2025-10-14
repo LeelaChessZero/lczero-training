@@ -1,6 +1,7 @@
 #include "loader/stages/chunk_unpacker.h"
 
 #include <absl/algorithm/container.h>
+#include <absl/container/flat_hash_set.h>
 #include <absl/log/log.h>
 #include <absl/random/random.h>
 #include <absl/random/seed_sequences.h>
@@ -16,39 +17,48 @@
 
 namespace lczero {
 namespace training {
-namespace {
-// Deal the i-th block of size k from a shuffled 0..n−1, rotating leftovers
-// forward and reshuffling the rest between rounds.
-std::vector<uint32_t> ShuffledBlock(uint32_t n, uint32_t k, uint64_t run_seed,
-                                    uint64_t chunk_seed, uint32_t i) {
-  if (!n || !k) return {};
-  std::vector<uint32_t> v(n);
-  absl::c_iota(v, 0u);
 
-  absl::BitGen gen(std::seed_seq{static_cast<uint32_t>(run_seed),
-                                 static_cast<uint32_t>(run_seed >> 32),
-                                 static_cast<uint32_t>(chunk_seed),
-                                 static_cast<uint32_t>(chunk_seed >> 32)});
-  std::shuffle(v.begin(), v.end(), gen);
+// Deterministically partitions `n` positions into disjoint subsets of size
+// `~p*n`, returning the subset for a given `iteration`. While each selection
+// individually behaves like a Bernoulli sample with probability `p`, the
+// samples are correlated to ensure all positions are selected exactly once over
+// `1/p` iterations. To sample disjoint subsets from the same set of positions,
+// `gen` must be seeded identically for each call with a different `iteration`.
+std::vector<uint32_t> PickRandomPositions(int32_t n, double p,
+                                          int32_t iteration,
+                                          absl::BitGen& gen) {
+  assert(p > 0.0 && p <= 1.0);
+  double carried_prob = p;
 
-  const uint32_t per = n / k;    // full K-blocks per round
-  const uint32_t cut = per * k;  // position after dealing one round
-  const uint32_t rem = n - cut;  // leftovers kept at front
+  std::vector<uint32_t> result;
+  absl::flat_hash_set<int32_t> skip_next_round;
 
-  // Jump over whole rounds: rotate leftovers to front, reshuffle the tail each
-  // time.
-  for (uint32_t r = i / per; r--;) {
-    std::rotate(v.begin(), v.begin() + cut, v.end());
-    std::shuffle(v.begin() + rem, v.end(), gen);  // reshuffle suffix
+  while (true) {
+    int32_t num_this_round = (1.0 - carried_prob) / p + 1;
+    double last_partial_prob = 1 - (carried_prob + (num_this_round - 1) * p);
+    const bool return_this_round = iteration < num_this_round;
+    absl::flat_hash_set<int32_t> skip_this_round(skip_next_round);
+    skip_next_round.clear();
+    for (int32_t i = 0; i < n; ++i) {
+      if (skip_this_round.contains(i)) continue;
+      const double toss = absl::Uniform<double>(gen, 0.0, 1.0);
+      const int32_t value = (toss - carried_prob) / p + 1;
+      if (value == iteration) result.push_back(static_cast<uint32_t>(i));
+      if (value >= num_this_round) {
+        skip_next_round.insert(static_cast<int32_t>(i));
+      }
+    }
+    if (return_this_round) return result;
+    iteration -= num_this_round;
+    carried_prob = p - last_partial_prob;
   }
-
-  const uint32_t off = (i % per) * k;  // block offset within the current round
-  return {v.begin() + off, v.begin() + off + k};
 }
 
-uint64_t GenerateRunSeed() {
+namespace {
+
+uint32_t GenerateRunSeed() {
   absl::BitGen gen(absl::MakeSeedSeq());
-  return absl::Uniform<uint64_t>(gen);
+  return absl::Uniform<uint32_t>(gen);
 }
 
 }  // namespace
@@ -113,12 +123,11 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
         return input_queue()->Get();
       }();
 
-      size_t positions_to_sample =
-          round(chunk.frames.size() * position_sampling_rate_);
-      if (positions_to_sample == 0) positions_to_sample = 1;
-      std::vector<uint32_t> positions = ShuffledBlock(
-          chunk.frames.size(), positions_to_sample, run_seed_,
-          static_cast<uint64_t>(chunk.global_index), chunk.reshuffle_count);
+      absl::BitGen gen(
+          std::seed_seq{run_seed_, static_cast<uint32_t>(chunk.global_index)});
+      std::vector<uint32_t> positions = PickRandomPositions(
+          static_cast<int32_t>(chunk.frames.size()), position_sampling_rate_,
+          chunk.reshuffle_count, gen);
 
       for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);
