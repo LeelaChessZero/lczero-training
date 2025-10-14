@@ -465,8 +465,10 @@ class Evaluation:
                 "policy": policy_pred,
                 "movesleft": movesleft_pred,
             }
+            onnx_inputs_np = np.asarray(inputs).copy()
+            onnx_inputs_np[:, 109, ...] *= 99
             onnx_comparator.compare(
-                jax_outputs_for_onnx, np.asarray(inputs), sample_idx
+                jax_outputs_for_onnx, onnx_inputs_np, sample_idx
             )
             outputs.update(onnx_comparator.onnx_outputs)
 
