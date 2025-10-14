@@ -21,6 +21,8 @@ dependencies = [
     "requests[socks]>=2.32.5",
     "matplotlib>=3.10.6",
     "jaxlib==0.7.1",
+    "onnxruntime>=1.23.1",
+    "onnxruntime-gpu>=1.23.0",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +67,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "optax"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "onnxruntime"
+ignore_missing_imports = true
+
 
 [tool.pytest.ini_options]
 testpaths = ["src"]

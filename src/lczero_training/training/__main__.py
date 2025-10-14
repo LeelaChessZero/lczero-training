@@ -86,6 +86,16 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Dump input/output tensors to specified JSON file.",
     )
+    eval_parser.add_argument(
+        "--onnx-model",
+        type=str,
+        help="Path to an ONNX model to compare against JAX outputs.",
+    )
+    eval_parser.add_argument(
+        "--no-softmax-jax-wdl",
+        action="store_true",
+        help="Disable softmaxing the JAX WDL head before comparison.",
+    )
     eval_parser.set_defaults(func=run)
 
     # Tune LR command
@@ -154,8 +164,8 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         "--coin-flip",
         action="store_true",
         help=(
-            "Train on two batches: first train batch A while evaluating batch B, "
-            "then vice versa."
+            "Train on two batches: first train batch A while evaluating batch "
+            "B, then vice versa."
         ),
     )
     overfit_parser.add_argument(
@@ -232,8 +242,8 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     migrate_parser.add_argument(
         "--rules_file",
-        help="Path to a CheckpointMigrationConfig textproto file containing the "
-        "migration rules.",
+        help="Path to a CheckpointMigrationConfig textproto file containing "
+        "the  migration rules.",
     )
     migrate_parser.add_argument(
         "--serialized-model",
@@ -274,6 +284,8 @@ def run(args: argparse.Namespace) -> None:
             dump_to_file=getattr(args, "dump_file", None),
             dump_to_shelve=getattr(args, "dump_shelve", None),
             dump_to_json=getattr(args, "dump_json", None),
+            onnx_model=getattr(args, "onnx_model", None),
+            softmax_jax_wdl=not getattr(args, "no_softmax_jax_wdl", False),
         )
     elif args.subcommand == "tune_lr":
         tune_lr(
