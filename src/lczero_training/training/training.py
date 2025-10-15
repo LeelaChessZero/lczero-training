@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from functools import partial
-from typing import Any, Callable, Dict, Generator, Tuple, cast
+from typing import Any, Callable, Dict, Generator, Optional, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -28,6 +28,9 @@ from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
 from proto.root_config_pb2 import RootConfig
 
+MetricsDict = Dict[str, Any]
+MetricsHook = Callable[[int, MetricsDict], None]
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +45,7 @@ class Training:
     optimizer_tx: optax.GradientTransformation
     train_step: Callable[
         [optax.GradientTransformation, JitTrainingState, dict],
-        Tuple[JitTrainingState, Dict[str, Any]],
+        Tuple[JitTrainingState, MetricsDict],
     ]
 
     def __init__(
@@ -76,7 +79,7 @@ class Training:
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
             batch: dict,
-        ) -> Tuple[JitTrainingState, Dict[str, Any]]:
+        ) -> Tuple[JitTrainingState, MetricsDict]:
             model = nnx.merge(graphdef, jit_state.model_state)
 
             def loss_for_grad(
@@ -124,7 +127,7 @@ class Training:
             )
 
             mean_unweighted = tree_util.tree_map(jnp.mean, unweighted_losses)
-            metrics = {
+            metrics: MetricsDict = {
                 "loss": mean_loss,
                 "unweighted_losses": mean_unweighted,
                 "grad_norm": grad_norm,
@@ -134,7 +137,7 @@ class Training:
         self.train_step = cast(
             Callable[
                 [optax.GradientTransformation, JitTrainingState, dict],
-                Tuple[JitTrainingState, Dict[str, Any]],
+                Tuple[JitTrainingState, MetricsDict],
             ],
             _step,
         )
@@ -144,6 +147,7 @@ class Training:
         jit_state: JitTrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
         num_steps: int,
+        metrics_hook: Optional[MetricsHook] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
         for _ in range(num_steps):
@@ -161,11 +165,16 @@ class Training:
                     "movesleft_targets": b_movesleft,
                 },
             )
+            step_value = int(
+                np.asarray(jax.device_get(jit_state.step)).reshape(())
+            )
+            if metrics_hook is not None:
+                metrics_hook(step_value, metrics)
             loss = metrics["loss"]
             unweighted_losses = metrics["unweighted_losses"]
             grad_norm = metrics["grad_norm"]
             logger.info(
-                f"Step {jit_state.step}, Loss: {loss}, Unweighted losses:"
+                f"Step {step_value}, Loss: {loss}, Unweighted losses:"
                 f" {unweighted_losses}, Grad norm: {grad_norm}"
             )
         return jit_state

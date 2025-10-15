@@ -24,6 +24,7 @@ from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
+from lczero_training.training.tensorboard import TensorboardLogger
 from lczero_training.training.training import Training, from_dataloader
 from proto.data_loader_config_pb2 import DataLoaderConfig
 from proto.root_config_pb2 import RootConfig
@@ -105,6 +106,7 @@ class TrainingPipeline:
     _checkpoint_mgr: ocp.CheckpointManager
     _training_state: TrainingState
     _cycle_state: _TrainingCycleState
+    _train_tensorboard_logger: TensorboardLogger | None
 
     def __init__(self, config_filepath: str) -> None:
         logger.info(f"Loading config from {config_filepath}")
@@ -116,6 +118,7 @@ class TrainingPipeline:
         self._chunks_to_wait = self._chunks_per_network
         self._cycle_state = _TrainingCycleState()
         self._force_training_event = threading.Event()
+        self._train_tensorboard_logger = None
         logger.info("Creating empty model")
         self._model = LczeroModel(self._config.model, rngs=nnx.Rngs(params=42))
         logger.info(
@@ -164,6 +167,15 @@ class TrainingPipeline:
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),
         )
+        if (
+            self._config.export.HasField("tensorboard_path")
+            and self._config.export.tensorboard_path
+        ):
+            tensorboard_path = os.path.join(
+                self._config.export.tensorboard_path, "train"
+            )
+            self._train_tensorboard_logger = TensorboardLogger(tensorboard_path)
+            logger.info("Writing TensorBoard summaries to %s", tensorboard_path)
 
         logger.info("Creating data loader")
         self._data_loader = _make_dataloader(self._config.data_loader)
@@ -268,6 +280,10 @@ class TrainingPipeline:
         except (KeyError, AttributeError, IndexError) as e:
             logging.error(f"Failed to extract model metadata for upload: {e}")
 
+    def _metrics_hook(self, step: int, metrics: dict) -> None:
+        if self._train_tensorboard_logger is not None:
+            self._train_tensorboard_logger.log(step, metrics)
+
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
 
@@ -280,6 +296,7 @@ class TrainingPipeline:
             jit_state=self._training_state.jit_state,
             datagen=from_dataloader(self._data_loader),
             num_steps=self._schedule.steps_per_network,
+            metrics_hook=self._metrics_hook,
         )
         self._training_state = self._training_state.replace(
             jit_state=new_jit_state
@@ -311,6 +328,8 @@ class TrainingPipeline:
 
     def stop(self) -> None:
         self._data_loader.stop()
+        if self._train_tensorboard_logger is not None:
+            self._train_tensorboard_logger.close()
 
     def get_data_loader(self) -> DataLoader:
         return self._data_loader
