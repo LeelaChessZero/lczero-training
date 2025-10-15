@@ -1,3 +1,4 @@
+import math
 from functools import partial
 
 import jax.numpy as jnp
@@ -5,48 +6,53 @@ import optax
 from flax import nnx
 
 from proto.training_config_pb2 import (
-    LinearWarmupLRSchedule,
+    LrSchedule,
     NadamwOptimizerConfig,
     OptimizerConfig,
 )
 
 
-def _make_linear_warmup_schedule(
-    config: LinearWarmupLRSchedule,
-) -> optax.Schedule:
-    steps = jnp.asarray(config.step, dtype=jnp.float32)
-    lrs = jnp.asarray(config.lr, dtype=jnp.float32)
-
-    if steps.size != lrs.size:
-        raise ValueError(
-            "linear_warmup_lr.step and lr must have the same length"
+def _interp(start_lr: float, end_lr: float, t: float, kind: int) -> float:
+    if kind == LrSchedule.Transition.LINEAR:
+        return start_lr + (end_lr - start_lr) * t
+    if kind == LrSchedule.Transition.COSINE:
+        return start_lr + 0.5 * (1.0 - math.cos(math.pi * t)) * (
+            end_lr - start_lr
         )
-    if steps.size == 0:
-        raise ValueError("linear_warmup_lr requires at least one step")
-    if jnp.any(steps[1:] < steps[:-1]):
-        raise ValueError("linear_warmup_lr.step must be sorted ascending")
+    return start_lr
 
-    def schedule(count: jnp.ndarray) -> jnp.ndarray:
-        step = jnp.asarray(count, dtype=jnp.float32)
 
-        lower = jnp.searchsorted(steps, step, side="right") - 1
-        lower = jnp.clip(lower, 0, steps.size - 1)
-        upper = jnp.clip(lower + 1, 0, steps.size - 1)
+def _pick_rule(rules: list[LrSchedule], step: float) -> LrSchedule:
+    eligible = (r for r in rules if r.starting_step <= step)
+    return max(eligible, key=lambda r: r.starting_step)
 
-        left_step = steps[lower]
-        right_step = steps[upper]
-        left_lr = lrs[lower]
-        right_lr = lrs[upper]
 
-        progress = jnp.where(
-            right_step == left_step,
-            0.0,
-            (step - left_step) / (right_step - left_step),
-        )
-        progress = jnp.clip(progress, 0.0, 1.0)
-        return left_lr + progress * (right_lr - left_lr)
+def _eval_rule(rule: LrSchedule, step: float) -> jnp.ndarray:
+    rel = step - rule.starting_step
+    lrs = rule.lr
 
-    return schedule
+    period = sum(rule.duration_steps)
+    if not rule.loop and rel >= period:
+        return jnp.asarray(lrs[-1], dtype=jnp.float32)
+    rel = rel % period
+
+    acc = 0.0
+    for i, d in enumerate(rule.duration_steps):
+        if d == 0:
+            continue
+        if rel < acc + d:
+            a = lrs[i]
+            k = (
+                rule.transition[i]
+                if i < len(rule.transition)
+                else LrSchedule.Transition.CONSTANT
+            )
+            t = max(0.0, min(1.0, (rel - acc) / d))
+            b = lrs[i + 1] if i + 1 < len(lrs) else a
+            return jnp.asarray(_interp(a, b, t, k), dtype=jnp.float32)
+        acc += d
+
+    assert False, "Unreachable: rel did not fall into any duration interval."
 
 
 def _make_nadamw_weight_decay_mask(
@@ -76,16 +82,14 @@ def _make_nadamw_weight_decay_mask(
 
 
 def make_lr_schedule(config: OptimizerConfig) -> optax.Schedule:
-    if config.HasField("constant_lr"):
-        return optax.constant_schedule(config.constant_lr.lr)
-    elif config.HasField("linear_warmup_lr"):
-        return _make_linear_warmup_schedule(config.linear_warmup_lr)
-    else:
-        raise ValueError(
-            "Unsupported learning rate schedule: {}".format(
-                config.WhichOneof("lr_schedule")
-            )
-        )
+    rules = list(config.lr_schedule)
+
+    def schedule(count: jnp.ndarray) -> jnp.ndarray:
+        step = float(jnp.asarray(count, dtype=jnp.float32))
+        rule = _pick_rule(rules, step)
+        return _eval_rule(rule, step)
+
+    return schedule
 
 
 def make_gradient_transformation(
