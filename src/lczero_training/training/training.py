@@ -107,6 +107,7 @@ class Training:
 
             grad_fn = nnx.value_and_grad(mean_loss_for_grad, has_aux=True)
             (mean_loss, unweighted_losses), mean_grads = grad_fn(model, batch)
+            grad_norm = optax.global_norm(mean_grads)
 
             assert jit_state.opt_state is not None
             updates, new_opt_state = optimizer_tx.update(
@@ -126,6 +127,7 @@ class Training:
             metrics = {
                 "loss": mean_loss,
                 "unweighted_losses": mean_unweighted,
+                "grad_norm": grad_norm,
             }
             return new_jit_state, metrics
 
@@ -161,9 +163,10 @@ class Training:
             )
             loss = metrics["loss"]
             unweighted_losses = metrics["unweighted_losses"]
+            grad_norm = metrics["grad_norm"]
             logger.info(
                 f"Step {jit_state.step}, Loss: {loss}, Unweighted losses:"
-                f" {unweighted_losses}"
+                f" {unweighted_losses}, Grad norm: {grad_norm}"
             )
         return jit_state
 
