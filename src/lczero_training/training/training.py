@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from functools import partial
-from typing import Callable, Dict, Generator, Tuple, cast
+from typing import Any, Callable, Dict, Generator, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -42,7 +42,7 @@ class Training:
     optimizer_tx: optax.GradientTransformation
     train_step: Callable[
         [optax.GradientTransformation, JitTrainingState, dict],
-        Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+        Tuple[JitTrainingState, Dict[str, Any]],
     ]
 
     def __init__(
@@ -76,7 +76,7 @@ class Training:
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
             batch: dict,
-        ) -> Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]]:
+        ) -> Tuple[JitTrainingState, Dict[str, Any]]:
             model = nnx.merge(graphdef, jit_state.model_state)
 
             def loss_for_grad(
@@ -123,12 +123,16 @@ class Training:
             )
 
             mean_unweighted = tree_util.tree_map(jnp.mean, unweighted_losses)
-            return new_jit_state, (mean_loss, mean_unweighted)
+            metrics = {
+                "loss": mean_loss,
+                "unweighted_losses": mean_unweighted,
+            }
+            return new_jit_state, metrics
 
         self.train_step = cast(
             Callable[
                 [optax.GradientTransformation, JitTrainingState, dict],
-                Tuple[JitTrainingState, Tuple[jax.Array, Dict[str, jax.Array]]],
+                Tuple[JitTrainingState, Dict[str, Any]],
             ],
             _step,
         )
@@ -145,7 +149,7 @@ class Training:
             batch = next(datagen)
             b_inputs, b_policy, b_values, _, b_movesleft = batch
             logger.info("Fetched batch from dataloader")
-            jit_state, (loss, unweighted_losses) = self.train_step(
+            jit_state, metrics = self.train_step(
                 self.optimizer_tx,
                 jit_state,
                 {
@@ -155,6 +159,8 @@ class Training:
                     "movesleft_targets": b_movesleft,
                 },
             )
+            loss = metrics["loss"]
+            unweighted_losses = metrics["unweighted_losses"]
             logger.info(
                 f"Step {jit_state.step}, Loss: {loss}, Unweighted losses:"
                 f" {unweighted_losses}"

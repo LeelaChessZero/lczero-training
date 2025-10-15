@@ -210,11 +210,13 @@ def overfit(
             ) -> None:
                 nonlocal jit_state
                 for _ in range(num_steps):
-                    jit_state, (loss, unweighted_losses) = training.train_step(
+                    jit_state, metrics = training.train_step(
                         optimizer_tx,
                         jit_state,
                         train_batch,
                     )
+                    loss = metrics["loss"]
+                    unweighted_losses = metrics["unweighted_losses"]
                     loss_value, unweighted_host = jax.device_get(
                         (loss, unweighted_losses)
                     )
@@ -252,11 +254,13 @@ def overfit(
         else:
             logger.info("Starting overfit loop for %d steps", num_steps)
             for _ in range(num_steps):
-                jit_state, (loss, unweighted_losses) = training.train_step(
+                jit_state, metrics = training.train_step(
                     optimizer_tx,
                     jit_state,
                     prepared_batch_a,
                 )
+                loss = metrics["loss"]
+                unweighted_losses = metrics["unweighted_losses"]
                 loss_value, unweighted_host = jax.device_get(
                     (loss, unweighted_losses)
                 )
