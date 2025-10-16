@@ -365,7 +365,7 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   EXPECT_EQ(chunk.frames.size(), 1);
   EXPECT_EQ(chunk.frames.front().version,
             static_cast<uint32_t>(chunk.index_within_sort_key));
-  EXPECT_EQ(chunk.reshuffle_count, 0u);
+  EXPECT_EQ(chunk.use_count, 0u);
 }
 
 TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
@@ -391,7 +391,7 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
 
   EXPECT_EQ(chunk.sort_key, "invalid_source");
   EXPECT_EQ(chunk.index_within_sort_key, 1);
-  EXPECT_EQ(chunk.reshuffle_count, 0u);
+  EXPECT_EQ(chunk.use_count, 0u);
   ASSERT_EQ(chunk.frames.size(), 1);
   EXPECT_EQ(chunk.frames.front().version, 42);
 
@@ -549,7 +549,7 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   struct ChunkRecord {
     std::string sort_key;
     size_t index;
-    uint32_t reshuffle_count;
+    uint32_t use_count;
   };
   std::vector<ChunkRecord> all_chunks_received;
 
@@ -558,15 +558,15 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
     output_queue->WaitForSizeAtLeast(1);
     auto chunk = output_queue->Get();
     all_chunks_received.push_back(
-        {chunk.sort_key, chunk.index_within_sort_key, chunk.reshuffle_count});
+        {chunk.sort_key, chunk.index_within_sort_key, chunk.use_count});
   }
 
   std::set<std::pair<std::string, size_t>> unique_chunks;
-  bool seen_reshuffle = false;
+  bool seen_reuse = false;
   for (const auto& record : all_chunks_received) {
     unique_chunks.emplace(record.sort_key, record.index);
-    if (record.reshuffle_count > 0) {
-      seen_reshuffle = true;
+    if (record.use_count > 0) {
+      seen_reuse = true;
     }
   }
 
@@ -585,8 +585,52 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   EXPECT_GT(all_chunks_received.size(), 3)
       << "Should get more than 3 chunks total due to shuffler reset, got "
       << all_chunks_received.size() << " chunks";
-  EXPECT_TRUE(seen_reshuffle)
-      << "Expect at least one chunk to report a reshuffle count";
+  EXPECT_TRUE(seen_reuse)
+      << "Expect at least one chunk to report a reuse count";
+}
+
+TEST_F(ShufflingChunkPoolTest, HanseMetrics_NoRejection_CacheAndReshuffles) {
+  // Single chunk so we will continually reuse the same chunk.
+  AddMockChunkSourceToQueue("source1", 1);
+  MarkInitialScanComplete();
+
+  auto config = MakeConfig(1, /*startup_threads=*/1, /*indexing_threads=*/1,
+                           /*loading_threads=*/1, /*queue_capacity=*/100);
+  // Enable Hanse sampling with p == 1 to avoid rejections.
+  config.set_hanse_sampling_threshold(1);
+
+  ShufflingChunkPool pool(config, StageListForInput());
+  pool.Start();
+
+  auto* output_queue = pool.output();
+  // Wait for multiple outputs to exercise cache hits and reshuffles.
+  output_queue->WaitForSizeAtLeast(3);
+  // Drain a few items.
+  for (int i = 0; i < 3; ++i) {
+    auto chunk = output_queue->Get();
+    EXPECT_EQ(chunk.frames.size(), 1u);
+  }
+
+  // Close input to avoid lingering.
+  CloseInputQueue();
+
+  // Flush metrics and validate Hanse counters and reshuffles.
+  auto metrics = pool.FlushMetrics();
+  uint64_t cache_hits = 0, cache_misses = 0, rejected = 0, reshuffles = 0;
+  for (const auto& m : metrics.count_metrics()) {
+    if (m.name() == "hanse_cache_hits") cache_hits = m.count();
+    if (m.name() == "hanse_cache_misses") cache_misses = m.count();
+    if (m.name() == "hanse_rejected") rejected = m.count();
+    if (m.name() == "reshuffles") reshuffles = m.count();
+  }
+
+  // First access computes and caches num_records => 1 miss, then hits.
+  EXPECT_EQ(cache_misses, 1u);
+  EXPECT_GE(cache_hits, 1u);
+  // With threshold=1 and one frame, p = 1 => no rejections.
+  EXPECT_EQ(rejected, 0u);
+  // Single chunk repeatedly consumed forces reshuffles.
+  EXPECT_GT(reshuffles, 0u);
 }
 
 TEST_F(ShufflingChunkPoolTest, ExplicitClose) {

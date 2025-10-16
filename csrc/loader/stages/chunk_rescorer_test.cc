@@ -62,11 +62,11 @@ class ChunkRescorerTest : public ::testing::Test {
 
   TrainingChunk MakeChunk(std::vector<V6TrainingData> frames,
                           std::string sort_key = "alpha", size_t index = 3,
-                          uint32_t reshuffle = 7) {
+                          uint32_t use = 7) {
     TrainingChunk chunk;
     chunk.sort_key = std::move(sort_key);
     chunk.index_within_sort_key = index;
-    chunk.reshuffle_count = reshuffle;
+    chunk.use_count = use;
     chunk.frames = std::move(frames);
     return chunk;
   }
@@ -93,7 +93,7 @@ TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
   EXPECT_FLOAT_EQ(output_chunk.frames[0].result_q, config_.dist_temp());
   EXPECT_EQ(output_chunk.sort_key, "alpha");
   EXPECT_EQ(output_chunk.index_within_sort_key, 3u);
-  EXPECT_EQ(output_chunk.reshuffle_count, 7u);
+  EXPECT_EQ(output_chunk.use_count, 7u);
 
   rescorer.Stop();
 }

@@ -125,9 +125,9 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
 
       absl::BitGen gen(
           std::seed_seq{run_seed_, static_cast<uint32_t>(chunk.global_index)});
-      std::vector<uint32_t> positions = PickRandomPositions(
-          static_cast<int32_t>(chunk.frames.size()), position_sampling_rate_,
-          chunk.reshuffle_count, gen);
+      std::vector<uint32_t> positions =
+          PickRandomPositions(static_cast<int32_t>(chunk.frames.size()),
+                              position_sampling_rate_, chunk.use_count, gen);
 
       for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);
