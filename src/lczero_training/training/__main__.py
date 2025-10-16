@@ -127,6 +127,23 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         help="Multiplier applied to the learning rate after each step.",
     )
     tune_lr_parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=0,
+        help=(
+            "Optional number of warmup steps to run at a fixed learning "
+            "rate before the exponential sweep."
+        ),
+    )
+    tune_lr_parser.add_argument(
+        "--warmup-lr",
+        type=float,
+        help=(
+            "Learning rate to use during warmup steps. Required when "
+            "--warmup-steps > 0."
+        ),
+    )
+    tune_lr_parser.add_argument(
         "--csv-output",
         type=str,
         help="Optional path to write CSV results (lr, loss).",
@@ -293,6 +310,8 @@ def run(args: argparse.Namespace) -> None:
             start_lr=args.start_lr,
             num_steps=args.num_steps,
             multiplier=getattr(args, "multiplier", 1.01),
+            warmup_steps=getattr(args, "warmup_steps", 0),
+            warmup_lr=getattr(args, "warmup_lr", None),
             csv_output=getattr(args, "csv_output", None),
             plot_output=getattr(args, "plot_output", None),
             num_test_batches=getattr(args, "num_test_batches", 1),
