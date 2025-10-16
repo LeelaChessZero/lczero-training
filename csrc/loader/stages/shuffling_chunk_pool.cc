@@ -278,81 +278,26 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   }
 }
 
+struct ShufflingChunkPool::ChunkData {
+  std::string data;
+  std::string sort_key;
+  size_t local_index = 0;
+  size_t global_index = 0;
+  uint32_t reshuffle_count = 0;
+  ChunkSourceItem* source_item = nullptr;
+};
+
 std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
-  struct ChunkData {
-    std::string data;
-    std::string sort_key;
-    size_t local_index = 0;
-    size_t global_index = 0;
-    uint32_t reshuffle_count = 0;
-  };
-  enum class ChunkStatus { kOk, kRetry, kEnd };
-
-  auto get_chunk_info = [&](ChunkData& out_chunk_data) -> ChunkStatus {
-    absl::MutexLock lock(&chunk_sources_mutex_);
-    std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
-
-    if (!chunk_index && !chunk_sources_.empty()) {
-      size_t total_chunks = chunk_sources_.back().start_chunk_index +
-                            chunk_sources_.back().source->GetChunkCount();
-      size_t lower_bound = total_chunks > chunk_pool_size_
-                               ? total_chunks - chunk_pool_size_
-                               : chunk_sources_.front().start_chunk_index;
-      stream_shuffler_.Reset(lower_bound, total_chunks);
-      for (auto& item : chunk_sources_) ++item.reshuffle_count;
-      chunk_index = stream_shuffler_.GetNextItem();
-    }
-
-    if (!chunk_index) return ChunkStatus::kEnd;
-
-    auto it =
-        absl::c_lower_bound(chunk_sources_, *chunk_index,
-                            [](const auto& source_item, size_t chunk_idx) {
-                              return source_item.start_chunk_index +
-                                         source_item.source->GetChunkCount() <=
-                                     chunk_idx;
-                            });
-
-    if (ABSL_PREDICT_FALSE(it == chunk_sources_.end() ||
-                           *chunk_index < it->start_chunk_index)) {
-      LOG(WARNING) << "Chunk index " << *chunk_index
-                   << " out of range for available chunk sources.";
-      return ChunkStatus::kRetry;
-    }
-
-    size_t local_index = *chunk_index - it->start_chunk_index;
-    if (it->dropped_chunks.contains(local_index)) {
-      return ChunkStatus::kRetry;
-    }
-
-    std::optional<std::string> chunk_data =
-        it->source->GetChunkData(local_index);
-
-    if (!chunk_data || (chunk_data->size() % sizeof(FrameType) != 0)) {
-      if (chunk_data) {
-        LOG(WARNING) << "Chunk size " << chunk_data->size()
-                     << " is not a multiple of V6TrainingData size "
-                     << sizeof(FrameType) << ", skipping chunk from sort key "
-                     << it->source->GetChunkSortKey() << " at index "
-                     << local_index;
-      }
-      it->dropped_chunks.insert(local_index);
-      dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
-      return ChunkStatus::kRetry;
-    }
-
-    out_chunk_data.data = std::move(*chunk_data);
-    out_chunk_data.sort_key = it->source->GetChunkSortKey();
-    out_chunk_data.reshuffle_count = it->reshuffle_count;
-    out_chunk_data.global_index = *chunk_index;
-    out_chunk_data.local_index = local_index;
-
-    return ChunkStatus::kOk;
-  };
-
   while (true) {
     ChunkData chunk_data;
-    ChunkStatus status = get_chunk_info(chunk_data);
+    ChunkStatus status;
+    {
+      absl::MutexLock lock(&chunk_sources_mutex_);
+      status = GetChunkInfo(chunk_data);
+      if (status == ChunkStatus::kOk) {
+        status = LoadChunkData(chunk_data);
+      }
+    }
 
     if (status == ChunkStatus::kRetry) continue;
     if (status == ChunkStatus::kEnd) return std::nullopt;
@@ -371,6 +316,73 @@ std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
 
     return chunk;
   }
+}
+
+ShufflingChunkPool::ChunkStatus ShufflingChunkPool::LoadChunkData(
+    ChunkData& chunk_data) {
+  std::optional<std::string> data =
+      chunk_data.source_item->source->GetChunkData(chunk_data.local_index);
+
+  if (!data || (data->size() % sizeof(FrameType) != 0)) {
+    if (data) {
+      LOG(WARNING) << "Chunk size " << data->size()
+                   << " is not a multiple of V6TrainingData size "
+                   << sizeof(FrameType) << ", skipping chunk from sort key "
+                   << chunk_data.source_item->source->GetChunkSortKey()
+                   << " at index " << chunk_data.local_index;
+    }
+    chunk_data.source_item->dropped_chunks.insert(chunk_data.local_index);
+    dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
+    return ChunkStatus::kRetry;
+  }
+
+  chunk_data.data = std::move(*data);
+  return ChunkStatus::kOk;
+}
+
+ShufflingChunkPool::ChunkStatus ShufflingChunkPool::GetChunkInfo(
+    ChunkData& out_chunk_data) {
+  std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
+
+  if (!chunk_index && !chunk_sources_.empty()) {
+    size_t total_chunks = chunk_sources_.back().start_chunk_index +
+                          chunk_sources_.back().source->GetChunkCount();
+    size_t lower_bound = total_chunks > chunk_pool_size_
+                             ? total_chunks - chunk_pool_size_
+                             : chunk_sources_.front().start_chunk_index;
+    stream_shuffler_.Reset(lower_bound, total_chunks);
+    for (auto& item : chunk_sources_) ++item.reshuffle_count;
+    chunk_index = stream_shuffler_.GetNextItem();
+  }
+
+  if (!chunk_index) return ChunkStatus::kEnd;
+
+  auto it =
+      absl::c_lower_bound(chunk_sources_, *chunk_index,
+                          [](const auto& source_item, size_t chunk_idx) {
+                            return source_item.start_chunk_index +
+                                       source_item.source->GetChunkCount() <=
+                                   chunk_idx;
+                          });
+
+  if (ABSL_PREDICT_FALSE(it == chunk_sources_.end() ||
+                         *chunk_index < it->start_chunk_index)) {
+    LOG(WARNING) << "Chunk index " << *chunk_index
+                 << " out of range for available chunk sources.";
+    return ChunkStatus::kRetry;
+  }
+
+  out_chunk_data.local_index = *chunk_index - it->start_chunk_index;
+  if (it->dropped_chunks.contains(out_chunk_data.local_index)) {
+    return ChunkStatus::kRetry;
+  }
+
+  out_chunk_data.source_item = &(*it);
+  out_chunk_data.sort_key = it->source->GetChunkSortKey();
+  out_chunk_data.reshuffle_count = it->reshuffle_count;
+  out_chunk_data.global_index = *chunk_index;
+
+  return ChunkStatus::kOk;
 }
 
 void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)

@@ -77,6 +77,14 @@ class ShufflingChunkPool
   std::optional<TrainingChunk> GetNextChunkData()
       ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
 
+  enum class ChunkStatus { kOk, kRetry, kEnd };
+  struct ChunkData;
+
+  ChunkStatus GetChunkInfo(ChunkData& out_chunk_data)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+  ChunkStatus LoadChunkData(ChunkData& chunk_data)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
   ThreadPool indexing_pool_;
