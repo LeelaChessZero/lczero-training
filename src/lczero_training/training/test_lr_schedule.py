@@ -127,12 +127,12 @@ def test_cosine() -> None:
     assert _val(sched, 4) == pytest.approx(1.0)
 
 
-def test_raises_when_before_any_rule() -> None:
+def test_before_first_rule_uses_earliest_first_lr() -> None:
     r = pb.LrSchedule(
         starting_step=5,
         duration_steps=[3],
         lr=[0.1, 0.2],
     )
     sched = _sched([r])
-    with pytest.raises(ValueError):
-        _ = _val(sched, 0)
+    # Before the first rule starts, schedule returns the first lr of earliest rule.
+    assert _val(sched, 0) == pytest.approx(0.1)
