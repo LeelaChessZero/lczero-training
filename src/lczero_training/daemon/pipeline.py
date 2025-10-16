@@ -136,11 +136,11 @@ class TrainingPipeline:
         logger.info("Restoring checkpoint")
         optimizer_config = self._config.training.optimizer
         max_grad_norm = getattr(self._config.training, "max_grad_norm", 0.0)
-        lr_sched = make_lr_schedule(self._config.training.lr_schedule)
+        self._lr_schedule = make_lr_schedule(self._config.training.lr_schedule)
         optimizer_tx = make_gradient_transformation(
             optimizer_config,
             max_grad_norm=max_grad_norm,
-            lr_schedule=lr_sched,
+            lr_schedule=self._lr_schedule,
         )
         jit_state = JitTrainingState(
             step=0,
@@ -166,7 +166,7 @@ class TrainingPipeline:
             optimizer_tx=make_gradient_transformation(
                 self._config.training.optimizer,
                 max_grad_norm=max_grad_norm,
-                lr_schedule=lr_sched,
+                lr_schedule=self._lr_schedule,
             ),
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),
@@ -285,6 +285,8 @@ class TrainingPipeline:
             logging.error(f"Failed to extract model metadata for upload: {e}")
 
     def _metrics_hook(self, step: int, metrics: dict) -> None:
+        # Append current learning rate from schedule to metrics.
+        metrics["lr"] = self._lr_schedule(step)
         if self._train_tensorboard_logger is not None:
             self._train_tensorboard_logger.log(step, metrics)
 
