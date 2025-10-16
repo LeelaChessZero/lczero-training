@@ -5,11 +5,12 @@ package lczero.training;
 // Configuration for training algorithm and parameters.
 message TrainingConfig {
   ScheduleConfig schedule = 1;
-  CheckpointConfig checkpoint = 2;
-  OptimizerConfig optimizer = 3;
-  LossWeightsConfig losses = 4;
+  repeated LrSchedule lr_schedule = 2;
+  CheckpointConfig checkpoint = 3;
+  OptimizerConfig optimizer = 4;
+  LossWeightsConfig losses = 5;
   // Maximum gradient norm; set to 0 or omit to disable clipping.
-  float max_grad_norm = 5;
+  float max_grad_norm = 6;
 }
 
 message ScheduleConfig {
@@ -21,8 +22,7 @@ message OptimizerConfig {
   oneof optimizer_type {
     NadamwOptimizerConfig nadamw = 1;
   }
-  repeated LrSchedule lr_schedule = 2;
-  float momentum = 3;
+  float momentum = 2;
 }
 
 message LrSchedule {

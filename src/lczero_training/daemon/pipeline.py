@@ -22,6 +22,7 @@ from lczero_training.convert.jax_to_leela import (
 )
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
 from lczero_training.training.tensorboard import TensorboardLogger
@@ -135,9 +136,11 @@ class TrainingPipeline:
         logger.info("Restoring checkpoint")
         optimizer_config = self._config.training.optimizer
         max_grad_norm = getattr(self._config.training, "max_grad_norm", 0.0)
+        lr_sched = make_lr_schedule(self._config.training.lr_schedule)
         optimizer_tx = make_gradient_transformation(
             optimizer_config,
             max_grad_norm=max_grad_norm,
+            lr_schedule=lr_sched,
         )
         jit_state = JitTrainingState(
             step=0,
@@ -163,6 +166,7 @@ class TrainingPipeline:
             optimizer_tx=make_gradient_transformation(
                 self._config.training.optimizer,
                 max_grad_norm=max_grad_norm,
+                lr_schedule=lr_sched,
             ),
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),

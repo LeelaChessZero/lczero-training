@@ -103,27 +103,27 @@ training {
     steps_per_network: 250
     chunks_per_network: 50000
   }
+  lr_schedule {
+    starting_step: 0
+    lr: 0.001
+  }
+  # lr_schedule {
+  #   starting_step: 0
+  #   duration_steps: 1500
+  #   duration_steps: 500
+  #   lr: 0.0           # Start at zero to warm up.
+  #   lr: 0.0005        # Ramp linearly from 0 to 0.0005.
+  #   lr: 0.0005        # Hold the same rate after warmup.
+  #   transition: LINEAR
+  #   # Missing transitions default to CONSTANT. The last duration may be
+  #   # omitted or set to 0 to keep the final rate indefinitely.
+  # }
   checkpoint {
     path: "/home/crem/tmp/2025-09/lc0_training/checkpoint"
     max_to_keep: 5
   }
   optimizer {
     nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
-    lr_schedule {
-      starting_step: 0
-      lr: 0.001
-    }
-    # lr_schedule {
-    #   starting_step: 0
-    #   duration_steps: 1500
-    #   duration_steps: 500
-    #   lr: 0.0           # Start at zero to warm up.
-    #   lr: 0.0005        # Ramp linearly from 0 to 0.0005.
-    #   lr: 0.0005        # Hold the same rate after warmup.
-    #   transition: LINEAR
-    #   # Missing transitions default to CONSTANT. The last duration may be
-    #   # omitted or set to 0 to keep the final rate indefinitely.
-    # }
   }
   max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {

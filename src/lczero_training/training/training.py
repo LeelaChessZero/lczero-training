@@ -24,6 +24,7 @@ from lczero_training.convert.jax_to_leela import (
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
 from proto.root_config_pb2 import RootConfig
@@ -220,9 +221,11 @@ def train(config_filename: str) -> None:
         replicated_sharding = jshard.NamedSharding(mesh, P())
         jit_state = jax.device_put(jit_state, replicated_sharding)
 
+    lr_sched = make_lr_schedule(config.training.lr_schedule)
     optimizer_tx = make_gradient_transformation(
         config.training.optimizer,
         max_grad_norm=getattr(config.training, "max_grad_norm", 0.0),
+        lr_schedule=lr_sched,
     )
     training = Training(
         optimizer_tx=optimizer_tx,

@@ -18,6 +18,7 @@ from jax.sharding import PartitionSpec as P
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import TrainingState
 from lczero_training.training.training import Training
@@ -110,9 +111,11 @@ def overfit(
         replicated_sharding = jshard.NamedSharding(mesh, P())
         jit_state = jax.device_put(jit_state, replicated_sharding)
 
+    lr_sched = make_lr_schedule(config.training.lr_schedule)
     optimizer_tx = make_gradient_transformation(
         config.training.optimizer,
         max_grad_norm=getattr(config.training, "max_grad_norm", 0.0),
+        lr_schedule=lr_sched,
     )
 
     loss_fn = LczeroLoss(config=config.training.losses)

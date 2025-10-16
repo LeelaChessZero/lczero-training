@@ -3,22 +3,14 @@ from typing import Callable, List
 import jax.numpy as jnp
 import pytest
 
-from lczero_training.training.optimizer import make_lr_schedule
+from lczero_training.training.lr_schedule import make_lr_schedule
 from proto import training_config_pb2 as pb
 
 
 def _sched(
     schedules: List[pb.LrSchedule],
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    cfg = pb.OptimizerConfig()
-    for s in schedules:
-        entry = cfg.lr_schedule.add()
-        entry.starting_step = s.starting_step
-        entry.duration_steps.extend(s.duration_steps)
-        entry.lr.extend(s.lr)
-        entry.transition.extend(s.transition)
-        entry.loop = s.loop
-    return make_lr_schedule(cfg)
+    return make_lr_schedule(schedules)
 
 
 def _val(s: Callable[[jnp.ndarray], jnp.ndarray], t: int | float) -> float:

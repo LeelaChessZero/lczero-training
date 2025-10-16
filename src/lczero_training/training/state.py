@@ -7,6 +7,7 @@ from flax import nnx
 from flax.struct import dataclass
 
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from proto.model_config_pb2 import ModelConfig
 from proto.training_config_pb2 import TrainingConfig
@@ -42,9 +43,11 @@ class TrainingState:
     ) -> "TrainingState":
         rngs = nnx.Rngs(params=42)
         model_state = nnx.state(LczeroModel(config=model_config, rngs=rngs))
+        lr_sched = make_lr_schedule(training_config.lr_schedule)
         opt_state = make_gradient_transformation(
             training_config.optimizer,
             max_grad_norm=getattr(training_config, "max_grad_norm", 0.0),
+            lr_schedule=lr_sched,
         ).init(model_state)
         jit_state = JitTrainingState(
             step=0,
