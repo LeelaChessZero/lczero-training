@@ -142,10 +142,13 @@ class TrainingPipeline:
             max_grad_norm=max_grad_norm,
             lr_schedule=self._lr_schedule,
         )
+        model_state = nnx.state(self._model)
         jit_state = JitTrainingState(
             step=0,
-            model_state=nnx.state(self._model),
-            opt_state=optimizer_tx.init(nnx.state(self._model)),
+            model_state=model_state,
+            opt_state=optimizer_tx.init(model_state),
+            swa_state=model_state,
+            num_averages=0.0,
         )
         empty_state = TrainingState(
             jit_state=jit_state,
@@ -170,6 +173,11 @@ class TrainingPipeline:
             ),
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),
+            swa_config=(
+                self._config.training.swa
+                if self._config.training.HasField("swa")
+                else None
+            ),
         )
         if (
             self._config.export.HasField("tensorboard_path")
@@ -230,10 +238,13 @@ class TrainingPipeline:
             num_heads=self._training_state.num_heads,
             license=None,
         )
-        net = jax_to_leela(
-            jax_weights=self._training_state.jit_state.model_state,
-            export_options=options,
+        export_state = (
+            self._training_state.jit_state.swa_state
+            if self._config.export.export_swa_model
+            else self._training_state.jit_state.model_state
         )
+        assert isinstance(export_state, nnx.State)
+        net = jax_to_leela(jax_weights=export_state, export_options=options)
         logging.info(f"Writing model to {export_filename}")
         os.makedirs(self._config.export.path, exist_ok=True)
         with gzip.open(export_filename, "wb") as f:

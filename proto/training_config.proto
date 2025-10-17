@@ -11,6 +11,9 @@ message TrainingConfig {
   LossWeightsConfig losses = 5;
   // Maximum gradient norm; set to 0 or omit to disable clipping.
   float max_grad_norm = 6;
+  // Stochastic Weight Averaging (SWA) configuration. When absent, SWA is
+  // disabled.
+  SWAConfig swa = 7;
 }
 
 message ScheduleConfig {
@@ -94,4 +97,12 @@ message ValueLossWeightsConfig {
 message MovesLeftLossWeightsConfig {
   string name = 1;
   float weight = 2;
+}
+
+// Stochastic Weight Averaging configuration.
+message SWAConfig {
+  // Number of steps between SWA updates.
+  uint32 period_steps = 1;
+  // Maximum effective number of model snapshots to average.
+  uint32 num_averages = 2;
 }
