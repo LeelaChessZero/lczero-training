@@ -83,8 +83,10 @@ message ChunkUnpackerConfig {
   optional uint64 threads = 2 [default = 1];
   // Probability of sampling each position within a chunk.
   optional float position_sampling_rate = 3 [default = 1.0];
+  // Number of positions to take from each chunk.
+  optional uint32 position_count = 4;
   // Size of the output queue.
-  optional uint64 queue_capacity = 4 [default = 16];
+  optional uint64 queue_capacity = 5 [default = 16];
 }
 
 // Configuration for shuffling frame sampler using reservoir sampling.

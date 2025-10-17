@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "absl/random/random.h"
+#include "absl/types/optional.h"
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
 #include "loader/stages/stage.h"
@@ -49,7 +50,8 @@ class ChunkUnpacker
 
   void Worker(ThreadContext* context);
 
-  const float position_sampling_rate_;
+  const absl::optional<float> position_sampling_rate_;
+  const absl::optional<uint32_t> position_count_;
   const uint32_t run_seed_;
   Queue<OutputType> output_queue_;
   // thread_contexts_ must be declared before thread_pool_ to ensure
@@ -59,8 +61,13 @@ class ChunkUnpacker
   std::atomic<bool> stop_requested_{false};
 };
 
-std::vector<uint32_t> PickRandomPositions(int32_t n, double p,
-                                          int32_t iteration, absl::BitGen& gen);
+std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
+                                           int32_t iteration,
+                                           absl::BitGen& gen);
+
+std::vector<uint32_t> PickFixedPositionCount(uint32_t n, uint32_t k,
+                                             absl::BitGen& gen,
+                                             uint32_t iteration);
 
 }  // namespace training
 }  // namespace lczero
