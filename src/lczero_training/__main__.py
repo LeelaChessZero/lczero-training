@@ -1,7 +1,7 @@
 import argparse
 import logging
-import sys
 
+from .commands import configure_root_logging
 from .convert import __main__ as convert_main
 from .daemon import __main__ as daemon_main
 from .training import __main__ as training_main
@@ -18,16 +18,7 @@ COMMANDS = [
     ("tui", "Launch the TUI application.", tui_main),
 ]
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(levelname).1s%(asctime)s.%(msecs)03d %(name)s "
-        "%(filename)s:%(lineno)d] %(message)s"
-    ),
-    datefmt="%m%d %H:%M:%S",
-    stream=sys.stderr,
-    force=True,
-)
+configure_root_logging(logging.INFO)
 
 parser = argparse.ArgumentParser(description="Leela Chess Zero training tools")
 subparsers = parser.add_subparsers(dest="command", required=True)

@@ -4,8 +4,8 @@
 
 import argparse
 import logging
-import sys
 
+from ..commands import configure_root_logging
 from .daemon import TrainingDaemon
 
 
@@ -19,16 +19,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format=(
-            "%(levelname).1s%(asctime)s.%(msecs)03d %(name)s "
-            "%(filename)s:%(lineno)d] %(message)s"
-        ),
-        datefmt="%m%d %H:%M:%S",
-        stream=sys.stderr,
-        force=True,
-    )
+    configure_root_logging(logging.INFO)
 
     parser = argparse.ArgumentParser()
     configure_parser(parser)
