@@ -6,7 +6,6 @@ from .eval import eval
 from .init import init
 from .migrate_checkpoint import migrate_checkpoint
 from .overfit import overfit
-from .training import train
 from .tune_lr import tune_lr
 
 
@@ -36,15 +35,7 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     )
     init_parser.set_defaults(func=run)
 
-    # Train command
-    train_parser = subparsers.add_parser("train", help="Start a training run.")
-    train_parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to the training config file.",
-    )
-    train_parser.set_defaults(func=run)
+    # Train command moved to console script `train` under commands.
 
     # Eval command
     eval_parser = subparsers.add_parser(
@@ -297,8 +288,6 @@ def run(args: argparse.Namespace) -> None:
             lczero_model=args.lczero_model,
             seed=args.seed,
         )
-    elif args.subcommand == "train":
-        train(config_filename=args.config)
     elif args.subcommand == "eval":
         eval(
             config_filename=args.config,

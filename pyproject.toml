@@ -35,6 +35,7 @@ training-init = "lczero_training.commands.training_init:main"
 training-eval = "lczero_training.commands.training_eval:main"
 tune-lr = "lczero_training.commands.tune_lr:main"
 migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
+train = "lczero_training.commands.train:main"
 
 [project.optional-dependencies]
 dev = [
