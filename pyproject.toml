@@ -29,6 +29,12 @@ dependencies = [
 [project.scripts]
 leela2jax = "lczero_training.commands.leela2jax:main"
 describe-training = "lczero_training.commands.describe_training:main"
+test-dataloader = "lczero_training.commands.test_dataloader:main"
+overfit = "lczero_training.commands.overfit:main"
+training-init = "lczero_training.commands.training_init:main"
+training-eval = "lczero_training.commands.training_eval:main"
+tune-lr = "lczero_training.commands.tune_lr:main"
+migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
 
 [project.optional-dependencies]
 dev = [
