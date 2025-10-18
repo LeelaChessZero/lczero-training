@@ -3,7 +3,6 @@ import logging
 
 from .commands import configure_root_logging
 from .convert import __main__ as convert_main
-from .daemon import __main__ as daemon_main
 from .training import __main__ as training_main
 from .tui import __main__ as tui_main
 
@@ -13,7 +12,6 @@ COMMANDS = [
         "Convert Leela networks between various formats.",
         convert_main,
     ),
-    ("daemon", "Run the training daemon for IPC communication.", daemon_main),
     ("training", "Training related commands.", training_main),
     ("tui", "Launch the TUI application.", tui_main),
 ]
