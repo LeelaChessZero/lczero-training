@@ -146,7 +146,10 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
     tune_lr_parser.add_argument(
         "--csv-output",
         type=str,
-        help="Optional path to write CSV results (lr, loss).",
+        help=(
+            "Optional path to write CSV results. Columns: lr, train_loss"
+            "[, val_loss]."
+        ),
     )
     tune_lr_parser.add_argument(
         "--plot-output",
@@ -157,7 +160,18 @@ def configure_parser(parser: argparse.ArgumentParser) -> None:
         "--num-test-batches",
         type=int,
         default=1,
-        help="Number of validation batches to use for computing the loss.",
+        help=(
+            "When --fixed-validation-batch is set, number of fixed validation"
+            " batches to average for validation loss."
+        ),
+    )
+    tune_lr_parser.add_argument(
+        "--fixed-validation-batch",
+        action="store_true",
+        help=(
+            "Also compute and report loss on a fixed validation batch"
+            " in addition to training batch loss."
+        ),
     )
     tune_lr_parser.set_defaults(func=run)
 
@@ -315,6 +329,9 @@ def run(args: argparse.Namespace) -> None:
             csv_output=getattr(args, "csv_output", None),
             plot_output=getattr(args, "plot_output", None),
             num_test_batches=getattr(args, "num_test_batches", 1),
+            fixed_validation_batch=getattr(
+                args, "fixed_validation_batch", False
+            ),
         )
     elif args.subcommand == "overfit":
         overfit(

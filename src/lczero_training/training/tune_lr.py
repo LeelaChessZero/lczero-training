@@ -96,7 +96,7 @@ def _plot_results(results: List[Tuple[float, float]], plot_output: str) -> None:
     plt.plot(lrs, losses, marker="o")
     plt.xscale("log")
     plt.xlabel("Learning Rate")
-    plt.ylabel("Validation Loss")
+    plt.ylabel("Loss")
     plt.title("Learning Rate Finder")
     plt.grid(True, which="both", linestyle="--")
     plt.tight_layout()
@@ -115,6 +115,7 @@ def tune_lr(
     csv_output: str | None = None,
     plot_output: str | None = None,
     num_test_batches: int = 1,
+    fixed_validation_batch: bool = False,
 ) -> None:
     if num_steps <= 0 or start_lr <= 0 or multiplier <= 0 or warmup_steps < 0:
         logger.error(
@@ -161,31 +162,39 @@ def tune_lr(
     )
 
     datagen = from_dataloader(make_dataloader(config.data_loader))
-    logger.info("Fetching %d validation batches", num_test_batches)
-    validation_batches = [
-        tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
-        for _ in range(num_test_batches)
-    ]
+
+    # Prepare fixed validation batches only if requested.
+    if fixed_validation_batch:
+        logger.info("Fetching %d validation batches", num_test_batches)
+        validation_batches = [
+            tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
+            for _ in range(num_test_batches)
+        ]
+    else:
+        validation_batches = []
 
     loss_fn = LczeroLoss(config=config.training.losses)
     eval_step = _make_eval_step(model, loss_fn)
 
     def avg_val_loss() -> float:
-        total_loss = sum(
-            float(eval_step(training_state.jit_state.model_state, vb))
-            for vb in validation_batches
-        )
-        return total_loss / num_test_batches
+        assert fixed_validation_batch
+        total_loss = 0.0
+        for vb in validation_batches:
+            total_loss += float(
+                eval_step(training_state.jit_state.model_state, vb)
+            )
+        return total_loss / float(num_test_batches)
 
     def train_one_step(
         training: Training, tx: optax.GradientTransformation
-    ) -> None:
+    ) -> float:
         nonlocal training_state
         batch = tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
-        new_jit_state, _ = training.train_step(
+        new_jit_state, metrics = training.train_step(
             tx, training_state.jit_state, batch
         )
         training_state = training_state.replace(jit_state=new_jit_state)
+        return float(metrics["loss"])  # training batch loss
 
     def run_phase(
         *,
@@ -193,7 +202,7 @@ def tune_lr(
         schedule: optax.Schedule,
         lr_at: Callable[[int], float],
         label: str,
-        on_result: Callable[[float, float], None],
+        on_result: Callable[[float, float, float | None], None],
     ) -> None:
         start_step = training_state.jit_state.step
 
@@ -209,10 +218,24 @@ def tune_lr(
             logger.info(
                 "%s step %d/%d at lr %.8f", label, i + 1, steps, current_lr
             )
-            train_one_step(training, tx)
-            val = avg_val_loss()
-            on_result(current_lr, val)
-            logger.info("%s loss at lr %.8f: %.6f", label, current_lr, val)
+            train_loss = train_one_step(training, tx)
+            val_loss = avg_val_loss() if fixed_validation_batch else None
+            on_result(current_lr, train_loss, val_loss)
+            if fixed_validation_batch:
+                logger.info(
+                    "%s at lr %.8f: train=%.6f, val=%.6f",
+                    label,
+                    current_lr,
+                    train_loss,
+                    cast(float, val_loss),
+                )
+            else:
+                logger.info(
+                    "%s train loss at lr %.8f: %.6f",
+                    label,
+                    current_lr,
+                    train_loss,
+                )
 
     results: List[Tuple[float, float]] = []
     with (
@@ -220,12 +243,20 @@ def tune_lr(
     ) as csv_file:
         writer = csv.writer(csv_file) if csv_file else None
         if writer:
-            writer.writerow(["lr", "loss"])
+            if fixed_validation_batch:
+                writer.writerow(["lr", "train_loss", "val_loss"])
+            else:
+                writer.writerow(["lr", "train_loss"])
 
-        def on_result(lr: float, loss: float) -> None:
-            results.append((lr, loss))
+        def on_result(
+            lr: float, train_loss: float, val_loss: float | None
+        ) -> None:
+            results.append((lr, train_loss))
             if writer and csv_file:
-                writer.writerow([lr, loss])
+                if fixed_validation_batch:
+                    writer.writerow([lr, train_loss, val_loss])
+                else:
+                    writer.writerow([lr, train_loss])
                 csv_file.flush()
 
         phases = []

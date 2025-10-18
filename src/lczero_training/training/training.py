@@ -235,7 +235,6 @@ class Training:
             logger.info(
                 f"Step {step_value} ({local_step}/{num_steps}), Loss: {loss}, "
                 f"Unweighted losses: {unweighted_losses}, Grad norm: {grad_norm}"
-                f" {unweighted_losses}, Grad norm: {grad_norm}"
             )
         return jit_state
 
