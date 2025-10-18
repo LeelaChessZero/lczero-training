@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.scripts]
-# Convert Leela weights to JAX state and/or model config
-lczero-leela2jax = "lczero_training.commands.leela2jax:main"
+leela2jax = "lczero_training.commands.leela2jax:main"
+describe-training = "lczero_training.commands.describe_training:main"
 
 [project.optional-dependencies]
 dev = [
