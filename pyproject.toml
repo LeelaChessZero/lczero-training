@@ -37,6 +37,7 @@ tune-lr = "lczero_training.commands.tune_lr:main"
 migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
 train = "lczero_training.commands.train:main"
 daemon = "lczero_training.commands.daemon:main"
+tui = "lczero_training.commands.tui:main"
 
 [project.optional-dependencies]
 dev = [
