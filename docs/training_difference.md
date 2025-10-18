@@ -10,7 +10,7 @@
    - TensorFlow clips gradients using `max_grad_norm` before applying updates (`tf/tfprocess.py:806-808`). JAX applies raw Optax updates (`src/lczero_training/training/training.py:111-117`), so large batches are no longer bounded.
 
 2. **Phase B – Training Schedule & Warmup** *(present on `daniel/tf-214`, now implemented)*
-   - The JAX training pipeline now honours piecewise-linear warmup schedules defined in `training.optimizer.linear_warmup_lr`, matching the TensorFlow helper's multi-stage curves (`tf/tfprocess.py:597-980`). Pretrained runs can anchor the schedule by setting the first step to the network's existing global step.
+   - The JAX training pipeline now honours piecewise warmup schedules defined with `training.optimizer.lr_schedule`, matching the TensorFlow helper's multi-stage curves (`tf/tfprocess.py:597-980`). Pretrained runs can anchor the schedule by setting the first `starting_step` to the network's existing global step.
 
 3. **Phase C – Policy Loss Objective (KL vs CE)** *(present on `daniel/tf-214`)*
    - The TensorFlow helper normalises targets, applies temperature, and subtracts target entropy, yielding `KL(target || policy)` (`tf/tfprocess.py:493-525`). The JAX loss keeps raw cross-entropy with masked negatives (`src/lczero_training/model/loss_function.py:70-84`), changing both gradient scale and objective.

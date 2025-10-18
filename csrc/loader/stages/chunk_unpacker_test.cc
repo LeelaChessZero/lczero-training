@@ -1,5 +1,6 @@
 #include "loader/stages/chunk_unpacker.h"
 
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -45,6 +46,7 @@ class ChunkUnpackerTest : public ::testing::Test {
     config_.set_threads(1);
     config_.set_queue_capacity(10);
     config_.set_input("source");
+    config_.set_position_sampling_rate(1.0f);
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -57,11 +59,11 @@ class ChunkUnpackerTest : public ::testing::Test {
 
   TrainingChunk MakeChunk(std::vector<V6TrainingData> frames,
                           std::string sort_key = "source", size_t index = 0,
-                          uint32_t reshuffle = 0) {
+                          uint32_t use = 0) {
     TrainingChunk chunk;
     chunk.sort_key = std::move(sort_key);
     chunk.index_within_sort_key = index;
-    chunk.reshuffle_count = reshuffle;
+    chunk.use_count = use;
     chunk.frames = std::move(frames);
     return chunk;
   }
@@ -184,37 +186,37 @@ TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
   EXPECT_THROW(unpacker.output()->Get(), QueueClosedException);
 }
 
-TEST(PickRandomPositionsTest, Deterministic) {
+TEST(PickSampledPositionsTest, Deterministic) {
   absl::BitGen gen1(absl::SeedSeq{42});
-  std::vector<uint32_t> result1 = PickRandomPositions(1000, 0.1, 5, gen1);
+  std::vector<uint32_t> result1 = PickSampledPositions(1000, 0.1, 5, gen1);
 
   absl::BitGen gen2(absl::SeedSeq{42});
-  std::vector<uint32_t> result2 = PickRandomPositions(1000, 0.1, 5, gen2);
+  std::vector<uint32_t> result2 = PickSampledPositions(1000, 0.1, 5, gen2);
 
   EXPECT_EQ(result1, result2);
 }
 
-TEST(PickRandomPositionsTest, FullBucketFirstRound) {
+TEST(PickSampledPositionsTest, FullBucketFirstRound) {
   absl::BitGen gen(absl::SeedSeq{42});
   const uint32_t n = 10000;
   const double p = 0.1;
-  std::vector<uint32_t> result = PickRandomPositions(n, p, 0, gen);
+  std::vector<uint32_t> result = PickSampledPositions(n, p, 0, gen);
   // Expect size to be around n*p.
   EXPECT_NEAR(result.size(), n * p, n * p * 0.25);
 }
 
-TEST(PickRandomPositionsTest, DisjointBuckets) {
+TEST(PickSampledPositionsTest, DisjointBuckets) {
   absl::BitGen gen(absl::SeedSeq{42});
   const uint32_t n = 1000;
   const double p = 0.1;
 
-  std::vector<uint32_t> bucket1 = PickRandomPositions(n, p, 0, gen);
+  std::vector<uint32_t> bucket1 = PickSampledPositions(n, p, 0, gen);
   absl::c_sort(bucket1);
 
   // The generator state is now changed. For the next bucket, we need a fresh
   // one with the same seed to test the logic for a different iteration.
   absl::BitGen gen2(absl::SeedSeq{42});
-  std::vector<uint32_t> bucket2 = PickRandomPositions(n, p, 1, gen2);
+  std::vector<uint32_t> bucket2 = PickSampledPositions(n, p, 1, gen2);
   absl::c_sort(bucket2);
 
   std::vector<uint32_t> intersection;
@@ -223,7 +225,7 @@ TEST(PickRandomPositionsTest, DisjointBuckets) {
   EXPECT_TRUE(intersection.empty());
 }
 
-TEST(PickRandomPositionsTest, PartialBucketElementsAreReturned) {
+TEST(PickSampledPositionsTest, PartialBucketElementsAreReturned) {
   absl::BitGen gen(absl::SeedSeq{42});
   const uint32_t n = 1000;
   const double p = 0.8;  // remainder 0.2
@@ -239,7 +241,7 @@ TEST(PickRandomPositionsTest, PartialBucketElementsAreReturned) {
   }
   absl::c_sort(expected_from_round1);
 
-  std::vector<uint32_t> result = PickRandomPositions(n, p, 1, gen);
+  std::vector<uint32_t> result = PickSampledPositions(n, p, 1, gen);
   absl::c_sort(result);
 
   // Check if all elements from round 1 are in the final result.
@@ -252,16 +254,51 @@ TEST(PickRandomPositionsTest, PartialBucketElementsAreReturned) {
   EXPECT_EQ(intersection.size(), expected_from_round1.size());
 }
 
-TEST(PickRandomPositionsTest, PartialBucketCompletedSize) {
+TEST(PickSampledPositionsTest, PartialBucketCompletedSize) {
   absl::BitGen gen(absl::SeedSeq{42});
   const uint32_t n = 10000;
   const double p = 0.8;  // remainder 0.2
 
-  std::vector<uint32_t> result = PickRandomPositions(n, p, 1, gen);
+  std::vector<uint32_t> result = PickSampledPositions(n, p, 1, gen);
 
   // Expect size to be around n*p.
   // This will fail due to incorrect probability calculation for completion.
   EXPECT_NEAR(result.size(), n * p, n * p * 0.25);
+}
+
+TEST(PickFixedPositionCountTest, Deterministic) {
+  absl::BitGen gen1(absl::SeedSeq{123});
+  std::vector<uint32_t> result1 = PickFixedPositionCount(100, 10, gen1, 4);
+
+  absl::BitGen gen2(absl::SeedSeq{123});
+  std::vector<uint32_t> result2 = PickFixedPositionCount(100, 10, gen2, 4);
+
+  EXPECT_EQ(result1, result2);
+}
+
+TEST(PickFixedPositionCountTest, ProvidesDisjointBlocks) {
+  absl::BitGen gen1(absl::SeedSeq{321});
+  std::vector<uint32_t> block1 = PickFixedPositionCount(90, 9, gen1, 0);
+  absl::c_sort(block1);
+
+  absl::BitGen gen2(absl::SeedSeq{321});
+  std::vector<uint32_t> block2 = PickFixedPositionCount(90, 9, gen2, 1);
+  absl::c_sort(block2);
+
+  std::vector<uint32_t> intersection;
+  absl::c_set_intersection(block1, block2, std::back_inserter(intersection));
+
+  EXPECT_TRUE(intersection.empty());
+  EXPECT_EQ(block1.size(), 9);
+  EXPECT_EQ(block2.size(), 9);
+}
+
+TEST(PickFixedPositionCountTest, HandlesLargeK) {
+  absl::BitGen gen(absl::SeedSeq{42});
+  std::vector<uint32_t> result = PickFixedPositionCount(5, 10, gen, 0);
+
+  absl::c_sort(result);
+  EXPECT_EQ(result, (std::vector<uint32_t>{0, 1, 2, 3, 4}));
 }
 
 }  // namespace training

@@ -40,6 +40,12 @@ message ShufflingChunkPoolConfig {
   optional uint64 chunk_loading_threads = 5 [default = 4];
   // Size of the output queue.
   optional uint64 queue_capacity = 6 [default = 16];
+  // When set to a positive value, enable Hanse single-position sampling.
+  // Probability to accept a chunk is
+  //   min(1.0, num_records / hanse_sampling_threshold) ** hanse_sampling_gamma
+  // where num_records is the number of frames in the chunk.
+  optional uint64 hanse_sampling_threshold = 7;  // by default, disabled.
+  optional double hanse_sampling_gamma = 8 [default = 1.0];
 }
 
 // Configuration for chunk rescorer that adjusts chunk metadata using
@@ -77,8 +83,10 @@ message ChunkUnpackerConfig {
   optional uint64 threads = 2 [default = 1];
   // Probability of sampling each position within a chunk.
   optional float position_sampling_rate = 3 [default = 1.0];
+  // Number of positions to take from each chunk.
+  optional uint32 position_count = 4;
   // Size of the output queue.
-  optional uint64 queue_capacity = 4 [default = 16];
+  optional uint64 queue_capacity = 5 [default = 16];
 }
 
 // Configuration for shuffling frame sampler using reservoir sampling.

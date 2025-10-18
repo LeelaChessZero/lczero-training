@@ -10,4 +10,6 @@ message ExportConfig {
   optional int32 upload_training_run = 2;
   // Directory path where TensorBoard event files will be written.
   optional string tensorboard_path = 3;
+  // Whether to export the SWA model instead of the main model.
+  optional bool export_swa_model = 4;
 }

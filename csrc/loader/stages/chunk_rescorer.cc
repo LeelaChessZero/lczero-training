@@ -114,7 +114,7 @@ void ChunkRescorer::Worker(ThreadContext* context) {
                    << exception.what() << "; sort_key=" << chunk.sort_key
                    << "; index_within_sort_key=" << chunk.index_within_sort_key
                    << "; global_index=" << chunk.global_index
-                   << "; reshuffle_count=" << chunk.reshuffle_count
+                   << "; use_count=" << chunk.use_count
                    << "; frame_count=" << chunk.frames.size();
         continue;
       }

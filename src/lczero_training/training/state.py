@@ -7,6 +7,7 @@ from flax import nnx
 from flax.struct import dataclass
 
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from proto.model_config_pb2 import ModelConfig
 from proto.training_config_pb2 import TrainingConfig
@@ -19,6 +20,11 @@ class JitTrainingState:
     step: int
     model_state: nnx.State
     opt_state: Optional[optax.OptState]
+    # SWA state mirrors model_state structure when enabled; None otherwise.
+    # Marked non-pytree to exclude from JIT/pjit inputs and device transfers.
+    swa_state: Optional[nnx.State]
+    # Effective number of model snapshots accumulated into SWA (can be fractional).
+    num_averages: float
 
     def replace(self, **changes: Any) -> "JitTrainingState":
         """Returns a new instance of the class with the specified changes."""
@@ -42,14 +48,18 @@ class TrainingState:
     ) -> "TrainingState":
         rngs = nnx.Rngs(params=42)
         model_state = nnx.state(LczeroModel(config=model_config, rngs=rngs))
+        lr_sched = make_lr_schedule(training_config.lr_schedule)
         opt_state = make_gradient_transformation(
             training_config.optimizer,
             max_grad_norm=getattr(training_config, "max_grad_norm", 0.0),
+            lr_schedule=lr_sched,
         ).init(model_state)
         jit_state = JitTrainingState(
             step=0,
             model_state=model_state,
             opt_state=opt_state,
+            swa_state=model_state,
+            num_averages=0.0,
         )
         return TrainingState(
             jit_state=jit_state,

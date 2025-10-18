@@ -7,9 +7,11 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/random/random.h"
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
@@ -55,7 +57,9 @@ class ShufflingChunkPool
     size_t start_chunk_index;
     std::unique_ptr<ChunkSource> source;
     absl::flat_hash_set<size_t> dropped_chunks;
-    uint32_t reshuffle_count = 0;
+    // Per-chunk counters and cached record counts.
+    std::vector<uint16_t> use_counts;
+    std::vector<uint16_t> num_records;
   };
 
   struct IndexingThreadContext {
@@ -76,6 +80,16 @@ class ShufflingChunkPool
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
   std::optional<TrainingChunk> GetNextChunkData()
       ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
+
+  enum class ChunkStatus { kOk, kRetry, kEnd };
+  struct ChunkData;
+
+  ChunkStatus GetChunkInfo(ChunkData& out_chunk_data)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+  bool LoadChunkData(ChunkData& chunk_data)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+  bool HanseAcceptAndMaybeLoad(ChunkData& chunk_data)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
 
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
@@ -99,6 +113,15 @@ class ShufflingChunkPool
   std::string anchor_ ABSL_GUARDED_BY(anchor_mutex_);
   std::atomic<int> chunks_since_anchor_{0};
   std::atomic<bool> stop_requested_{false};
+
+  // Thread-local RNG for Hanse sampling.
+  static thread_local absl::BitGen bitgen_;
+
+  // Metrics counters.
+  std::atomic<uint64_t> hanse_cache_hits_{0};
+  std::atomic<uint64_t> hanse_cache_misses_{0};
+  std::atomic<uint64_t> hanse_rejected_{0};
+  std::atomic<uint64_t> reshuffles_{0};
 };
 
 }  // namespace training

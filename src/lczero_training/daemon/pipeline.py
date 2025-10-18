@@ -22,6 +22,7 @@ from lczero_training.convert.jax_to_leela import (
 )
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
 from lczero_training.training.tensorboard import TensorboardLogger
@@ -135,14 +136,19 @@ class TrainingPipeline:
         logger.info("Restoring checkpoint")
         optimizer_config = self._config.training.optimizer
         max_grad_norm = getattr(self._config.training, "max_grad_norm", 0.0)
+        self._lr_schedule = make_lr_schedule(self._config.training.lr_schedule)
         optimizer_tx = make_gradient_transformation(
             optimizer_config,
             max_grad_norm=max_grad_norm,
+            lr_schedule=self._lr_schedule,
         )
+        model_state = nnx.state(self._model)
         jit_state = JitTrainingState(
             step=0,
-            model_state=nnx.state(self._model),
-            opt_state=optimizer_tx.init(nnx.state(self._model)),
+            model_state=model_state,
+            opt_state=optimizer_tx.init(model_state),
+            swa_state=model_state,
+            num_averages=0.0,
         )
         empty_state = TrainingState(
             jit_state=jit_state,
@@ -163,9 +169,15 @@ class TrainingPipeline:
             optimizer_tx=make_gradient_transformation(
                 self._config.training.optimizer,
                 max_grad_norm=max_grad_norm,
+                lr_schedule=self._lr_schedule,
             ),
             graphdef=nnx.graphdef(self._model),
             loss_fn=LczeroLoss(config=self._config.training.losses),
+            swa_config=(
+                self._config.training.swa
+                if self._config.training.HasField("swa")
+                else None
+            ),
         )
         if (
             self._config.export.HasField("tensorboard_path")
@@ -226,10 +238,13 @@ class TrainingPipeline:
             num_heads=self._training_state.num_heads,
             license=None,
         )
-        net = jax_to_leela(
-            jax_weights=self._training_state.jit_state.model_state,
-            export_options=options,
+        export_state = (
+            self._training_state.jit_state.swa_state
+            if self._config.export.export_swa_model
+            else self._training_state.jit_state.model_state
         )
+        assert isinstance(export_state, nnx.State)
+        net = jax_to_leela(jax_weights=export_state, export_options=options)
         logging.info(f"Writing model to {export_filename}")
         os.makedirs(self._config.export.path, exist_ok=True)
         with gzip.open(export_filename, "wb") as f:
@@ -281,6 +296,8 @@ class TrainingPipeline:
             logging.error(f"Failed to extract model metadata for upload: {e}")
 
     def _metrics_hook(self, step: int, metrics: dict) -> None:
+        # Append current learning rate from schedule to metrics.
+        metrics["lr"] = self._lr_schedule(step)
         if self._train_tensorboard_logger is not None:
             self._train_tensorboard_logger.log(step, metrics)
 

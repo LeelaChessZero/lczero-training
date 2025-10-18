@@ -2,6 +2,7 @@
 
 #include <absl/algorithm/container.h>
 #include <absl/container/flat_hash_set.h>
+#include <absl/log/check.h>
 #include <absl/log/log.h>
 #include <absl/random/random.h>
 #include <absl/random/seed_sequences.h>
@@ -24,9 +25,9 @@ namespace training {
 // samples are correlated to ensure all positions are selected exactly once over
 // `1/p` iterations. To sample disjoint subsets from the same set of positions,
 // `gen` must be seeded identically for each call with a different `iteration`.
-std::vector<uint32_t> PickRandomPositions(int32_t n, double p,
-                                          int32_t iteration,
-                                          absl::BitGen& gen) {
+std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
+                                           int32_t iteration,
+                                           absl::BitGen& gen) {
   assert(p > 0.0 && p <= 1.0);
   double carried_prob = p;
 
@@ -54,6 +55,33 @@ std::vector<uint32_t> PickRandomPositions(int32_t n, double p,
   }
 }
 
+// Deterministically partitions `n` positions into disjoint subsets of size
+// `k` and returns the subset for a given `iteration`. To obtain disjoint
+// subsets from the same set of positions, `gen` must be seeded identically
+// for each call with a different `iteration`.
+std::vector<uint32_t> PickFixedPositionCount(uint32_t n, uint32_t k,
+                                             absl::BitGen& gen,
+                                             uint32_t iteration) {
+  if (!n || !k) return {};
+  const uint32_t actual_k = std::min(n, k);
+  std::vector<uint32_t> v(n);
+  absl::c_iota(v, 0u);
+
+  std::shuffle(v.begin(), v.end(), gen);
+
+  const uint32_t per = n / actual_k;
+  const uint32_t cut = per * actual_k;
+  const uint32_t rem = n - cut;
+
+  for (uint32_t r = iteration / per; r--;) {
+    std::rotate(v.begin(), v.begin() + cut, v.end());
+    std::shuffle(v.begin() + rem, v.end(), gen);
+  }
+
+  const uint32_t off = (iteration % per) * actual_k;
+  return {v.begin() + off, v.begin() + off + actual_k};
+}
+
 namespace {
 
 uint32_t GenerateRunSeed() {
@@ -66,10 +94,21 @@ uint32_t GenerateRunSeed() {
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
                              const StageList& existing_stages)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
-      position_sampling_rate_(config.position_sampling_rate()),
+      position_sampling_rate_(
+          config.has_position_sampling_rate()
+              ? absl::make_optional(config.position_sampling_rate())
+              : absl::nullopt),
+      position_count_(config.has_position_count()
+                          ? absl::make_optional(config.position_count())
+                          : absl::nullopt),
       run_seed_(GenerateRunSeed()),
       output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
+  const bool has_rate = config.has_position_sampling_rate();
+  const bool has_count = config.has_position_count();
+  CHECK(has_rate != has_count)
+      << "Exactly one of position_sampling_rate or position_count must be "
+         "set.";
   LOG(INFO) << "Initializing ChunkUnpacker with " << config.threads()
             << " worker threads";
 
@@ -125,9 +164,18 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
 
       absl::BitGen gen(
           std::seed_seq{run_seed_, static_cast<uint32_t>(chunk.global_index)});
-      std::vector<uint32_t> positions = PickRandomPositions(
-          static_cast<int32_t>(chunk.frames.size()), position_sampling_rate_,
-          chunk.reshuffle_count, gen);
+      std::vector<uint32_t> positions;
+      if (position_sampling_rate_) {
+        positions = PickSampledPositions(
+            static_cast<int32_t>(chunk.frames.size()), *position_sampling_rate_,
+            chunk.use_count, gen);
+      } else {
+        const uint32_t frame_count = static_cast<uint32_t>(chunk.frames.size());
+        const uint32_t selection_count =
+            std::min(frame_count, *position_count_);
+        positions = PickFixedPositionCount(frame_count, selection_count, gen,
+                                           chunk.use_count);
+      }
 
       for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);

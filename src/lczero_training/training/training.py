@@ -24,8 +24,10 @@ from lczero_training.convert.jax_to_leela import (
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
+from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
+from proto import training_config_pb2 as training_config_pb2
 from proto.root_config_pb2 import RootConfig
 
 MetricsDict = Dict[str, Any]
@@ -47,14 +49,17 @@ class Training:
         [optax.GradientTransformation, JitTrainingState, dict],
         Tuple[JitTrainingState, MetricsDict],
     ]
+    _swa_config: Optional[training_config_pb2.SWAConfig]
 
     def __init__(
         self,
         optimizer_tx: optax.GradientTransformation,
         graphdef: nnx.GraphDef,
         loss_fn: LczeroLoss,
+        swa_config: Optional[training_config_pb2.SWAConfig] = None,
     ):
         self.optimizer_tx = optimizer_tx
+        self._swa_config = swa_config
 
         jit_kwargs: Dict[str, object] = {"static_argnames": ("optimizer_tx",)}
         if jax.device_count() > 1:
@@ -142,6 +147,57 @@ class Training:
             _step,
         )
 
+    def update_swa(
+        self, jit_state: JitTrainingState, weight: float
+    ) -> JitTrainingState:
+        """Update SWA using the provided weight for the current model.
+
+        Assumes `jit_state.swa_state` is initialized and `_swa_config` present.
+        """
+        logger.info(
+            "Updating SWA model, weight=%f, num_averages=%f",
+            weight,
+            jit_state.num_averages,
+        )
+        assert self._swa_config is not None
+        assert jit_state.swa_state is not None
+        assert weight > 0.0
+        max_num_averages = self._swa_config.num_averages
+        denom = jit_state.num_averages + weight
+        alpha = jit_state.num_averages / denom
+        beta = weight / denom
+        new_swa_state = tree_util.tree_map(
+            lambda a, b: alpha * a + beta * b,
+            jit_state.swa_state,
+            jit_state.model_state,
+        )
+        new_num_averages = min(
+            max_num_averages, jit_state.num_averages + weight
+        )
+        return jit_state.replace(
+            swa_state=new_swa_state, num_averages=new_num_averages
+        )
+
+    def maybe_update_swa(
+        self,
+        jit_state: JitTrainingState,
+        steps_completed: int,
+        total_steps: int,
+    ) -> JitTrainingState:
+        """Optionally update SWA based on configured schedule and epoch progress.
+
+        Returns the original jit_state when no update is scheduled.
+        """
+        assert self._swa_config is not None
+        period_steps = self._swa_config.period_steps
+        assert period_steps > 0
+        if steps_completed % period_steps == 0:
+            return self.update_swa(jit_state, 1.0)
+        if steps_completed == total_steps:
+            remainder = total_steps % period_steps
+            return self.update_swa(jit_state, remainder / period_steps)
+        return jit_state
+
     def run(
         self,
         jit_state: JitTrainingState,
@@ -150,7 +206,7 @@ class Training:
         metrics_hook: Optional[MetricsHook] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
-        for _ in range(num_steps):
+        for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
             batch = next(datagen)
             b_inputs, b_policy, b_values, _, b_movesleft = batch
@@ -168,14 +224,17 @@ class Training:
             step_value = int(
                 np.asarray(jax.device_get(jit_state.step)).reshape(())
             )
+            jit_state = self.maybe_update_swa(
+                jit_state, local_step + 1, num_steps
+            )
             if metrics_hook is not None:
                 metrics_hook(step_value, metrics)
             loss = metrics["loss"]
             unweighted_losses = metrics["unweighted_losses"]
             grad_norm = metrics["grad_norm"]
             logger.info(
-                f"Step {step_value}, Loss: {loss}, Unweighted losses:"
-                f" {unweighted_losses}, Grad norm: {grad_norm}"
+                f"Step {step_value} ({local_step}/{num_steps}), Loss: {loss}, "
+                f"Unweighted losses: {unweighted_losses}, Grad norm: {grad_norm}"
             )
         return jit_state
 
@@ -220,14 +279,19 @@ def train(config_filename: str) -> None:
         replicated_sharding = jshard.NamedSharding(mesh, P())
         jit_state = jax.device_put(jit_state, replicated_sharding)
 
+    lr_sched = make_lr_schedule(config.training.lr_schedule)
     optimizer_tx = make_gradient_transformation(
         config.training.optimizer,
         max_grad_norm=getattr(config.training, "max_grad_norm", 0.0),
+        lr_schedule=lr_sched,
     )
     training = Training(
         optimizer_tx=optimizer_tx,
         graphdef=model,
         loss_fn=LczeroLoss(config=config.training.losses),
+        swa_config=(
+            config.training.swa if config.training.HasField("swa") else None
+        ),
     )
     new_state = training.run(
         jit_state,
@@ -249,10 +313,13 @@ def train(config_filename: str) -> None:
             num_heads=training_state.num_heads,
             license=None,
         )
-        net = jax_to_leela(
-            jax_weights=new_state.model_state,
-            export_options=options,
+        export_state = (
+            new_state.swa_state
+            if config.export.export_swa_model
+            else new_state.model_state
         )
+        assert isinstance(export_state, nnx.State)
+        net = jax_to_leela(jax_weights=export_state, export_options=options)
         logging.info(f"Writing model to {export_filename}")
         os.makedirs(config.export.path, exist_ok=True)
         with gzip.open(export_filename, "wb") as f:
