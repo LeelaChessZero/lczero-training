@@ -14,7 +14,7 @@
 
 | CLI scope | Current entry | Underlying logic | Proposed new module | Style | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Convert weights | `python -m lczero_training convert leela2jax …` | `convert/leela_to_jax.py::leela_to_jax_files` | `commands/convert_leela2jax.py` | Wrapper | Only one subcommand; keep logic in `convert/` so tests remain unaffected. |
+| Convert weights | `python -m lczero_training convert leela2jax …` | `convert/leela_to_jax.py::leela_to_jax_files` | `commands/leela2jax.py` | Wrapper | Only one subcommand; keep logic in `convert/` so tests remain unaffected. |
 | Training init | `python -m lczero_training training init …` | `training/init.py::init` | `commands/training_init.py` | Wrapper | Heavy configuration/IO stays under `training/`. |
 | Training run | `python -m lczero_training training train …` | `training/training.py::train` | `commands/training_run.py` | Wrapper | Start/stop logic is central, migrate later in plan. |
 | Eval | `python -m lczero_training training eval …` | `training/eval.py::eval` | `commands/training_eval.py` | Wrapper | CLI arguments already map 1:1 to function inputs. |
@@ -55,39 +55,39 @@ and `just pre-commit`.
    shared helpers (logging, argument utilities) used by multiple commands.
 
 2. **Extract convert CLI**  
-   Move the `leela2jax` CLI into `commands/convert_leela2jax.py`, register the
+   Move the `leela2jax` CLI into `commands/leela2jax.py`, register the
    script, update docs, run `just format` and `just pre-commit`.
 
 3. **Extract describe CLI**  
-   Create `commands/training_describe.py` as a thin wrapper around
+   Create `commands/describe-training.py` as a thin wrapper around
    `training.describe`. Update docs/tests and run the formatting/pre-commit duo.
 
 4. **Extract data loader probe**  
-   Create `commands/training_test_dataloader.py`, wire arguments, update
+   Create `commands/test-dataloader.py`, wire arguments, update
    scripts/doc references, and finish with `just format` + `just pre-commit`.
 
 5. **Extract overfit CLI**  
-   Add `commands/training_overfit.py`, ensure argument parity, update docs,
+   Add `commands/overfit.py`, ensure argument parity, update docs,
    and run the required tooling.
 
 6. **Extract training init CLI**  
-   Introduce `commands/training_init.py`, migrate CLI options, adjust docs, run
+   Introduce `commands/training-init.py`, migrate CLI options, adjust docs, run
    `just format` and `just pre-commit`.
 
 7. **Extract evaluation CLI**  
-   Move the eval entrypoint into `commands/training_eval.py`, verify flag
+   Move the eval entrypoint into `commands/training-eval.py`, verify flag
    wiring, refresh docs, run the required tooling.
 
 8. **Extract learning-rate tuner**  
-   Create `commands/training_tune_lr.py`, update documentation, run
+   Create `commands/tune-lr.py`, update documentation, run
    `just format` and `just pre-commit`.
 
 9. **Extract checkpoint migration**  
-   Build `commands/training_migrate_checkpoint.py`, carefully mirror argument
+   Build `commands/migrate-checkpoint.py`, carefully mirror argument
    behaviour, update docs/tests, run the tooling.
 
 10. **Extract training run (main loop)**  
-    Add `commands/training_run.py`, ensure there is no behaviour change, update
+    Add `commands/train.py`, ensure there is no behaviour change, update
     references, run the tooling.
 
 11. **Extract daemon CLI**  

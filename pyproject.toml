@@ -26,6 +26,10 @@ dependencies = [
     "tensorboardx>=2.6.4",
 ]
 
+[project.scripts]
+# Convert Leela weights to JAX state and/or model config
+lczero-leela2jax = "lczero_training.commands.leela2jax:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
