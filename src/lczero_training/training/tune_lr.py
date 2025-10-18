@@ -114,8 +114,7 @@ def tune_lr(
     warmup_lr: float | None = None,
     csv_output: str | None = None,
     plot_output: str | None = None,
-    num_test_batches: int = 1,
-    fixed_validation_batch: bool = False,
+    num_test_batches: int = 0,
 ) -> None:
     if num_steps <= 0 or start_lr <= 0 or multiplier <= 0 or warmup_steps < 0:
         logger.error(
@@ -163,8 +162,9 @@ def tune_lr(
 
     datagen = from_dataloader(make_dataloader(config.data_loader))
 
-    # Prepare fixed validation batches only if requested.
-    if fixed_validation_batch:
+    # Prepare fixed validation batches only if requested (num_test_batches > 0).
+    use_validation = num_test_batches > 0
+    if use_validation:
         logger.info("Fetching %d validation batches", num_test_batches)
         validation_batches = [
             tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
@@ -177,7 +177,7 @@ def tune_lr(
     eval_step = _make_eval_step(model, loss_fn)
 
     def avg_val_loss() -> float:
-        assert fixed_validation_batch
+        assert use_validation
         total_loss = 0.0
         for vb in validation_batches:
             total_loss += float(
@@ -219,9 +219,9 @@ def tune_lr(
                 "%s step %d/%d at lr %.8f", label, i + 1, steps, current_lr
             )
             train_loss = train_one_step(training, tx)
-            val_loss = avg_val_loss() if fixed_validation_batch else None
+            val_loss = avg_val_loss() if use_validation else None
             on_result(current_lr, train_loss, val_loss)
-            if fixed_validation_batch:
+            if use_validation:
                 logger.info(
                     "%s at lr %.8f: train=%.6f, val=%.6f",
                     label,
@@ -243,7 +243,7 @@ def tune_lr(
     ) as csv_file:
         writer = csv.writer(csv_file) if csv_file else None
         if writer:
-            if fixed_validation_batch:
+            if use_validation:
                 writer.writerow(["lr", "train_loss", "val_loss"])
             else:
                 writer.writerow(["lr", "train_loss"])
@@ -253,7 +253,7 @@ def tune_lr(
         ) -> None:
             results.append((lr, train_loss))
             if writer and csv_file:
-                if fixed_validation_batch:
+                if use_validation:
                     writer.writerow([lr, train_loss, val_loss])
                 else:
                     writer.writerow([lr, train_loss])
