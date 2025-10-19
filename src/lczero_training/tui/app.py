@@ -4,6 +4,7 @@
 import argparse
 import signal
 import subprocess
+import sys
 from typing import Iterable, Optional
 
 import anyio
@@ -102,10 +103,9 @@ class TrainingTuiApp(App):
 
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""
-        # Create the daemon process via console script entrypoint.
-        # Requires running under an environment where the package scripts are on PATH.
+        # Create the daemon process via Python module execution to avoid PATH reliance.
         self._daemon_process = await anyio.open_process(
-            ["daemon"],
+            [sys.executable, "-m", "lczero_training.commands.daemon"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
