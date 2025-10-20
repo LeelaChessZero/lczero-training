@@ -5,8 +5,9 @@ may become incompatible with the new setup.
 
 For this, we provide a utility to help migrate checkpoints to the new setup.
 
-It's located in `src/lczero_training/training/migrate_checkpoint.py`, and is
-called from `src/lczero_training/training/__main__.py`.
+The underlying implementation lives in
+`src/lczero_training/training/migrate_checkpoint.py` and is exposed via the CLI
+command `migrate-checkpoint` registered in `pyproject.toml`.
 
 ## Command line arguments
 
@@ -121,9 +122,8 @@ If should be helpful to fix the rules.
 ## Implementation notes
 
 * There is `justfile`, e.g. `just build-proto` to build the protos.
-* We use `uv`. E.g. after it's implemented, test with:
+* We use `uv`. Example usage:
 
 ```bash
-uv run python -m lczero_training.training.migrate_checkpoint \
-    --config=~/tmp/lc0/config/overfit.textproto
+uv run migrate-checkpoint --config=~/tmp/lc0/config/overfit.textproto
 ```

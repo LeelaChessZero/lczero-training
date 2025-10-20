@@ -90,4 +90,4 @@ Generating trainingdata from pgn files is currently broken and has low priority,
 7. `meson compile -C build/release/`
 8. `ln -s -T ../../build/release/_lczero_training.cpython-311-x86_64-linux-gnu.so src/lczero_training/_lczero_training.so`
 
-14. Run it! `uv run python -m lczero_training --config docs/example.textproto`
+14. Run it! `uv run tui --config docs/example.textproto`

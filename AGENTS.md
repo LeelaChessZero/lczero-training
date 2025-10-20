@@ -39,7 +39,7 @@ in the `builddir/`.
     `absl::StrCat`, etc.)
 * We use `uv` for Python package and venv management, and to running the
   application.
-* Run TUI app: `uv run python -m lczero_training --config=<path_to_config>`
+* Run TUI app: `uv run tui --config=<path_to_config>`
 
 * Do not attempt to run TUI — it messes up the Agent interface and session has
   to be killed. Ask me to check it for you manually instead.

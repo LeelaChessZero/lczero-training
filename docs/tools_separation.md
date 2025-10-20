@@ -1,14 +1,9 @@
 # Tools Separation Plan
 
-## Current CLI Layout
-- `src/lczero_training/__main__.py` acts as a dispatcher with subcommands
-  (`convert`, `daemon`, `training`, `tui`), so running `python -m
-  lczero_training …` fans out into nested `__main__.py` modules.
-- Each package-level `__main__.py` (`convert`, `daemon`, `training`, `tui`)
-  repeats argument parsing and redispatches into implementation modules.
-- Nested subcommands inside `training.__main__` cover eight separate tools,
-  but the entry point has to be reached through `python -m
-  lczero_training training <subcommand>` today.
+## CLI Layout (post-extraction)
+- Commands are exposed via console scripts configured in `[project.scripts]`.
+- Use `uv run <command> …` to execute tools without relying on `python -m`.
+- Legacy `__main__.py` dispatchers have been removed.
 
 ## Commands To Extract
 

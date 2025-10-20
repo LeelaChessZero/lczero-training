@@ -7,3 +7,4 @@
 * [Training Tuple Format](training_tuple.md) — A description of the training
   tuple format used in the project. This is an interface between data loader and
   model training.
+* [Command-Line Tools](cli.md) — How to run the tools via `uv run`.
