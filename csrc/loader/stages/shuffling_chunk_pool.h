@@ -62,7 +62,7 @@ class ShufflingChunkPool
     std::vector<uint16_t> num_records;
   };
 
-  struct IndexingThreadContext {
+  struct SourceIngestionThreadContext {
     LoadMetricUpdater load_metric_updater;
   };
 
@@ -70,11 +70,10 @@ class ShufflingChunkPool
     LoadMetricUpdater load_metric_updater;
   };
 
-  std::vector<std::unique_ptr<ChunkSource>> InitializeChunkSources(
-      size_t startup_indexing_threads);
+  std::vector<std::unique_ptr<ChunkSource>> InitializeChunkSources();
   void ProcessInputFiles(
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources);
-  void IndexingWorker(IndexingThreadContext* context);
+  void SourceIngestionWorker(SourceIngestionThreadContext* context);
   void OutputWorker(ChunkLoadingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
@@ -93,7 +92,7 @@ class ShufflingChunkPool
 
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
-  ThreadPool indexing_pool_;
+  ThreadPool source_ingestion_pool_;
   ThreadPool chunk_loading_pool_;
   Queue<TrainingChunk> output_queue_;
 
@@ -104,7 +103,8 @@ class ShufflingChunkPool
       ABSL_GUARDED_BY(chunk_sources_mutex_);
   StreamShuffler stream_shuffler_ ABSL_GUARDED_BY(chunk_sources_mutex_);
   std::jthread initialization_thread_;
-  std::vector<std::unique_ptr<IndexingThreadContext>> indexing_thread_contexts_;
+  std::vector<std::unique_ptr<SourceIngestionThreadContext>>
+      source_ingestion_thread_contexts_;
   std::vector<std::unique_ptr<ChunkLoadingThreadContext>>
       chunk_loading_thread_contexts_;
 

@@ -16,12 +16,13 @@ class TarChunkSource : public ChunkSource {
   TarChunkSource(const std::filesystem::path& filename);
   ~TarChunkSource() override;
   std::string GetChunkSortKey() const override;
-  void Index() override;
   size_t GetChunkCount() const override;
   std::optional<std::string> GetChunkData(size_t index) override;
   std::optional<std::string> GetChunkPrefix(size_t index, size_t max_bytes);
 
  private:
+  // Performs one-time indexing during construction. Not part of the interface.
+  void Index();
   struct FileEntry {
     long int offset;
     long int size;

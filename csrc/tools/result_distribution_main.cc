@@ -113,7 +113,6 @@ ResultCounts CountResultsInTar(const fs::path& tar_path) {
   ResultCounts counts;
 
   TarChunkSource source(tar_path);
-  source.Index();
 
   const size_t chunk_count = source.GetChunkCount();
   for (size_t index = 0; index < chunk_count; ++index) {

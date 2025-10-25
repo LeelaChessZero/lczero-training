@@ -19,15 +19,11 @@ class ChunkSource {
   // Returns a sort key (e.g. filename or a timestamp).
   virtual std::string GetChunkSortKey() const = 0;
 
-  // Indexes the chunks in the source. This is called before any chunk data is
-  // requested.
-  virtual void Index() = 0;
-
-  // Returns the number of chunks in this source. Only called after Index().
+  // Returns the number of chunks in this source.
   virtual size_t GetChunkCount() const = 0;
 
-  // Returns the data for the chunk at the given index. Only called after
-  // Index(). Returns std::nullopt if the chunk could not be read.
+  // Returns the data for the chunk at the given index. Returns std::nullopt if
+  // the chunk could not be read.
   virtual std::optional<std::string> GetChunkData(size_t index) = 0;
 };
 

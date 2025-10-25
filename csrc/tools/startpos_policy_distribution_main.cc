@@ -90,7 +90,6 @@ void WriteRow(std::ostream& output, absl::string_view sort_key, size_t index,
 void ProcessTarFile(const fs::path& tar_path, std::ostream& output) {
   std::unique_ptr<ChunkSource> source =
       std::make_unique<TarChunkSource>(tar_path);
-  source->Index();
   const std::string sort_key = source->GetChunkSortKey();
 
   for (size_t i = 0, count = source->GetChunkCount(); i < count; ++i) {

@@ -32,7 +32,6 @@ class DebugChunkSource : public ChunkSource {
 
  private:
   std::string GetChunkSortKey() const override;
-  void Index() override;
   size_t GetChunkCount() const override;
   std::optional<std::string> GetChunkData(size_t index) override;
 

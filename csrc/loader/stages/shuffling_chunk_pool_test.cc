@@ -50,20 +50,9 @@ class MockChunkSource : public ChunkSource {
       : sort_key_(sort_key), chunk_count_(chunk_count) {}
 
   std::string GetChunkSortKey() const override { return sort_key_; }
-
-  void Index() override { indexed_ = true; }
-
-  size_t GetChunkCount() const override {
-    if (!indexed_) {
-      throw std::runtime_error("Index() must be called before GetChunkCount()");
-    }
-    return chunk_count_;
-  }
+  size_t GetChunkCount() const override { return chunk_count_; }
 
   std::optional<std::string> GetChunkData(size_t index) override {
-    if (!indexed_) {
-      throw std::runtime_error("Index() must be called before GetChunkData()");
-    }
     if (index >= chunk_count_) {
       throw std::out_of_range("Chunk index out of range");
     }
@@ -75,12 +64,9 @@ class MockChunkSource : public ChunkSource {
     return chunk;
   }
 
-  bool is_indexed() const { return indexed_; }
-
  private:
   std::string sort_key_;
   size_t chunk_count_;
-  bool indexed_ = false;
 };
 
 class InvalidChunkSource : public ChunkSource {
@@ -89,20 +75,9 @@ class InvalidChunkSource : public ChunkSource {
       : sort_key_(std::move(sort_key)) {}
 
   std::string GetChunkSortKey() const override { return sort_key_; }
-
-  void Index() override { indexed_ = true; }
-
-  size_t GetChunkCount() const override {
-    if (!indexed_) {
-      throw std::runtime_error("Index() must be called before GetChunkCount()");
-    }
-    return 2;
-  }
+  size_t GetChunkCount() const override { return 2; }
 
   std::optional<std::string> GetChunkData(size_t index) override {
-    if (!indexed_) {
-      throw std::runtime_error("Index() must be called before GetChunkData()");
-    }
     if (index >= 2) {
       throw std::out_of_range("Chunk index out of range");
     }
@@ -118,7 +93,6 @@ class InvalidChunkSource : public ChunkSource {
 
  private:
   std::string sort_key_;
-  bool indexed_ = false;
 };
 
 class ShufflingChunkPoolTest : public ::testing::Test {
@@ -164,14 +138,12 @@ class ShufflingChunkPoolTest : public ::testing::Test {
   }
 
   ShufflingChunkPoolConfig MakeConfig(int chunk_pool_size,
-                                      int startup_threads = 1,
-                                      int indexing_threads = 1,
+                                      int source_ingestion_threads = 1,
                                       int loading_threads = 1,
                                       int queue_capacity = 100) const {
     ShufflingChunkPoolConfig config;
     config.set_chunk_pool_size(chunk_pool_size);
-    config.set_startup_indexing_threads(startup_threads);
-    config.set_indexing_threads(indexing_threads);
+    config.set_source_ingestion_threads(source_ingestion_threads);
     config.set_chunk_loading_threads(loading_threads);
     config.set_queue_capacity(queue_capacity);
     SetInputProvider(&config);
@@ -373,7 +345,7 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
   input_producer_->Put(std::move(invalid_source));
   MarkInitialScanComplete();
 
-  auto config = MakeConfig(2, /*startup_threads=*/1, /*indexing_threads=*/1,
+  auto config = MakeConfig(2, /*source_ingestion_threads=*/1,
                            /*loading_threads=*/1, /*queue_capacity=*/10);
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
@@ -464,8 +436,7 @@ TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigDefaults) {
   config.set_chunk_pool_size(1000);
 
   EXPECT_EQ(config.chunk_pool_size(), 1000);
-  EXPECT_EQ(config.startup_indexing_threads(), 4);  // Default value
-  EXPECT_EQ(config.indexing_threads(), 4);          // Default value
+  EXPECT_EQ(config.source_ingestion_threads(), 1);  // Default value
   EXPECT_EQ(config.chunk_loading_threads(), 4);     // Default value
   EXPECT_EQ(config.queue_capacity(), 16);           // Default value
 }
@@ -473,14 +444,12 @@ TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigDefaults) {
 TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigCustomValues) {
   ShufflingChunkPoolConfig config;
   config.set_chunk_pool_size(500);
-  config.set_startup_indexing_threads(2);
-  config.set_indexing_threads(3);
+  config.set_source_ingestion_threads(3);
   config.set_chunk_loading_threads(4);
   config.set_queue_capacity(25);
 
   EXPECT_EQ(config.chunk_pool_size(), 500);
-  EXPECT_EQ(config.startup_indexing_threads(), 2);
-  EXPECT_EQ(config.indexing_threads(), 3);
+  EXPECT_EQ(config.source_ingestion_threads(), 3);
   EXPECT_EQ(config.chunk_loading_threads(), 4);
   EXPECT_EQ(config.queue_capacity(), 25);
 }
@@ -507,33 +476,12 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   });
 }
 
-TEST_F(ShufflingChunkPoolTest, MultipleInitialIndexingThreads) {
-  // Test with multiple indexing threads to ensure no crashes or hangs
-  AddMockChunkSourceToQueue("source1", 30);
-  AddMockChunkSourceToQueue("source2", 40);
-  AddMockChunkSourceToQueue("source3", 50);
-  MarkInitialScanComplete();
-
-  auto config = MakeConfig(100, /*startup_threads=*/3);
-
-  // Should work without hanging or crashing
-  EXPECT_NO_THROW({
-    ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
-
-    // Close input queue to stop input worker from waiting
-    CloseInputQueue();
-
-    auto* output_queue = shuffling_chunk_pool.output();
-    EXPECT_NE(output_queue, nullptr);
-  });
-}
-
 TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   // Create a small chunk source to quickly exhaust the shuffler
   AddMockChunkSourceToQueue("source1", 3);  // Only 3 chunks for faster testing
   MarkInitialScanComplete();
 
-  auto config = MakeConfig(3, /*startup_threads=*/1, /*indexing_threads=*/1,
+  auto config = MakeConfig(3, /*source_ingestion_threads=*/1,
                            /*loading_threads=*/1,
                            /*queue_capacity=*/100);  // Large enough
 
@@ -591,7 +539,7 @@ TEST_F(ShufflingChunkPoolTest, HanseMetrics_NoRejection_CacheAndReshuffles) {
   AddMockChunkSourceToQueue("source1", 1);
   MarkInitialScanComplete();
 
-  auto config = MakeConfig(1, /*startup_threads=*/1, /*indexing_threads=*/1,
+  auto config = MakeConfig(1, /*source_ingestion_threads=*/1,
                            /*loading_threads=*/1, /*queue_capacity=*/100);
   // Enable Hanse sampling with p == 1 to avoid rejections.
   config.set_hanse_sampling_threshold(1);
@@ -667,7 +615,7 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
   AddMockChunkSourceToQueue("source1", 15);
   MarkInitialScanComplete();
 
-  auto config = MakeConfig(15, /*startup_threads=*/1, /*indexing_threads=*/1,
+  auto config = MakeConfig(15, /*source_ingestion_threads=*/1,
                            /*loading_threads=*/2, /*queue_capacity=*/50);
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);

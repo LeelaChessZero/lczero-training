@@ -20,8 +20,6 @@ std::string DebugChunkSource::GetChunkSortKey() const {
   return absl::StrFormat("%08" PRIu64, id_);
 }
 
-void DebugChunkSource::Index() {}
-
 size_t DebugChunkSource::GetChunkCount() const {
   if (!cached_chunk_count_.has_value()) {
     std::mt19937_64 rng(id_);

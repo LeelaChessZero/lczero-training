@@ -25,8 +25,7 @@ data_loader {
     shuffling_chunk_pool {
       input: "chunk_source_loader"
       chunk_pool_size: 50000     # Shuffle buffer size (chunks in memory)
-      startup_indexing_threads: 4  # Threads for startup indexing
-      indexing_threads: 4          # Threads for ongoing indexing
+      source_ingestion_threads: 1  # Threads for ingesting new sources
       chunk_loading_threads: 4     # Threads for loading chunk data
       queue_capacity: 16           # Output queue for shuffled chunks
     }

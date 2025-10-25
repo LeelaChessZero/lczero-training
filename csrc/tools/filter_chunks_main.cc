@@ -148,7 +148,6 @@ void ProcessTar(const fs::path& tar_path, const fs::path& output_dir,
                 absl::Span<const uint64_t> expected_planes) {
   std::unique_ptr<ChunkSource> source =
       std::make_unique<TarChunkSource>(tar_path);
-  source->Index();
 
   const std::string base_name = tar_path.stem().string();
   size_t written_count = 0;

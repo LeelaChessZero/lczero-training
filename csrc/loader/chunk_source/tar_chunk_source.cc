@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <stdexcept>
 
@@ -112,13 +113,19 @@ TarChunkSource::TarChunkSource(const std::filesystem::path& filename)
     : file_(fopen(filename.string().c_str(), "rb")),
       filename_(filename.filename().string()) {
   if (!file_) throw std::runtime_error("Failed to open tar file");
+  // Perform indexing during construction.
+  Index();
 }
 
 TarChunkSource::~TarChunkSource() {
   if (file_) fclose(file_);
 }
 
+std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
+
 void TarChunkSource::Index() {
+  assert(files_.empty());
+
   while (true) {
     TarHeader header;
     if (fread(&header, sizeof(header), 1, file_) != 1) {
@@ -126,7 +133,7 @@ void TarChunkSource::Index() {
       break;
     }
 
-    if (header.name[0] == '\0') break;  // End of file
+    if (header.name[0] == '\0') break;  // End of file.
 
     switch (header.typeflag) {
       case '5':  // Directory
@@ -138,14 +145,14 @@ void TarChunkSource::Index() {
         continue;
     }
 
-    std::string_view filename(const_cast<const char*>(header.name.data()));
-    const std::filesystem::path filepath = std::filesystem::path(filename);
+    std::string_view fname(const_cast<const char*>(header.name.data()));
+    const std::filesystem::path filepath = std::filesystem::path(fname);
     const long int offset = ftell(file_);
     const long int size = ParseOctal(header.size);
     const long int new_offset = offset + (size + 511) / 512 * 512;
     fseek(file_, new_offset, SEEK_SET);
     if (new_offset != ftell(file_)) {
-      LOG(WARNING) << "Truncated tar file at " << filename
+      LOG(WARNING) << "Truncated tar file at " << fname
                    << ", expected size: " << size
                    << ", actual size: " << (new_offset - offset);
       break;
@@ -157,8 +164,6 @@ void TarChunkSource::Index() {
 
   LOG(INFO) << "Read " << files_.size() << " entries from " << filename_;
 }
-
-std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
 
 size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 

@@ -31,8 +31,6 @@ class ChunkSourceView : public ChunkSource {
     return source_->GetChunkSortKey();
   }
 
-  void Index() override { source_->Index(); }
-
   size_t GetChunkCount() const override { return indices_.size(); }
 
   std::optional<std::string> GetChunkData(size_t index) override {

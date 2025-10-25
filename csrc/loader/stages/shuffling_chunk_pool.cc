@@ -34,7 +34,8 @@ ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
           config, existing_stages),
       chunk_pool_size_(config.chunk_pool_size()),
       config_(config),
-      indexing_pool_(config.indexing_threads(), ThreadPoolOptions{}),
+      source_ingestion_pool_(config.source_ingestion_threads(),
+                             ThreadPoolOptions{}),
       chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}),
       output_queue_(config.queue_capacity()) {
   LOG(INFO) << "Initializing ShufflingChunkPool with pool size "
@@ -57,16 +58,17 @@ void ShufflingChunkPool::Start() {
       LOG(INFO) << "Starting ShufflingChunkPool with pool size "
                 << config_.chunk_pool_size();
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources =
-          InitializeChunkSources(config_.startup_indexing_threads());
+          InitializeChunkSources();
       ProcessInputFiles(std::move(uninitialized_sources));
 
       // Start input processing worker that continuously processes new files.
-      for (size_t i = 0; i < indexing_pool_.num_threads(); ++i) {
+      for (size_t i = 0; i < source_ingestion_pool_.num_threads(); ++i) {
         auto* context =
-            indexing_thread_contexts_
-                .emplace_back(std::make_unique<IndexingThreadContext>())
+            source_ingestion_thread_contexts_
+                .emplace_back(std::make_unique<SourceIngestionThreadContext>())
                 .get();
-        indexing_pool_.Enqueue([this, context]() { IndexingWorker(context); });
+        source_ingestion_pool_.Enqueue(
+            [this, context]() { SourceIngestionWorker(context); });
       }
 
       // Start output workers after everything is fully initialized.
@@ -104,15 +106,15 @@ void ShufflingChunkPool::Stop() {
     initialization_thread_.join();
   }
 
-  indexing_pool_.WaitAll();
+  source_ingestion_pool_.WaitAll();
   chunk_loading_pool_.WaitAll();
-  indexing_pool_.Shutdown();
+  source_ingestion_pool_.Shutdown();
   chunk_loading_pool_.Shutdown();
   LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 
 std::vector<std::unique_ptr<ChunkSource>>
-ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
+ShufflingChunkPool::InitializeChunkSources() {
   std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources;
 
   // Read from input queue until kInitialScanComplete.
@@ -145,10 +147,7 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   std::atomic<size_t> total_chunks = 0;
   size_t sources_to_keep = 0;
 
-  ThreadPool indexing_pool(startup_indexing_threads);
-
-  // Index sources ≈sequentially until we have enough chunks. It's fine to
-  // overshoot a bit due to multiple threads.
+  // Process sources sequentially until we have enough chunks.
   std::string current_anchor;
   {
     absl::MutexLock lock(&anchor_mutex_);
@@ -156,29 +155,25 @@ ShufflingChunkPool::InitializeChunkSources(size_t startup_indexing_threads) {
   }
 
   for (auto& source : uninitialized_sources) {
-    indexing_pool.WaitForAvailableThread();
     if (output_queue_.IsClosed()) {
-      LOG(INFO) << "Output queue closed, stopping indexing.";
+      LOG(INFO) << "Output queue closed, stopping source ingestion.";
       break;
     }
     if (total_chunks >= chunk_pool_size_) break;
 
-    indexing_pool.Enqueue([&source, &total_chunks, &current_anchor, this]() {
-      source->Index();
-      const size_t chunk_count = source->GetChunkCount();
-      total_chunks += chunk_count;
+    // Count chunks immediately; constructors have already prepared metadata.
+    const size_t chunk_count = source->GetChunkCount();
+    total_chunks += chunk_count;
 
-      // Count chunks since anchor during initial load.
-      if (source->GetChunkSortKey() > current_anchor) {
-        chunks_since_anchor_ += chunk_count;
-      }
+    // Count chunks since anchor during initial load.
+    if (source->GetChunkSortKey() > current_anchor) {
+      chunks_since_anchor_ += chunk_count;
+    }
 
-      LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load()
-                               << "; new: " << chunks_since_anchor_;
-    });
+    LOG_EVERY_N_SEC(INFO, 4) << "Loaded so far: " << total_chunks.load()
+                             << "; new: " << chunks_since_anchor_;
     ++sources_to_keep;
   }
-  indexing_pool.WaitAll();
 
   LOG(INFO) << "ShufflingChunkPool indexed " << total_chunks.load()
             << " chunk(s) across " << sources_to_keep
@@ -240,7 +235,8 @@ void ShufflingChunkPool::ProcessInputFiles(
   }
 }
 
-void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
+void ShufflingChunkPool::SourceIngestionWorker(
+    SourceIngestionThreadContext* context) {
   try {
     while (true) {
       auto chunk_source_with_phase = [&]() {
@@ -250,9 +246,8 @@ void ShufflingChunkPool::IndexingWorker(IndexingThreadContext* context) {
 
       if (chunk_source_with_phase.message_type ==
           FilePathProvider::MessageType::kFile) {
-        // Index the new chunk source.
+        // Ingest the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
-        source->Index();
         size_t chunk_count = source->GetChunkCount();
         chunks_since_anchor_ += chunk_count;
         absl::MutexLock lock(&chunk_sources_mutex_);
@@ -484,13 +479,13 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
   StageMetricProto stage_metric;
   stage_metric.set_stage_type("shuffling_chunk_pool");
 
-  // Aggregate indexing load metrics from all indexing threads.
-  LoadMetricProto indexing_load;
-  indexing_load.set_name("indexing");
-  for (const auto& context : indexing_thread_contexts_) {
-    UpdateFrom(indexing_load, context->load_metric_updater.FlushMetrics());
+  // Aggregate source ingestion load metrics from all ingestion threads.
+  LoadMetricProto ingestion_load;
+  ingestion_load.set_name("source_ingestion");
+  for (const auto& context : source_ingestion_thread_contexts_) {
+    UpdateFrom(ingestion_load, context->load_metric_updater.FlushMetrics());
   }
-  *stage_metric.add_load_metrics() = std::move(indexing_load);
+  *stage_metric.add_load_metrics() = std::move(ingestion_load);
 
   // Aggregate chunk loading load metrics from all chunk loading threads.
   LoadMetricProto chunk_loading_load;

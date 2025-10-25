@@ -32,10 +32,8 @@ message ShufflingChunkPoolConfig {
   optional string input = 1;
   // Size of the chunk shuffle buffer.
   optional uint64 chunk_pool_size = 2 [default = 100000];
-  // Threads used during startup indexing.
-  optional uint64 startup_indexing_threads = 3 [default = 4];
-  // Threads for ongoing indexing operations.
-  optional uint64 indexing_threads = 4 [default = 4];
+  // Threads for ingesting new chunk sources (lightweight).
+  optional uint64 source_ingestion_threads = 4 [default = 1];
   // Threads for loading chunk data.
   optional uint64 chunk_loading_threads = 5 [default = 4];
   // Size of the output queue.
