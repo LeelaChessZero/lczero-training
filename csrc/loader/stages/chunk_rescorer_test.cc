@@ -76,9 +76,10 @@ class ChunkRescorerTest : public ::testing::Test {
 };
 
 TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkRescorer rescorer(config_, stages, StubRescore);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkRescorer rescorer(config_, registry, StubRescore);
 
   rescorer.Start();
 
@@ -99,9 +100,10 @@ TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
 }
 
 TEST_F(ChunkRescorerTest, HandlesInputQueueClosure) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkRescorer rescorer(config_, stages, StubRescore);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkRescorer rescorer(config_, registry, StubRescore);
 
   rescorer.Start();
 

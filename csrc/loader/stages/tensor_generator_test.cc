@@ -220,9 +220,10 @@ class TensorGeneratorTest : public ::testing::Test {
 };
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -238,9 +239,10 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 }
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -257,9 +259,10 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -294,9 +297,10 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   config_.set_batch_size(2);
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -312,9 +316,10 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   // Close input queue without sending data.
@@ -326,9 +331,10 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   config_.set_batch_size(1);
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -366,9 +372,10 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   config_.set_batch_size(1);
-  PassthroughStage<FrameType> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  TensorGenerator generator(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
+                                  input_queue_.get()));
+  TensorGenerator generator(config_, registry);
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();

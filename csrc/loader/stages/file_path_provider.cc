@@ -35,7 +35,7 @@ bool ShouldSkipPathEntry(const FilePathProvider::Path& path) {
 }  // namespace
 
 FilePathProvider::FilePathProvider(const FilePathProviderConfig& config,
-                                   const StageList& existing_stages)
+                                   const StageRegistry& existing_stages)
     : output_queue_(config.queue_capacity()),
       directory_(config.directory()),
       producer_(output_queue_.CreateProducer()),

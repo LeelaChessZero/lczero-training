@@ -33,7 +33,7 @@ class ChunkUnpacker
   using OutputType = FrameType;
 
   ChunkUnpacker(const ChunkUnpackerConfig& config,
-                const StageList& existing_stages);
+                const StageRegistry& existing_stages);
   ~ChunkUnpacker();
 
   Queue<OutputType>* output();

@@ -12,7 +12,7 @@ namespace lczero {
 namespace training {
 
 ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
-                             const StageList& existing_stages,
+                             const StageRegistry& existing_stages,
                              RescoreFn rescore_fn)
     : SingleInputStage<ChunkRescorerConfig, InputType>(config, existing_stages),
       syzygy_paths_(config.syzygy_paths()),

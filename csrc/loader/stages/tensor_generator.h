@@ -31,7 +31,7 @@ class TensorGenerator
   using OutputType = TensorTuple;
 
   TensorGenerator(const TensorGeneratorConfig& config,
-                  const StageList& existing_stages);
+                  const StageRegistry& existing_stages);
   ~TensorGenerator();
 
   Queue<OutputType>* output();

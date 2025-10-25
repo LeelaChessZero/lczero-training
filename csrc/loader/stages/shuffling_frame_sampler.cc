@@ -13,7 +13,8 @@ namespace lczero {
 namespace training {
 
 ShufflingFrameSampler::ShufflingFrameSampler(
-    const ShufflingFrameSamplerConfig& config, const StageList& existing_stages)
+    const ShufflingFrameSamplerConfig& config,
+    const StageRegistry& existing_stages)
     : SingleInputStage<ShufflingFrameSamplerConfig, InputType>(config,
                                                                existing_stages),
       output_queue_(config.queue_capacity()),

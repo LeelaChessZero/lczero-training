@@ -82,7 +82,7 @@ Replace the monolithic `DataLoader` wiring with dynamic assembly.
 
 1. **Factory**
    - Implement `loader/stages/stage_factory.cc` with
-     `std::unique_ptr<Stage> CreateStage(const StageConfig&, const StageList&)`.
+     `std::unique_ptr<Stage> CreateStage(const StageConfig&, const StageRegistry&)`.
    - Validate the “exactly one sub-config set” rule and perform type-specific
      construction.
 2. **DataLoader rewrite**
@@ -276,7 +276,7 @@ Key responsibilities:
 
 ### Stage Factory Pattern
 
-`CreateStage(const StageConfig&, const StageList&)` will:
+`CreateStage(const StageConfig&, const StageRegistry&)` will:
 
 1. Ensure exactly one sub-config is populated.
 2. Use `if/else` on `has_...()` to dispatch to concrete constructors.

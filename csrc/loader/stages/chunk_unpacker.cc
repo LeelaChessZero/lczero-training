@@ -92,7 +92,7 @@ uint32_t GenerateRunSeed() {
 }  // namespace
 
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
-                             const StageList& existing_stages)
+                             const StageRegistry& existing_stages)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
       position_sampling_rate_(
           config.has_position_sampling_rate()

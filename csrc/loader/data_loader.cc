@@ -1,5 +1,6 @@
 #include "loader/data_loader.h"
 
+#include <absl/algorithm/container.h>
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
 
@@ -25,7 +26,8 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
             UpdateFrom(dest, src);
           }) {
   AddStages(serialized_data_loader_config);
-  LOG(INFO) << "DataLoader initialized with " << stages_.size() << " stage(s).";
+  LOG(INFO) << "DataLoader initialized with " << stage_registry_.size()
+            << " stage(s).";
 }
 
 DataLoader::~DataLoader() { Stop(); }
@@ -35,18 +37,7 @@ void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
 }
 
 void DataLoader::AddStages(const DataLoaderConfig& config) {
-  for (const auto& stage_config : config.stage()) {
-    AddStage(stage_config);
-  }
-  if (stages_.empty()) {
-    throw std::runtime_error(
-        "DataLoader pipeline must contain at least one "
-        "stage.");
-  }
-  if (output_queue_ == nullptr) {
-    throw std::runtime_error(
-        "Pipeline does not expose a TensorTuple output queue.");
-  }
+  for (const auto& stage_config : config.stage()) AddStage(stage_config);
 }
 
 void DataLoader::AddStage(const StageConfig& stage_config) {
@@ -54,95 +45,19 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
     throw std::runtime_error("Cannot add stages after DataLoader has started.");
   }
 
-  const std::string stage_name = ResolveStageName(stage_config);
-  for (const auto& entry : stages_) {
-    if (entry.first == stage_name) {
-      throw std::runtime_error(
-          absl::StrCat("Duplicate stage name detected: ", stage_name));
-    }
+  auto stage = CreateStage(stage_config, stage_registry_);
+  if (!stage_config.has_name()) {
+    throw std::runtime_error("Stage configuration is missing name.");
   }
-
-  Stage::StageList existing = BuildStageList();
-  auto stage = CreateStage(stage_config, existing);
-  Stage* stage_raw = stage.get();
-  stages_.emplace_back(stage_name, std::move(stage));
-  UpdateOutputQueue(stage_name, stage_raw);
-}
-
-Stage::StageList DataLoader::BuildStageList() const {
-  Stage::StageList list;
-  list.reserve(stages_.size());
-  for (const auto& entry : stages_) {
-    list.emplace_back(entry.first, entry.second.get());
-  }
-  return list;
-}
-
-std::string DataLoader::ResolveStageName(
-    const StageConfig& stage_config) const {
-  if (stage_config.has_name() && !stage_config.name().empty()) {
-    return std::string(stage_config.name());
-  }
-  if (stage_config.has_file_path_provider()) {
-    return "file_path_provider";
-  }
-  if (stage_config.has_chunk_source_loader()) {
-    return "chunk_source_loader";
-  }
-  if (stage_config.has_shuffling_chunk_pool()) {
-    return "shuffling_chunk_pool";
-  }
-  if (stage_config.has_chunk_rescorer()) {
-    return "chunk_rescorer";
-  }
-  if (stage_config.has_chunk_unpacker()) {
-    return "chunk_unpacker";
-  }
-  if (stage_config.has_shuffling_frame_sampler()) {
-    return "shuffling_frame_sampler";
-  }
-  if (stage_config.has_tensor_generator()) {
-    return "tensor_generator";
-  }
-  throw std::runtime_error(
-      "Cannot resolve name for stage without a specific configuration.");
-}
-
-void DataLoader::UpdateOutputQueue(const std::string& stage_name,
-                                   Stage* stage) {
-  QueueBase* raw_output = stage->GetOutput();
-  if (raw_output == nullptr) {
-    return;
-  }
-  auto* tensor_queue = dynamic_cast<Queue<TensorTuple>*>(raw_output);
-  if (tensor_queue != nullptr) {
-    output_queue_ = tensor_queue;
-    output_stage_name_ = stage_name;
-  }
-}
-
-Queue<TensorTuple>* DataLoader::GetOutputQueue() {
-  if (output_queue_ == nullptr) {
-    throw std::runtime_error("Tensor output queue is not configured.");
-  }
-  return output_queue_;
-}
-
-const Queue<TensorTuple>* DataLoader::GetOutputQueue() const {
-  if (output_queue_ == nullptr) {
-    throw std::runtime_error("Tensor output queue is not configured.");
-  }
-  return output_queue_;
+  LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
+  stage_registry_.AddStage(stage_config.name(), std::move(stage));
 }
 
 void DataLoader::Start() {
   if (started_) {
-    LOG(WARNING) << "DataLoader::Start called but loader already running.";
-    return;
+    throw std::runtime_error("DataLoader has already been started.");
   }
-  LOG(INFO) << "Starting DataLoader with output stage '" << output_stage_name_
-            << "'.";
-  for (auto& [name, stage] : stages_) {
+  for (auto& [name, stage] : stage_registry_.stages()) {
     LOG(INFO) << "Starting stage '" << name << "'.";
     stage->Start();
   }
@@ -154,12 +69,10 @@ void DataLoader::Start() {
   LOG(INFO) << "DataLoader started.";
 }
 
-TensorTuple DataLoader::GetNext() { return GetOutputQueue()->Get(); }
+// TensorTuple DataLoader::GetNext() { return GetOutputQueue()->Get(); }
 
 void DataLoader::Stop() {
-  if (stopped_) {
-    return;
-  }
+  if (stopped_) return;
 
   LOG(INFO) << "Stopping DataLoader.";
 
@@ -168,9 +81,9 @@ void DataLoader::Stop() {
     metrics_thread_.join();
   }
 
-  for (auto it = stages_.rbegin(); it != stages_.rend(); ++it) {
-    LOG(INFO) << "Stopping stage '" << it->first << "'.";
-    it->second->Stop();
+  for (auto& [name, stage] : stage_registry_.stages()) {
+    LOG(INFO) << "Stopping stage '" << name << "'.";
+    stage->Stop();
   }
 
   stopped_ = true;
@@ -208,7 +121,7 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
   while (!stop_token.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     DataLoaderMetricsProto metrics;
-    for (auto& [name, stage] : stages_) {
+    for (auto& [name, stage] : stage_registry_.stages()) {
       StageMetricProto stage_metric = stage->FlushMetrics();
       stage_metric.set_name(name);
       *metrics.add_stage_metrics() = std::move(stage_metric);
@@ -223,8 +136,8 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
 std::vector<std::pair<std::string, StageControlResponse>>
 DataLoader::SendControlMessage(const StageControlRequest& request) {
   std::vector<std::pair<std::string, StageControlResponse>> responses;
-  responses.reserve(stages_.size());
-  for (auto& [name, stage] : stages_) {
+  responses.reserve(stage_registry_.size());
+  for (auto& [name, stage] : stage_registry_.stages()) {
     std::optional<StageControlResponse> response = stage->Control(request);
     if (response.has_value()) {
       responses.emplace_back(name, std::move(*response));

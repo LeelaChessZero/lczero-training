@@ -32,7 +32,7 @@ class ShufflingFrameSampler
   using OutputType = FrameType;
 
   ShufflingFrameSampler(const ShufflingFrameSamplerConfig& config,
-                        const StageList& existing_stages);
+                        const StageRegistry& existing_stages);
   ~ShufflingFrameSampler();
 
   Queue<OutputType>* output();

@@ -31,7 +31,7 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
 }
 
 ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
-                                     const StageList& existing_stages)
+                                     const StageRegistry& existing_stages)
     : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config,
                                                            existing_stages),
       output_queue_(config.queue_capacity()),

@@ -16,12 +16,9 @@
 namespace lczero {
 namespace training {
 
-// Forward declaration of StageList is not necessary as we embed it in Stage.
 // Base interface implemented by all loader stages.
 class Stage {
  public:
-  using StageList = std::vector<std::pair<std::string, Stage*>>;
-
   virtual ~Stage() = default;
 
   // Starts background workers owned by the stage.
@@ -44,43 +41,51 @@ class Stage {
   }
 };
 
+class StageRegistry {
+ public:
+  // Registers a new stage with the given name and takes ownership of it.
+  void AddStage(std::string_view stage_name, std::unique_ptr<Stage> stage);
+
+  // Returns the output queue for the specified stage.
+  // If stage_name contains a dot (e.g., "stage.output"), splits it into stage
+  // name and output name, passing the output name to Stage::GetOutput().
+  // Returns nullptr if the stage is not found.
+  QueueBase* GetStageOutput(std::string_view stage_name) const;
+
+  template <typename StageT>
+  Queue<StageT>* GetTypedStageOutput(std::string_view stage_name) const {
+    QueueBase* raw_queue = GetStageOutput(stage_name);
+    if (raw_queue == nullptr) return nullptr;
+    auto* typed_queue = dynamic_cast<Queue<StageT>*>(raw_queue);
+    if (!typed_queue) {
+      throw std::runtime_error(
+          absl::StrCat("Stage output type mismatch for stage: ", stage_name));
+    }
+    return typed_queue;
+  }
+
+  size_t size() const { return stages_.size(); }
+  const std::vector<std::pair<std::string, std::unique_ptr<Stage>>>& stages()
+      const {
+    return stages_;
+  }
+
+ private:
+  std::vector<std::pair<std::string, std::unique_ptr<Stage>>> stages_;
+};
+
 // Helper for stages that consume a single upstream queue.
 template <typename ConfigT, typename InputT>
 class SingleInputStage : public Stage {
- public:
-  using typename Stage::StageList;
-
  protected:
   explicit SingleInputStage(const ConfigT& config,
-                            const StageList& existing_stages)
+                            const StageRegistry& existing_stages)
       : input_queue_(nullptr) {
-    std::string input_name;
-    if (config.has_input()) {
-      input_name = config.input();
-    } else if (!existing_stages.empty()) {
-      input_name = existing_stages.back().first;
+    input_queue_ = existing_stages.GetTypedStageOutput<InputT>(config.input());
+    if (!input_queue_) {
+      throw std::runtime_error(absl::StrCat("Input stage '", config.input(),
+                                            "' not found or has wrong type."));
     }
-
-    if (input_name.empty()) {
-      throw std::runtime_error("Stage configuration is missing input binding.");
-    }
-
-    auto it = std::find_if(
-        existing_stages.begin(), existing_stages.end(),
-        [&input_name](const auto& entry) { return entry.first == input_name; });
-    if (it == existing_stages.end()) {
-      throw std::runtime_error(
-          absl::StrCat("Stage input not found: ", input_name));
-    }
-
-    QueueBase* raw_queue = it->second->GetOutput();
-    auto* typed_queue = dynamic_cast<Queue<InputT>*>(raw_queue);
-    if (typed_queue == nullptr) {
-      throw std::runtime_error(
-          absl::StrCat("Stage input type mismatch for input: ", input_name));
-    }
-
-    input_queue_ = typed_queue;
   }
 
   Queue<InputT>* input_queue() { return input_queue_; }

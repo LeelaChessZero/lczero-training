@@ -44,16 +44,9 @@ class DataLoader {
  private:
   static DataLoaderConfig ParseConfig(
       const std::string& serialized_data_loader_config);
-  Stage::StageList BuildStageList() const;
-  std::string ResolveStageName(const StageConfig& stage_config) const;
-  void UpdateOutputQueue(const std::string& stage_name, Stage* stage);
-  Queue<TensorTuple>* GetOutputQueue();
-  const Queue<TensorTuple>* GetOutputQueue() const;
   void MetricsThread(std::stop_token stop_token);
 
-  using StageEntry = std::pair<std::string, std::unique_ptr<Stage>>;
-
-  std::vector<StageEntry> stages_;
+  StageRegistry stage_registry_;
   Queue<TensorTuple>* output_queue_ = nullptr;
   std::string output_stage_name_;
   MetricsAggregator metrics_aggregator_;

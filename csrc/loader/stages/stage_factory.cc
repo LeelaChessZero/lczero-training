@@ -29,7 +29,7 @@ int CountStageConfigs(const StageConfig& config) {
 }  // namespace
 
 std::unique_ptr<Stage> CreateStage(const StageConfig& config,
-                                   const Stage::StageList& existing_stages) {
+                                   const StageRegistry& existing_stages) {
   if (CountStageConfigs(config) != 1) {
     throw std::runtime_error(
         "StageConfig must have exactly one stage-specific config set.");

@@ -73,9 +73,10 @@ class ChunkUnpackerTest : public ::testing::Test {
 };
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkUnpacker unpacker(config_, registry);
   unpacker.Start();
 
   V6TrainingData test_frame = CreateTestFrame(6);
@@ -90,9 +91,10 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkUnpacker unpacker(config_, registry);
   unpacker.Start();
 
   std::vector<V6TrainingData> test_frames = {
@@ -122,9 +124,10 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 }
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkUnpacker unpacker(config_, registry);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -157,9 +160,10 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkUnpacker unpacker(config_, registry);
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -174,9 +178,10 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
 }
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
-  PassthroughStage<TrainingChunk> source_stage(input_queue_.get());
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkUnpacker unpacker(config_, stages);
+  StageRegistry registry;
+  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
+                                  input_queue_.get()));
+  ChunkUnpacker unpacker(config_, registry);
   unpacker.Start();
 
   // Close input queue without sending data

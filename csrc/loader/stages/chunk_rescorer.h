@@ -32,7 +32,7 @@ class ChunkRescorer
       std::vector<V6TrainingData>, SyzygyTablebase*, float, float, float, int)>;
 
   ChunkRescorer(const ChunkRescorerConfig& config,
-                const StageList& existing_stages,
+                const StageRegistry& existing_stages,
                 RescoreFn rescore_fn = RescoreTrainingData);
   ~ChunkRescorer() override;
 

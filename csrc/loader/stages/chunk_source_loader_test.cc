@@ -37,9 +37,11 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   config.set_input("source");
-  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkSourceLoader feed(config, stages);
+  StageRegistry registry;
+  registry.AddStage(
+      "source",
+      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
+  ChunkSourceLoader feed(config, registry);
   feed.Start();
 
   {
@@ -73,9 +75,11 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   config.set_input("source");
-  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkSourceLoader feed(config, stages);
+  StageRegistry registry;
+  registry.AddStage(
+      "source",
+      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
+  ChunkSourceLoader feed(config, registry);
   feed.Start();
 
   {
@@ -107,9 +111,11 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   config.set_threads(1);
   config.set_queue_capacity(10);
   config.set_input("source");
-  PassthroughStage<FilePathProvider::File> source_stage(&input_queue);
-  Stage::StageList stages{{"source", &source_stage}};
-  ChunkSourceLoader feed(config, stages);
+  StageRegistry registry;
+  registry.AddStage(
+      "source",
+      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
+  ChunkSourceLoader feed(config, registry);
   feed.Start();
 
   {

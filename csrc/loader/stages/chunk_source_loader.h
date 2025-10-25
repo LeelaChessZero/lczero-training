@@ -36,7 +36,7 @@ class ChunkSourceLoader
   using OutputType = ChunkSourceWithPhase;
 
   ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
-                    const StageList& existing_stages);
+                    const StageRegistry& existing_stages);
   ~ChunkSourceLoader();
 
   Queue<OutputType>* output();

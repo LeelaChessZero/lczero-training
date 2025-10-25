@@ -43,7 +43,7 @@ class FilePathProvider : public Stage {
     MessageType message_type;
   };
   explicit FilePathProvider(const FilePathProviderConfig& config,
-                            const StageList& existing_stages = {});
+                            const StageRegistry& existing_stages = {});
   ~FilePathProvider();
 
   // Returns the output queue for this stage
