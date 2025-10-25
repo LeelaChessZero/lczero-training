@@ -113,6 +113,36 @@ message TensorGeneratorConfig {
   optional uint64 queue_capacity = 4 [default = 4];
 }
 
+// Configuration for a stage that splits incoming ChunkSources into several
+// outputs based on a deterministic hash of (chunk source name, index within
+// source). For each configured output, provides a name, weight that controls
+// the proportion of indices assigned to it, and queue parameters.
+message ChunkSourceSplitterConfig {
+  // Name of the upstream stage producing ChunkSourceWithPhase.
+  optional string input = 1;
+
+  // Queue overflow behavior.
+  enum OverflowBehavior {
+    BLOCK = 0;
+    DROP_NEW = 1;
+    KEEP_NEWEST = 2;
+  }
+
+  message OutputConfig {
+    // Name of this output (referenced as "<stage>.<name>").
+    optional string name = 1;
+    // Relative weight used for hash-based assignment.
+    optional uint64 weight = 2 [default = 1];
+    // Capacity of the output queue.
+    optional uint64 queue_capacity = 3 [default = 16];
+    // Overflow behavior of the output queue.
+    optional OverflowBehavior overflow_behavior = 4;
+  }
+
+  // List of outputs to produce.
+  repeated OutputConfig output = 2;
+}
+
 // Stage-level configuration providing a name and stage-specific options.
 message StageConfig {
   // Unique name used to reference the stage output.
@@ -124,6 +154,7 @@ message StageConfig {
   optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 6;
   optional TensorGeneratorConfig tensor_generator = 7;
   optional ChunkRescorerConfig chunk_rescorer = 8;
+  optional ChunkSourceSplitterConfig chunk_source_splitter = 9;
 }
 
 // Main configuration class for the DataLoader containing all component

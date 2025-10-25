@@ -30,6 +30,8 @@ class QueueClosedException : public std::runtime_error {
   QueueClosedException() : std::runtime_error("Queue is closed") {}
 };
 
+enum class OverflowBehavior { BLOCK, DROP_NEW, KEEP_NEWEST };
+
 // Thread-safe fixed-size circular buffer queue with blocking operations.
 // Supports both single and batch put/get operations.
 // The queue automatically closes when all Producer tokens are destroyed.
@@ -38,7 +40,9 @@ class QueueClosedException : public std::runtime_error {
 template <typename T>
 class Queue : public QueueBase {
  public:
-  enum class OverflowBehavior { BLOCK, DROP_NEW, KEEP_NEWEST };
+  // Backwards-compatible alias to support code referring to
+  // Queue<T>::OverflowBehavior.
+  using OverflowBehavior = ::lczero::OverflowBehavior;
 
   explicit Queue(size_t capacity,
                  OverflowBehavior overflow_behavior = OverflowBehavior::BLOCK);
