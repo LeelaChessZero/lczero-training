@@ -133,7 +133,8 @@ message StageConfig {
 message DataLoaderConfig {
   // Ordered list of stage configurations comprising the pipeline.
   repeated StageConfig stage = 1;
-  // Names of the outputs to be used as the final output of the DataLoader.
-  // Expected format: "stage.output" where ".output" is optional.
+  // Exposed outputs, each with an optional alias used by clients to fetch
+  // data. Expected format: "alias:stage.output", where "alias:" and ".output"
+  // are optional.
   repeated string output = 2;
 }

@@ -27,7 +27,7 @@ class DataLoader {
   ~DataLoader();
 
   void Start();
-  TensorTuple GetNext();
+  TensorTuple GetNext(std::string_view alias);
   void Stop();
   std::pair<std::string, float> GetBucketMetrics(int time_period,
                                                  bool include_pending) const;
@@ -45,10 +45,11 @@ class DataLoader {
   static DataLoaderConfig ParseConfig(
       const std::string& serialized_data_loader_config);
   void MetricsThread(std::stop_token stop_token);
+  void BuildOutputMapping(const DataLoaderConfig& config);
+  Queue<TensorTuple>* GetOutputQueue(std::string_view alias) const;
 
   StageRegistry stage_registry_;
-  Queue<TensorTuple>* output_queue_ = nullptr;
-  std::string output_stage_name_;
+  std::vector<std::pair<std::string, Queue<TensorTuple>*>> outputs_;
   MetricsAggregator metrics_aggregator_;
   std::jthread metrics_thread_;
   bool started_ = false;

@@ -3,6 +3,7 @@
 #include <absl/algorithm/container.h>
 #include <absl/log/log.h>
 #include <absl/strings/str_cat.h>
+#include <absl/strings/str_join.h>
 
 #include <chrono>
 #include <cmath>
@@ -25,9 +26,11 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
           [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
             UpdateFrom(dest, src);
           }) {
-  AddStages(serialized_data_loader_config);
+  DataLoaderConfig config = ParseConfig(serialized_data_loader_config);
+  AddStages(config);
+  BuildOutputMapping(config);
   LOG(INFO) << "DataLoader initialized with " << stage_registry_.size()
-            << " stage(s).";
+            << " stage(s) and " << outputs_.size() << " output(s).";
 }
 
 DataLoader::~DataLoader() { Stop(); }
@@ -69,7 +72,18 @@ void DataLoader::Start() {
   LOG(INFO) << "DataLoader started.";
 }
 
-// TensorTuple DataLoader::GetNext() { return GetOutputQueue()->Get(); }
+TensorTuple DataLoader::GetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
+  if (!q) {
+    std::string alias_list = absl::StrJoin(
+        outputs_, ", ",
+        [](std::string* out, const auto& p) { absl::StrAppend(out, p.first); });
+    throw std::runtime_error(absl::StrCat("Unknown DataLoader output: '", alias,
+                                          "'. Available outputs: [", alias_list,
+                                          "]."));
+  }
+  return q->Get();
+}
 
 void DataLoader::Stop() {
   if (stopped_) return;
@@ -144,6 +158,44 @@ DataLoader::SendControlMessage(const StageControlRequest& request) {
     }
   }
   return responses;
+}
+
+void DataLoader::BuildOutputMapping(const DataLoaderConfig& config) {
+  outputs_.clear();
+  outputs_.reserve(config.output_size());
+
+  for (const auto& out_spec : config.output()) {
+    auto it = absl::c_find(out_spec, ':');
+    std::string alias = it == out_spec.end()
+                            ? std::string("")
+                            : std::string(out_spec.begin(), it);
+    std::string stage_name = it == out_spec.end()
+                                 ? std::string(out_spec)
+                                 : std::string(it + 1, out_spec.end());
+
+    // Ensure alias is unique.
+    if (absl::c_find_if(outputs_, [&](const auto& p) {
+          return p.first == alias;
+        }) != outputs_.end()) {
+      throw std::runtime_error(
+          absl::StrCat("Duplicate output alias specified: ", alias));
+    }
+
+    Queue<TensorTuple>* queue =
+        stage_registry_.GetTypedStageOutput<TensorTuple>(stage_name);
+    if (queue == nullptr) {
+      throw std::runtime_error(
+          absl::StrCat("Output stage not found or wrong type: ", stage_name));
+    }
+    outputs_.emplace_back(std::move(alias), queue);
+  }
+}
+
+Queue<TensorTuple>* DataLoader::GetOutputQueue(std::string_view alias) const {
+  auto it = absl::c_find_if(outputs_,
+                            [&](const auto& p) { return p.first == alias; });
+  if (it == outputs_.end()) return nullptr;
+  return it->second;
 }
 
 }  // namespace training

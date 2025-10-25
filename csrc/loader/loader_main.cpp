@@ -70,6 +70,7 @@ void Run() {
   tensor_generator->set_input(sampler_stage->name());
 
   // Serialize config and create loader
+  config.add_output("tensor_generator");
   std::string config_string = config.OutputAsString();
   DataLoader loader(config_string);
 
@@ -103,7 +104,7 @@ void Run() {
   });
 
   while (true) {
-    TensorTuple batch = loader.GetNext();
+    TensorTuple batch = loader.GetNext("train");
     ++batch_count;
   }
 }

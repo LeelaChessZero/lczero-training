@@ -7,12 +7,13 @@
 namespace lczero {
 namespace training {
 
-TEST(DataLoaderTest, ThrowsWhenOutputQueueMissing) {
+TEST(DataLoaderTest, AllowsNoOutputsConfigured) {
   DataLoaderConfig config;
   auto* file_stage = config.add_stage();
+  file_stage->set_name("file_path_provider");
   file_stage->mutable_file_path_provider()->set_directory(".");
 
-  EXPECT_THROW(DataLoader(config.OutputAsString()), std::runtime_error);
+  EXPECT_NO_THROW(DataLoader(config.OutputAsString()));
 }
 
 TEST(DataLoaderTest, ThrowsOnDuplicateStageName) {

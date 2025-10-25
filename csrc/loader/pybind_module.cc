@@ -131,13 +131,15 @@ PYBIND11_MODULE(_lczero_training, m) {
           "StageControlResponse) tuples.")
       .def(
           "get_next",
-          [](DataLoader& self) {
+          [](DataLoader& self, const std::string& alias) {
             return tensor_tuple_to_numpy_tuple([&] {
               py::gil_scoped_release release;
-              return self.GetNext();
+              return self.GetNext(alias);
             }());
           },
-          "Get next batch of tensors as tuple of numpy arrays")
+          py::arg("alias") = "",
+          "Get next batch for the given output alias (default empty) as a "
+          "tuple of numpy arrays")
       .def(
           "get_bucket_metrics",
           [](const DataLoader& self, int time_period, bool include_pending) {
