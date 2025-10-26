@@ -76,6 +76,7 @@ def get_checkpoint_steps(
         if max_step is not None and step > max_step:
             continue
         filtered_steps.append(step)
+    filtered_steps.sort()
     return filtered_steps
 
 
