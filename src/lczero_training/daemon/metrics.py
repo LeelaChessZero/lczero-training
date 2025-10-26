@@ -3,6 +3,7 @@
 import logging
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import jax
@@ -21,6 +22,14 @@ from proto.metrics_config_pb2 import MetricConfig, MetricsConfig
 logger = logging.getLogger(__name__)
 
 Batch = Tuple[np.ndarray, ...]
+
+
+@dataclass
+class CachedBatch:
+    """Cached batch data with the global step when it was last updated."""
+
+    batch: Batch
+    global_step: int
 
 
 def load_batch_from_npz(npz_filename: str) -> Batch:
@@ -178,24 +187,34 @@ class _DataLoaderMetric(_EvaluatingMetric):
         loss_fn: Optional[LczeroLoss],
         data_loader: Optional[DataLoader],
         dataloader_name: str,
+        cached_batches: Dict[str, CachedBatch],
     ):
         super().__init__(config, logger, loss_fn)
         if not data_loader:
             raise ValueError(f"Metric '{config.name}': DataLoader required")
         self.data_loader = data_loader
         self.dataloader_name = dataloader_name
-        self.cached_batch: Optional[Batch] = None
+        self.cached_batches = cached_batches
 
     def get_batch(self) -> Batch:
-        batch = self.data_loader.maybe_get_next(self.dataloader_name)
-        if batch is not None:
-            self.cached_batch = batch
-        elif self.cached_batch is None:
-            raise RuntimeError(
-                f"No data for metric '{self.config.name}' "
-                f"from dataloader '{self.dataloader_name}'"
-            )
-        return self.cached_batch
+        return self.cached_batches[self.dataloader_name].batch
+
+    def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
+        """Update cache if needed and log the metric."""
+        cached = self.cached_batches.get(self.dataloader_name)
+        if cached is None or cached.global_step != hook_data.global_step:
+            batch = self.data_loader.maybe_get_next(self.dataloader_name)
+            if batch is not None:
+                self.cached_batches[self.dataloader_name] = CachedBatch(
+                    batch, hook_data.global_step
+                )
+            elif cached is None:
+                raise RuntimeError(
+                    f"No data for metric '{self.config.name}' "
+                    f"from dataloader '{self.dataloader_name}'"
+                )
+
+        super().log(hook_data, graphdef)
 
 
 class _NpzMetric(_EvaluatingMetric):
@@ -225,6 +244,7 @@ class Metrics:
         data_loader: Optional[DataLoader] = None,
     ):
         self._metrics: Dict[str, _Metric] = {}
+        self._cached_batches: Dict[str, CachedBatch] = {}
 
         for mc in config.metric:
             tb_logger = TensorboardLogger(
@@ -236,7 +256,12 @@ class Metrics:
                 metric = _TrainingBatchMetric(mc, tb_logger)
             elif mc.HasField("dataloader_output"):
                 metric = _DataLoaderMetric(
-                    mc, tb_logger, loss_fn, data_loader, mc.dataloader_output
+                    mc,
+                    tb_logger,
+                    loss_fn,
+                    data_loader,
+                    mc.dataloader_output,
+                    self._cached_batches,
                 )
             elif mc.HasField("npz_filename"):
                 metric = _NpzMetric(mc, tb_logger, loss_fn, mc.npz_filename)
