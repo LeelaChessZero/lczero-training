@@ -1,0 +1,53 @@
+#pragma once
+
+#include <atomic>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
+
+#include "absl/random/random.h"
+#include "loader/chunk_source/chunk_source.h"
+#include "loader/stages/chunk_source_loader.h"
+#include "loader/stages/stage.h"
+#include "loader/stages/training_chunk.h"
+#include "proto/data_loader_config.pb.h"
+#include "proto/training_metrics.pb.h"
+#include "utils/queue.h"
+
+namespace lczero {
+namespace training {
+
+// Single-threaded stage that shuffles chunks within each source.
+class SimpleChunkShuffler
+    : public SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase> {
+ public:
+  SimpleChunkShuffler(const SimpleChunkShufflerConfig& config,
+                      const StageRegistry& existing_stages);
+  ~SimpleChunkShuffler();
+
+  void Start() override;
+  void Stop() override;
+  StageMetricProto FlushMetrics() override;
+  QueueBase* GetOutput(std::string_view name = "") override;
+
+ private:
+  void Worker();
+  void ProcessSource(Queue<TrainingChunk>::Producer& producer,
+                     std::unique_ptr<ChunkSource> source);
+  std::optional<TrainingChunk> LoadChunk(ChunkSource& source,
+                                         const std::string& sort_key,
+                                         size_t index);
+
+  Queue<TrainingChunk> output_queue_;
+  std::jthread worker_thread_;
+  std::atomic<bool> stop_requested_{false};
+  std::atomic<uint64_t> chunks_processed_{0};
+  std::atomic<uint64_t> chunks_dropped_{0};
+  std::atomic<uint64_t> sources_processed_{0};
+  absl::BitGen bitgen_;
+};
+
+}  // namespace training
+}  // namespace lczero

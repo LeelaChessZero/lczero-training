@@ -118,9 +118,25 @@ class Communicator:
         payload_dict = _to_serializable(payload_instance)
         message = {"type": event_type, "payload": payload_dict}
 
-        json.dump(message, self.output)
-        self.output.write("\n")
+        self.output.write(json.dumps(message) + "\n")
         self.output.flush()
+
+    def _dispatch(self, line: str) -> None:
+        line = line.strip()
+        if not line:
+            return
+
+        data = json.loads(line)
+        event_type = data["type"]
+        payload_dict = data["payload"]
+
+        payload_cls = TYPE_TO_CLASS_MAP[event_type]
+        payload_instance = _from_serializable(payload_cls, payload_dict)
+
+        handler_method_name = f"on_{event_type}"
+        handler_method = getattr(self.handler, handler_method_name)
+
+        handler_method(payload_instance)
 
     def run(self) -> None:
         """
@@ -131,21 +147,7 @@ class Communicator:
         This method blocks until the input stream is closed.
         """
         for line in self.input:
-            line = line.strip()
-            if not line:
-                continue
-
-            data = json.loads(line)
-            event_type = data["type"]
-            payload_dict = data["payload"]
-
-            payload_cls = TYPE_TO_CLASS_MAP[event_type]
-            payload_instance = _from_serializable(payload_cls, payload_dict)
-
-            handler_method_name = f"on_{event_type}"
-            handler_method = getattr(self.handler, handler_method_name)
-
-            handler_method(payload_instance)
+            self._dispatch(line)
 
 
 class AsyncCommunicator:
@@ -186,6 +188,23 @@ class AsyncCommunicator:
         message_line = json.dumps(message) + "\n"
         await self.output_stream.send(message_line)
 
+    def _dispatch(self, line: str, task_group: anyio.abc.TaskGroup) -> None:
+        line = line.strip()
+        if not line:
+            return
+
+        data = json.loads(line)
+        event_type = data["type"]
+        payload_dict = data["payload"]
+
+        payload_cls = TYPE_TO_CLASS_MAP[event_type]
+        payload_instance = _from_serializable(payload_cls, payload_dict)
+
+        handler_method_name = f"on_{event_type}"
+        handler_method = getattr(self.handler, handler_method_name)
+
+        task_group.start_soon(handler_method, payload_instance)
+
     async def run(self) -> None:
         """
         Starts the async listener loop.
@@ -196,18 +215,4 @@ class AsyncCommunicator:
         """
         async with anyio.create_task_group() as task_group:
             async for line in self.input_stream:
-                line = line.strip()
-                if not line:
-                    continue
-
-                data = json.loads(line)
-                event_type = data["type"]
-                payload_dict = data["payload"]
-
-                payload_cls = TYPE_TO_CLASS_MAP[event_type]
-                payload_instance = _from_serializable(payload_cls, payload_dict)
-
-                handler_method_name = f"on_{event_type}"
-                handler_method = getattr(self.handler, handler_method_name)
-
-                task_group.start_soon(handler_method, payload_instance)
+                self._dispatch(line, task_group)

@@ -44,7 +44,7 @@ def load_batch_from_npz(npz_filename: str) -> Batch:
     Raises:
         ValueError: If the NPZ file doesn't contain exactly one batch.
     """
-    with np.load(npz_filename) as npz_file:
+    with np.load(npz_filename, allow_pickle=True) as npz_file:
         batches = npz_file["batches"]
         if batches.size != 1:
             raise ValueError(
