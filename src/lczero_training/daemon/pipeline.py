@@ -25,13 +25,17 @@ from lczero_training.model.model import LczeroModel
 from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
 from lczero_training.training.state import JitTrainingState, TrainingState
-from lczero_training.training.tensorboard import TensorboardLogger
-from lczero_training.training.training import Training, from_dataloader
+from lczero_training.training.training import (
+    StepHookData,
+    Training,
+    from_dataloader,
+)
 from proto.data_loader_config_pb2 import DataLoaderConfig
 from proto.root_config_pb2 import RootConfig
 from proto.stage_control_pb2 import StageControlRequest, StageControlResponse
 from proto.training_config_pb2 import ScheduleConfig
 
+from .metrics import Metrics
 from .protocol.messages import TrainingScheduleData, TrainingStage
 
 logger = logging.getLogger(__name__)
@@ -107,7 +111,7 @@ class TrainingPipeline:
     _checkpoint_mgr: ocp.CheckpointManager
     _training_state: TrainingState
     _cycle_state: _TrainingCycleState
-    _train_tensorboard_logger: TensorboardLogger | None
+    _metrics: Metrics | None
 
     def __init__(self, config_filepath: str) -> None:
         logger.info(f"Loading config from {config_filepath}")
@@ -119,7 +123,7 @@ class TrainingPipeline:
         self._chunks_to_wait = self._chunks_per_network
         self._cycle_state = _TrainingCycleState()
         self._force_training_event = threading.Event()
-        self._train_tensorboard_logger = None
+        self._metrics = None
         logger.info("Creating empty model")
         self._model = LczeroModel(self._config.model, rngs=nnx.Rngs(params=42))
         logger.info(
@@ -165,6 +169,7 @@ class TrainingPipeline:
         )
 
         logger.info("Creating training session")
+        loss_fn = LczeroLoss(config=self._config.training.losses)
         self._training = Training(
             optimizer_tx=make_gradient_transformation(
                 self._config.training.optimizer,
@@ -172,26 +177,28 @@ class TrainingPipeline:
                 lr_schedule=self._lr_schedule,
             ),
             graphdef=nnx.graphdef(self._model),
-            loss_fn=LczeroLoss(config=self._config.training.losses),
+            loss_fn=loss_fn,
             swa_config=(
                 self._config.training.swa
                 if self._config.training.HasField("swa")
                 else None
             ),
         )
-        if (
-            self._config.export.HasField("tensorboard_path")
-            and self._config.export.tensorboard_path
-        ):
-            tensorboard_path = os.path.join(
-                self._config.export.tensorboard_path, "train"
-            )
-            self._train_tensorboard_logger = TensorboardLogger(tensorboard_path)
-            logger.info("Writing TensorBoard summaries to %s", tensorboard_path)
 
         logger.info("Creating data loader")
         self._data_loader = _make_dataloader(self._config.data_loader)
         self._set_chunk_anchor(self._training_state.last_chunk_source)
+
+        # Create metrics if configured.
+        if self._config.HasField("metrics"):
+            logger.info("Creating metrics")
+            self._metrics = Metrics(
+                config=self._config.metrics,
+                loss_fn=loss_fn,
+                data_loader=self._data_loader,
+            )
+        else:
+            logger.info("No metrics configured")
 
         _log_jax_system_info()
 
@@ -295,11 +302,11 @@ class TrainingPipeline:
         except (KeyError, AttributeError, IndexError) as e:
             logging.error(f"Failed to extract model metadata for upload: {e}")
 
-    def _metrics_hook(self, step: int, metrics: dict) -> None:
+    def _step_hook(self, hook_data: StepHookData) -> None:
         # Append current learning rate from schedule to metrics.
-        metrics["lr"] = self._lr_schedule(step)
-        if self._train_tensorboard_logger is not None:
-            self._train_tensorboard_logger.log(step, metrics)
+        hook_data.metrics["lr"] = self._lr_schedule(hook_data.global_step)
+        if self._metrics is not None:
+            self._metrics.on_step(hook_data, nnx.graphdef(self._model))
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
@@ -313,7 +320,7 @@ class TrainingPipeline:
             jit_state=self._training_state.jit_state,
             datagen=from_dataloader(self._data_loader),
             num_steps=self._schedule.steps_per_network,
-            metrics_hook=self._metrics_hook,
+            step_hook=self._step_hook,
         )
         self._training_state = self._training_state.replace(
             jit_state=new_jit_state
@@ -345,8 +352,8 @@ class TrainingPipeline:
 
     def stop(self) -> None:
         self._data_loader.stop()
-        if self._train_tensorboard_logger is not None:
-            self._train_tensorboard_logger.close()
+        if self._metrics is not None:
+            self._metrics.close()
 
     def get_data_loader(self) -> DataLoader:
         return self._data_loader

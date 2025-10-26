@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from functools import partial
 from typing import Any, Callable, Dict, Generator, Optional, Tuple, cast
@@ -18,7 +19,20 @@ from lczero_training.training.state import JitTrainingState
 from proto import training_config_pb2 as training_config_pb2
 
 MetricsDict = Dict[str, Any]
-MetricsHook = Callable[[int, MetricsDict], None]
+
+
+@dataclasses.dataclass
+class StepHookData:
+    """Data passed to the step hook callback during training."""
+
+    global_step: int
+    local_step: int
+    steps_per_epoch: int
+    metrics: MetricsDict
+    jit_state: JitTrainingState
+
+
+StepHook = Callable[[StepHookData], None]
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +204,7 @@ class Training:
         jit_state: JitTrainingState,
         datagen: Generator[Tuple[np.ndarray, ...], None, None],
         num_steps: int,
-        metrics_hook: Optional[MetricsHook] = None,
+        step_hook: Optional[StepHook] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
         for local_step in range(num_steps):
@@ -214,8 +228,15 @@ class Training:
             jit_state = self.maybe_update_swa(
                 jit_state, local_step + 1, num_steps
             )
-            if metrics_hook is not None:
-                metrics_hook(step_value, metrics)
+            if step_hook is not None:
+                hook_data = StepHookData(
+                    global_step=step_value,
+                    local_step=local_step,
+                    steps_per_epoch=num_steps,
+                    metrics=metrics,
+                    jit_state=jit_state,
+                )
+                step_hook(hook_data)
             loss = metrics["loss"]
             unweighted_losses = metrics["unweighted_losses"]
             grad_norm = metrics["grad_norm"]
