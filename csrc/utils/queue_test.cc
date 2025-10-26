@@ -1432,4 +1432,83 @@ TEST_F(QueueTest, GetTotalDropCountReset) {
   EXPECT_EQ(queue.GetTotalDropCount(), 0);
 }
 
+// MaybeGet() tests
+
+TEST_F(QueueTest, MaybeGetOnEmptyQueue) {
+  Queue<int> queue(5);
+  auto result = queue.MaybeGet();
+  EXPECT_FALSE(result.has_value());
+}
+
+TEST_F(QueueTest, MaybeGetOnNonEmptyQueue) {
+  Queue<int> queue(5);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(42);
+  }
+
+  auto result = queue.MaybeGet();
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, 42);
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, MaybeGetMultipleValues) {
+  Queue<int> queue(5);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(1);
+    producer.Put(2);
+    producer.Put(3);
+  }
+
+  auto result1 = queue.MaybeGet();
+  ASSERT_TRUE(result1.has_value());
+  EXPECT_EQ(*result1, 1);
+
+  auto result2 = queue.MaybeGet();
+  ASSERT_TRUE(result2.has_value());
+  EXPECT_EQ(*result2, 2);
+
+  auto result3 = queue.MaybeGet();
+  ASSERT_TRUE(result3.has_value());
+  EXPECT_EQ(*result3, 3);
+
+  auto result4 = queue.MaybeGet();
+  EXPECT_FALSE(result4.has_value());
+}
+
+TEST_F(QueueTest, MaybeGetWithMoveOnlyType) {
+  Queue<std::unique_ptr<int>> queue(5);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(std::make_unique<int>(42));
+  }
+
+  auto result = queue.MaybeGet();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(*result, nullptr);
+  EXPECT_EQ(**result, 42);
+}
+
+TEST_F(QueueTest, MaybeGetUpdatesGetCount) {
+  Queue<int> queue(5);
+  {
+    auto producer = queue.CreateProducer();
+    producer.Put(1);
+    producer.Put(2);
+  }
+
+  EXPECT_EQ(queue.GetTotalGetCount(), 0);
+
+  queue.MaybeGet();
+  EXPECT_EQ(queue.GetTotalGetCount(), 1);
+
+  queue.MaybeGet();
+  EXPECT_EQ(queue.GetTotalGetCount(), 2);
+
+  queue.MaybeGet();                        // Empty queue.
+  EXPECT_EQ(queue.GetTotalGetCount(), 2);  // Count not incremented.
+}
+
 }  // namespace lczero

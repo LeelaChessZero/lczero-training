@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 
 #include "absl/base/thread_annotations.h"
@@ -86,6 +87,10 @@ class Queue : public QueueBase {
   // Gets exactly count elements from the queue. Blocks until count elements
   // available.
   absl::FixedArray<T> Get(size_t count);
+
+  // Gets a single element from the queue if available, returns std::nullopt
+  // if empty.
+  std::optional<T> MaybeGet();
 
   // Returns the current size of the queue.
   size_t Size() const override;
@@ -495,6 +500,19 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
   }
 
   return result;
+}
+
+template <typename T>
+std::optional<T> Queue<T>::MaybeGet() {
+  absl::MutexLock lock(&mutex_);
+  if (size_ == 0) return std::nullopt;
+
+  T item = std::move(buffer_[head_]);
+  head_ = (head_ + 1) % capacity_;
+  --size_;
+  ++total_get_count_;
+
+  return item;
 }
 
 template <typename T>
