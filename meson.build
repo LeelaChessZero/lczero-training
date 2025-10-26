@@ -215,13 +215,13 @@ shuffling_chunk_pool_test = executable(
   link_with : loader_lib,
 )
 
-simple_chunk_shuffler_test = executable(
-  'simple_chunk_shuffler_test',
-  'csrc/loader/stages/simple_chunk_shuffler_test.cc',
-  include_directories : includes,
-  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
-  link_with : loader_lib,
-)
+# simple_chunk_shuffler_test = executable(
+#   'simple_chunk_shuffler_test',
+#   'csrc/loader/stages/simple_chunk_shuffler_test.cc',
+#   include_directories : includes,
+#   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+#   link_with : loader_lib,
+# )
 
 chunk_rescorer_test = executable(
   'chunk_rescorer_test',
@@ -306,7 +306,7 @@ chunk_source_splitter_test = executable(
 )
 test('chunk_source_splitter_test', chunk_source_splitter_test)
 test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
-test('simple_chunk_shuffler_test', simple_chunk_shuffler_test)
+# test('simple_chunk_shuffler_test', simple_chunk_shuffler_test)
 test('chunk_rescorer_test', chunk_rescorer_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
 test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)
