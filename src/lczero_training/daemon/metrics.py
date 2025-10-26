@@ -226,12 +226,24 @@ class _NpzMetric(_EvaluatingMetric):
         logger: TensorboardLogger,
         loss_fn: Optional[LczeroLoss],
         npz_filename: str,
+        cached_batches: Dict[str, CachedBatch],
     ):
         super().__init__(config, logger, loss_fn)
-        self.npz_data: Batch = load_batch_from_npz(npz_filename)
+        self.npz_filename = npz_filename
+        self.cached_batches = cached_batches
 
     def get_batch(self) -> Batch:
-        return self.npz_data
+        return self.cached_batches[self.npz_filename].batch
+
+    def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
+        """Load NPZ data if needed and log the metric."""
+        if self.npz_filename not in self.cached_batches:
+            batch = load_batch_from_npz(self.npz_filename)
+            self.cached_batches[self.npz_filename] = CachedBatch(
+                batch, hook_data.global_step
+            )
+
+        super().log(hook_data, graphdef)
 
 
 class Metrics:
@@ -264,7 +276,13 @@ class Metrics:
                     self._cached_batches,
                 )
             elif mc.HasField("npz_filename"):
-                metric = _NpzMetric(mc, tb_logger, loss_fn, mc.npz_filename)
+                metric = _NpzMetric(
+                    mc,
+                    tb_logger,
+                    loss_fn,
+                    mc.npz_filename,
+                    self._cached_batches,
+                )
             else:
                 raise ValueError(f"Metric '{mc.name}' has no sample source")
 
