@@ -28,6 +28,7 @@ class DataLoader {
 
   void Start();
   TensorTuple GetNext(std::string_view alias);
+  std::optional<TensorTuple> MaybeGetNext(std::string_view alias);
   void Stop();
   std::pair<std::string, float> GetBucketMetrics(int time_period,
                                                  bool include_pending) const;

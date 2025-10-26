@@ -1,7 +1,7 @@
 # ABOUTME: Type stubs for C++ DataLoader PyBind11 bindings.
 # ABOUTME: Provides type annotations for _lczero_training compiled module.
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -22,6 +22,9 @@ class DataLoader:
     ) -> List[Tuple[str, StageControlResponse]]: ...
     def start(self) -> None: ...
     def get_next(self, alias: str = "") -> Tuple[np.ndarray, ...]: ...
+    def maybe_get_next(
+        self, alias: str = ""
+    ) -> Optional[Tuple[np.ndarray, ...]]: ...
     def stop(self) -> None: ...
     def get_bucket_metrics(
         self, time_period: int, include_pending: bool

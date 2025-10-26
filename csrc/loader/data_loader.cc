@@ -85,6 +85,19 @@ TensorTuple DataLoader::GetNext(std::string_view alias) {
   return q->Get();
 }
 
+std::optional<TensorTuple> DataLoader::MaybeGetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
+  if (!q) {
+    std::string alias_list = absl::StrJoin(
+        outputs_, ", ",
+        [](std::string* out, const auto& p) { absl::StrAppend(out, p.first); });
+    throw std::runtime_error(absl::StrCat("Unknown DataLoader output: '", alias,
+                                          "'. Available outputs: [", alias_list,
+                                          "]."));
+  }
+  return q->MaybeGet();
+}
+
 void DataLoader::Stop() {
   if (stopped_) return;
 

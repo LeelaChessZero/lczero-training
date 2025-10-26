@@ -141,6 +141,21 @@ PYBIND11_MODULE(_lczero_training, m) {
           "Get next batch for the given output alias (default empty) as a "
           "tuple of numpy arrays")
       .def(
+          "maybe_get_next",
+          [](DataLoader& self, const std::string& alias) -> py::object {
+            auto result = [&] {
+              py::gil_scoped_release release;
+              return self.MaybeGetNext(alias);
+            }();
+            if (result.has_value()) {
+              return tensor_tuple_to_numpy_tuple(std::move(*result));
+            }
+            return py::none();
+          },
+          py::arg("alias") = "",
+          "Non-blocking get next batch for the given output alias (default "
+          "empty). Returns tuple of numpy arrays or None if no data available")
+      .def(
           "get_bucket_metrics",
           [](const DataLoader& self, int time_period, bool include_pending) {
             auto [metrics, duration] = [&] {
