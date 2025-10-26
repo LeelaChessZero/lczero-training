@@ -64,13 +64,11 @@ def _validate_and_get_metrics(
 def _load_and_migrate_checkpoint(
     checkpoint_path: str,
     step: int,
-    template: TrainingState | None,
+    template: TrainingState,
     rules: list[tuple],
 ) -> TrainingState:
     """Load checkpoint and apply migration if rules provided."""
     state, _ = load_checkpoint(checkpoint_path, step)
-    if not rules:
-        return state
     return Migration(state, template).run(rules)
 
 
@@ -114,11 +112,7 @@ def backfill_metrics(
 
     # Prepare migration if needed.
     rules = load_migration_rules(migration_config_path)
-    template = (
-        TrainingState.new_from_config(config.model, config.training)
-        if rules
-        else None
-    )
+    template = TrainingState.new_from_config(config.model, config.training)
 
     # Get and process checkpoints.
     steps = get_checkpoint_steps(
