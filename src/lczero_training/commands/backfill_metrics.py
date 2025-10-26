@@ -3,6 +3,7 @@ import logging
 import sys
 
 from lczero_training.commands import configure_root_logging
+from lczero_training.training.backfill_metrics import backfill_metrics
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -48,7 +49,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Lazy import to avoid heavy deps unless executing the command.
-    from lczero_training.training.backfill_metrics import backfill_metrics
 
     backfill_metrics(
         config_path=args.config,
