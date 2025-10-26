@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 Batch = Tuple[np.ndarray, ...]
 
 
+def load_batch_from_npz(npz_filename: str) -> Batch:
+    """Load a batch from an NPZ file.
+
+    Args:
+        npz_filename: Path to the NPZ file.
+
+    Returns:
+        Batch tuple of (inputs, policy, values, _, movesleft).
+
+    Raises:
+        ValueError: If the NPZ file doesn't contain exactly one batch.
+    """
+    with np.load(npz_filename) as npz_file:
+        batches = npz_file["batches"]
+        if batches.size != 1:
+            raise ValueError(
+                f"Expected 1 batch in npz '{npz_filename}', got {batches.size}"
+            )
+        return batches[0]
+
+
 class _Metric(ABC):
     """Base class for individual metric tracking."""
 
@@ -86,43 +107,65 @@ class _EvaluatingMetric(_Metric, ABC):
         self, batch: Batch, jit_state: JitTrainingState, graphdef: nnx.GraphDef
     ) -> Dict[str, jax.Array]:
         """Evaluate loss function on a batch of data."""
-        b_inputs, b_policy, b_values, _, b_movesleft = batch
-
-        model_state = (
-            jit_state.swa_state
-            if self.config.use_swa_model
-            else jit_state.model_state
+        return evaluate_batch(
+            batch, jit_state, graphdef, self.loss_fn, self.config.use_swa_model
         )
-        if self.config.use_swa_model and model_state is None:
-            raise RuntimeError("SWA state not available")
 
-        model = nnx.merge(graphdef, model_state)
 
-        def loss_fn(
-            m: LczeroModel, b: dict
-        ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-            return self.loss_fn(
-                m,
-                inputs=b["inputs"],
-                value_targets=b["value_targets"],
-                policy_targets=b["policy_targets"],
-                movesleft_targets=b["movesleft_targets"],
-            )
+def evaluate_batch(
+    batch: Batch,
+    jit_state: JitTrainingState,
+    graphdef: nnx.GraphDef,
+    loss_fn: LczeroLoss,
+    use_swa_model: bool = False,
+) -> Dict[str, jax.Array]:
+    """Evaluate loss function on a batch of data.
 
-        loss_vfn = jax.vmap(loss_fn, in_axes=(None, 0), out_axes=0)
+    Args:
+        batch: Tuple of (inputs, policy, values, _, movesleft).
+        jit_state: JIT training state containing model and optimizer state.
+        graphdef: Graph definition of the model.
+        loss_fn: Loss function to evaluate.
+        use_swa_model: If True, use SWA model state instead of regular model.
 
-        batch_dict = {
-            "inputs": jax.device_put(b_inputs),
-            "value_targets": jax.device_put(b_values),
-            "policy_targets": jax.device_put(b_policy),
-            "movesleft_targets": jax.device_put(b_movesleft),
-        }
+    Returns:
+        Dictionary of metrics with loss and unweighted losses.
+    """
+    b_inputs, b_policy, b_values, _, b_movesleft = batch
 
-        per_sample_loss, unweighted = loss_vfn(model, batch_dict)
-        return {
-            "loss": jnp.mean(per_sample_loss),
-            "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
-        }
+    model_state = (
+        jit_state.swa_state if use_swa_model else jit_state.model_state
+    )
+    if use_swa_model and model_state is None:
+        raise RuntimeError("SWA state not available")
+
+    model = nnx.merge(graphdef, model_state)
+
+    def loss_fn_inner(
+        m: LczeroModel, b: dict
+    ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
+        return loss_fn(
+            m,
+            inputs=b["inputs"],
+            value_targets=b["value_targets"],
+            policy_targets=b["policy_targets"],
+            movesleft_targets=b["movesleft_targets"],
+        )
+
+    loss_vfn = jax.vmap(loss_fn_inner, in_axes=(None, 0), out_axes=0)
+
+    batch_dict = {
+        "inputs": jax.device_put(b_inputs),
+        "value_targets": jax.device_put(b_values),
+        "policy_targets": jax.device_put(b_policy),
+        "movesleft_targets": jax.device_put(b_movesleft),
+    }
+
+    per_sample_loss, unweighted = loss_vfn(model, batch_dict)
+    return {
+        "loss": jnp.mean(per_sample_loss),
+        "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
+    }
 
 
 class _DataLoaderMetric(_EvaluatingMetric):
@@ -166,14 +209,7 @@ class _NpzMetric(_EvaluatingMetric):
         npz_filename: str,
     ):
         super().__init__(config, logger, loss_fn)
-        with np.load(npz_filename) as npz_file:
-            batches = npz_file["batches"]
-            if batches.size != 1:
-                raise ValueError(
-                    f"Metric '{config.name}': Expected 1 batch in npz, "
-                    f"got {batches.size}"
-                )
-            self.npz_data: Batch = batches[0]
+        self.npz_data: Batch = load_batch_from_npz(npz_filename)
 
     def get_batch(self) -> Batch:
         return self.npz_data

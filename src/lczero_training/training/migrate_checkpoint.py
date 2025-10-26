@@ -26,9 +26,18 @@ def _load_new_state(
     return new_state
 
 
-def _load_old_state(
-    checkpoint_path: str, checkpoint_step: int | None
+def load_checkpoint(
+    checkpoint_path: str, checkpoint_step: int | None = None
 ) -> Tuple[Any, int]:
+    """Load a checkpoint from the given path.
+
+    Args:
+        checkpoint_path: Path to the checkpoint directory.
+        checkpoint_step: Step to load, or None to load the latest.
+
+    Returns:
+        Tuple of (checkpoint_state, checkpoint_step).
+    """
     manager = ocp.CheckpointManager(
         checkpoint_path,
         options=ocp.CheckpointManagerOptions(create=False),
@@ -40,7 +49,52 @@ def _load_old_state(
     return manager.restore(checkpoint_step), checkpoint_step
 
 
-def _load_rules(rules_file: str | None) -> List[Tuple[Any, Any]]:
+def get_checkpoint_steps(
+    checkpoint_path: str,
+    min_step: int | None = None,
+    max_step: int | None = None,
+) -> list[int]:
+    """Get all checkpoint steps in the given range.
+
+    Args:
+        checkpoint_path: Path to the checkpoint directory.
+        min_step: Minimum step (inclusive), or None for no minimum.
+        max_step: Maximum step (inclusive), or None for no maximum.
+
+    Returns:
+        List of checkpoint steps in ascending order.
+    """
+    manager = ocp.CheckpointManager(
+        checkpoint_path,
+        options=ocp.CheckpointManagerOptions(create=False),
+    )
+    all_steps = sorted(manager.all_steps())
+    filtered_steps = []
+    for step in all_steps:
+        if min_step is not None and step < min_step:
+            continue
+        if max_step is not None and step > max_step:
+            continue
+        filtered_steps.append(step)
+    return filtered_steps
+
+
+def _load_old_state(
+    checkpoint_path: str, checkpoint_step: int | None
+) -> Tuple[Any, int]:
+    return load_checkpoint(checkpoint_path, checkpoint_step)
+
+
+def load_migration_rules(rules_file: str | None) -> List[Tuple[Any, Any]]:
+    """Load migration rules from a CheckpointMigrationConfig file.
+
+    Args:
+        rules_file: Path to the CheckpointMigrationConfig textproto file,
+            or None to return empty rules.
+
+    Returns:
+        List of (from_path, to_path) tuples representing migration rules.
+    """
     rules = []
     if rules_file:
         migration_config = (
@@ -251,7 +305,7 @@ def migrate_checkpoint(
     old_state, old_checkpoint_step = _load_old_state(
         root_config.training.checkpoint.path, checkpoint_step
     )
-    rules = _load_rules(rules_file)
+    rules = load_migration_rules(rules_file)
 
     migration = Migration(old_state, new_state)
     migrated_state = migration.run(rules)
