@@ -103,6 +103,13 @@ message ShufflingFrameSamplerConfig {
 // Configuration for tensor generator that converts frames to batched tensors.
 // Maps to TensorGeneratorOptions in csrc/loader/tensor_generator.h
 message TensorGeneratorConfig {
+  // Queue overflow behavior.
+  enum OverflowBehavior {
+    BLOCK = 0;
+    DROP_NEW = 1;
+    KEEP_NEWEST = 2;
+  }
+
   // Name of the stage providing input to this generator.
   optional string input = 1;
   // Number of worker threads for tensor generation.
@@ -111,6 +118,8 @@ message TensorGeneratorConfig {
   optional uint64 batch_size = 3 [default = 1024];
   // Size of the output queue.
   optional uint64 queue_capacity = 4 [default = 4];
+  // Overflow behavior of the output queue.
+  optional OverflowBehavior overflow_behavior = 5;
 }
 
 // Configuration for a stage that splits incoming ChunkSources into several

@@ -17,11 +17,30 @@
 namespace lczero {
 namespace training {
 
+namespace {
+
+OverflowBehavior ToOverflowBehavior(
+    TensorGeneratorConfig::OverflowBehavior behavior) {
+  using OB = OverflowBehavior;
+  switch (behavior) {
+    case TensorGeneratorConfig::BLOCK:
+      return OB::BLOCK;
+    case TensorGeneratorConfig::DROP_NEW:
+      return OB::DROP_NEW;
+    case TensorGeneratorConfig::KEEP_NEWEST:
+      return OB::KEEP_NEWEST;
+  }
+  throw std::runtime_error("Unknown OverflowBehavior in TensorGeneratorConfig");
+}
+
+}  // namespace
+
 TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config,
                                  const StageRegistry& existing_stages)
     : SingleInputStage<TensorGeneratorConfig, InputType>(config,
                                                          existing_stages),
-      output_queue_(config.queue_capacity()),
+      output_queue_(config.queue_capacity(),
+                    ToOverflowBehavior(config.overflow_behavior())),
       batch_size_(config.batch_size()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing TensorGenerator with " << config.threads()
