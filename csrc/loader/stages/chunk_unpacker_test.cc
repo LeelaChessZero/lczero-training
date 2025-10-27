@@ -44,7 +44,7 @@ class ChunkUnpackerTest : public ::testing::Test {
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<TrainingChunk>>(10);
     config_.set_threads(1);
-    config_.set_queue_capacity(10);
+    config_.mutable_output()->set_queue_capacity(10);
     config_.set_input("source");
     config_.set_position_sampling_rate(1.0f);
   }
@@ -84,7 +84,7 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
   producer.Put(MakeChunk({test_frame}));
   producer.Close();
 
-  auto output_frame = unpacker.output()->Get();
+  auto output_frame = unpacker.output_queue()->Get();
   EXPECT_EQ(output_frame.version, 6);
   EXPECT_EQ(output_frame.input_format, 3);
   EXPECT_EQ(output_frame.root_q, 0.5f);
@@ -106,7 +106,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
   std::vector<uint32_t> actual_versions;
   actual_versions.reserve(test_frames.size());
   for (size_t i = 0; i < test_frames.size(); ++i) {
-    auto output_frame = unpacker.output()->Get();
+    auto output_frame = unpacker.output_queue()->Get();
     actual_versions.push_back(output_frame.version);
     EXPECT_EQ(output_frame.input_format, 3);
     EXPECT_EQ(output_frame.root_q, 0.5f);
@@ -148,7 +148,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
   std::vector<uint32_t> actual_versions;
   actual_versions.reserve(expected_versions.size());
   for (size_t i = 0; i < expected_versions.size(); ++i) {
-    auto output_frame = unpacker.output()->Get();
+    auto output_frame = unpacker.output_queue()->Get();
     actual_versions.push_back(output_frame.version);
     EXPECT_EQ(output_frame.input_format, 3);
     EXPECT_EQ(output_frame.root_q, 0.5f);
@@ -174,7 +174,7 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
   producer.Close();
 
   // Should not produce any output frames, queue should close
-  EXPECT_THROW(unpacker.output()->Get(), QueueClosedException);
+  EXPECT_THROW(unpacker.output_queue()->Get(), QueueClosedException);
 }
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
@@ -188,7 +188,7 @@ TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
   input_queue_->Close();
 
   // Output queue should eventually close
-  EXPECT_THROW(unpacker.output()->Get(), QueueClosedException);
+  EXPECT_THROW(unpacker.output_queue()->Get(), QueueClosedException);
 }
 
 TEST(PickSampledPositionsTest, Deterministic) {

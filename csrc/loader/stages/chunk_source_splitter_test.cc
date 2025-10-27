@@ -63,12 +63,12 @@ TEST(ChunkSourceSplitterTest, SplitsByHashAndWeight) {
   cfg.set_input("src");
   auto* outA = cfg.add_output();
   outA->set_name("A");
-  outA->set_weight(1);
   outA->set_queue_capacity(8);
+  cfg.add_weight(1);
   auto* outB = cfg.add_output();
   outB->set_name("B");
-  outB->set_weight(2);
   outB->set_queue_capacity(8);
+  cfg.add_weight(2);
 
   ChunkSourceSplitter splitter(cfg, registry);
   registry.AddStage(
@@ -131,8 +131,10 @@ TEST(ChunkSourceSplitterTest, BroadcastsInitialScanComplete) {
   cfg.set_input("src");
   auto* outA = cfg.add_output();
   outA->set_name("A");
+  cfg.add_weight(1);
   auto* outB = cfg.add_output();
   outB->set_name("B");
+  cfg.add_weight(1);
 
   ChunkSourceSplitter splitter(cfg, registry);
   splitter.Start();

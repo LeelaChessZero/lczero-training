@@ -16,7 +16,7 @@ namespace {
 
 FilePathProviderConfig MakeConfig(const std::filesystem::path& directory) {
   FilePathProviderConfig config;
-  config.set_queue_capacity(128);
+  config.mutable_output()->set_queue_capacity(128);
   config.set_directory(directory.string());
   return config;
 }
@@ -98,7 +98,7 @@ TEST_F(FilePathProviderTest, ConstructorCreatesQueue) {
   FilePathProvider provider(Config());
   provider.Start();
 
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
   ASSERT_NE(queue, nullptr);
   EXPECT_EQ(queue->Capacity(), 128);
 
@@ -117,7 +117,7 @@ TEST_F(FilePathProviderTest, InitialScanFindsVisibleFiles) {
 
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
 
   auto discovered = DrainInitialScan(queue);
   std::unordered_set<std::string> relative_paths;
@@ -141,7 +141,7 @@ TEST_F(FilePathProviderTest, InitialScanSkipsHiddenEntries) {
 
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
 
   auto discovered = DrainInitialScan(queue);
   std::unordered_set<std::string> relative_paths;
@@ -160,7 +160,7 @@ TEST_F(FilePathProviderTest, InitialScanSkipsHiddenEntries) {
 TEST_F(FilePathProviderTest, DetectsNewVisibleFile) {
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
   DrainInitialScan(queue);
 
   CreateFile(test_dir_ / "new_file.txt");
@@ -177,7 +177,7 @@ TEST_F(FilePathProviderTest, DetectsFilesInPreExistingSubdirectory) {
 
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
   DrainInitialScan(queue);
 
   CreateFile(subdir / "from_subdir.txt");
@@ -191,7 +191,7 @@ TEST_F(FilePathProviderTest, DetectsFilesInPreExistingSubdirectory) {
 TEST_F(FilePathProviderTest, IgnoresHiddenFileEvents) {
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
   DrainInitialScan(queue);
 
   CreateFile(test_dir_ / ".hidden_event.txt");
@@ -207,7 +207,7 @@ TEST_F(FilePathProviderTest, IgnoresHiddenFileEvents) {
 TEST_F(FilePathProviderTest, SkipsHiddenDirectoryRecursion) {
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
   DrainInitialScan(queue);
 
   CreateDirectory(test_dir_ / ".hidden_dir");
@@ -223,7 +223,7 @@ TEST_F(FilePathProviderTest, SkipsHiddenDirectoryRecursion) {
 TEST_F(FilePathProviderTest, HandlesEmptyDirectory) {
   FilePathProvider provider(Config());
   provider.Start();
-  auto* queue = provider.output();
+  auto* queue = provider.output_queue();
 
   auto discovered = DrainInitialScan(queue);
   EXPECT_TRUE(discovered.empty());

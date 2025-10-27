@@ -35,7 +35,7 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
-  config.set_queue_capacity(10);
+  config.mutable_output()->set_queue_capacity(10);
   config.set_input("source");
   StageRegistry registry;
   registry.AddStage(
@@ -57,7 +57,7 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   // files
   try {
     while (true) {
-      auto output = feed.output()->Get();
+      auto output = feed.output_queue()->Get();
       // If we get output, it means a ChunkSource was created, which shouldn't
       // happen for unsupported files
       FAIL() << "Expected no output for unsupported file extension";
@@ -73,7 +73,7 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
-  config.set_queue_capacity(10);
+  config.mutable_output()->set_queue_capacity(10);
   config.set_input("source");
   StageRegistry registry;
   registry.AddStage(
@@ -98,7 +98,7 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   // Queue should eventually close when input is done
   try {
     while (true) {
-      feed.output()->Get();
+      feed.output_queue()->Get();
     }
   } catch (const QueueClosedException&) {
     SUCCEED();
@@ -109,7 +109,7 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   Queue<FilePathProvider::File> input_queue(10);
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
-  config.set_queue_capacity(10);
+  config.mutable_output()->set_queue_capacity(10);
   config.set_input("source");
   StageRegistry registry;
   registry.AddStage(
@@ -126,14 +126,14 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   }  // Producer destroyed here, closing input queue
 
   // Should get kInitialScanComplete in output with null ChunkSource
-  auto output = feed.output()->Get();
+  auto output = feed.output_queue()->Get();
   EXPECT_EQ(output.message_type,
             FilePathProvider::MessageType::kInitialScanComplete);
   EXPECT_EQ(output.source, nullptr);
 
   // Queue should be closed after the single message
   try {
-    feed.output()->Get();
+    feed.output_queue()->Get();
     FAIL() << "Expected queue to be closed";
   } catch (const QueueClosedException&) {
     SUCCEED();

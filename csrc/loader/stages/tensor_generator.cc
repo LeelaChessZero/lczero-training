@@ -17,30 +17,11 @@
 namespace lczero {
 namespace training {
 
-namespace {
-
-OverflowBehavior ToOverflowBehavior(
-    TensorGeneratorConfig::OverflowBehavior behavior) {
-  using OB = OverflowBehavior;
-  switch (behavior) {
-    case TensorGeneratorConfig::BLOCK:
-      return OB::BLOCK;
-    case TensorGeneratorConfig::DROP_NEW:
-      return OB::DROP_NEW;
-    case TensorGeneratorConfig::KEEP_NEWEST:
-      return OB::KEEP_NEWEST;
-  }
-  throw std::runtime_error("Unknown OverflowBehavior in TensorGeneratorConfig");
-}
-
-}  // namespace
-
 TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config,
                                  const StageRegistry& existing_stages)
     : SingleInputStage<TensorGeneratorConfig, InputType>(config,
                                                          existing_stages),
-      output_queue_(config.queue_capacity(),
-                    ToOverflowBehavior(config.overflow_behavior())),
+      SingleOutputStage<OutputType>(config.output()),
       batch_size_(config.batch_size()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing TensorGenerator with " << config.threads()
@@ -54,15 +35,6 @@ TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config,
 }
 
 TensorGenerator::~TensorGenerator() { Stop(); }
-
-Queue<TensorGenerator::OutputType>* TensorGenerator::output() {
-  return &output_queue_;
-}
-
-QueueBase* TensorGenerator::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
 
 void TensorGenerator::Start() {
   LOG(INFO) << "Starting TensorGenerator worker threads.";
@@ -79,14 +51,14 @@ void TensorGenerator::Stop() {
 
   LOG(INFO) << "Stopping TensorGenerator.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
   thread_pool_.WaitAll();
   thread_pool_.Shutdown();
   LOG(INFO) << "TensorGenerator stopped.";
 }
 
 void TensorGenerator::Worker(ThreadContext* context) {
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
   std::vector<FrameType> batch;
   batch.reserve(batch_size_);
 
@@ -236,7 +208,8 @@ StageMetricProto TensorGenerator::FlushMetrics() {
     UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

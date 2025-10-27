@@ -21,7 +21,8 @@ namespace training {
 
 // Single-threaded stage that shuffles chunks within each source.
 class SimpleChunkShuffler
-    : public SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase> {
+    : public SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase>,
+      public SingleOutputStage<TrainingChunk> {
  public:
   SimpleChunkShuffler(const SimpleChunkShufflerConfig& config,
                       const StageRegistry& existing_stages);
@@ -30,7 +31,6 @@ class SimpleChunkShuffler
   void Start() override;
   void Stop() override;
   StageMetricProto FlushMetrics() override;
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   void Worker();
@@ -40,7 +40,6 @@ class SimpleChunkShuffler
                                          const std::string& sort_key,
                                          size_t index);
 
-  Queue<TrainingChunk> output_queue_;
   std::jthread worker_thread_;
   std::atomic<bool> stop_requested_{false};
   std::atomic<uint64_t> chunks_processed_{0};

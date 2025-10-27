@@ -34,7 +34,7 @@ ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
                                      const StageRegistry& existing_stages)
     : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config,
                                                            existing_stages),
-      output_queue_(config.queue_capacity()),
+      SingleOutputStage<OutputType>(config.output()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkSourceLoader with " << config.threads()
             << " worker threads";
@@ -47,15 +47,6 @@ ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
 }
 
 ChunkSourceLoader::~ChunkSourceLoader() { Stop(); }
-
-Queue<ChunkSourceLoader::OutputType>* ChunkSourceLoader::output() {
-  return &output_queue_;
-}
-
-QueueBase* ChunkSourceLoader::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
 
 void ChunkSourceLoader::Start() {
   LOG(INFO) << "Starting ChunkSourceLoader worker threads.";
@@ -72,7 +63,7 @@ void ChunkSourceLoader::Stop() {
 
   LOG(INFO) << "Stopping ChunkSourceLoader.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
   thread_pool_.WaitAll();
   thread_pool_.Shutdown();
   LOG(INFO) << "ChunkSourceLoader stopped.";
@@ -80,7 +71,7 @@ void ChunkSourceLoader::Stop() {
 
 void ChunkSourceLoader::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
   LOG(INFO) << "ChunkSourceLoader worker@" << static_cast<const void*>(context)
             << " started.";
 
@@ -159,7 +150,8 @@ StageMetricProto ChunkSourceLoader::FlushMetrics() {
     }
   }
 
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

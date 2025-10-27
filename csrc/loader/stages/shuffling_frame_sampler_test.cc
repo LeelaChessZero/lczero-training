@@ -36,7 +36,7 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_reservoir_size_per_thread(10);  // Small size for testing
-    config_.set_queue_capacity(20);
+    config_.mutable_output()->set_queue_capacity(20);
     config_.set_input("source");
   }
 
@@ -71,7 +71,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
   std::set<uint32_t> output_versions;
   try {
     while (true) {
-      auto frame = sampler.output()->Get();
+      auto frame = sampler.output_queue()->Get();
       output_versions.insert(frame.version);
     }
   } catch (const QueueClosedException&) {
@@ -103,7 +103,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
   std::set<uint32_t> output_versions;
   try {
     while (true) {
-      auto frame = sampler.output()->Get();
+      auto frame = sampler.output_queue()->Get();
       output_versions.insert(frame.version);
     }
   } catch (const QueueClosedException&) {
@@ -132,7 +132,7 @@ TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
   input_queue_->Close();
 
   // Should not output any frames
-  EXPECT_THROW(sampler.output()->Get(), QueueClosedException);
+  EXPECT_THROW(sampler.output_queue()->Get(), QueueClosedException);
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
@@ -155,7 +155,7 @@ TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
   std::set<uint32_t> output_versions;
   try {
     while (true) {
-      auto frame = sampler.output()->Get();
+      auto frame = sampler.output_queue()->Get();
       output_versions.insert(frame.version);
     }
   } catch (const QueueClosedException&) {
@@ -199,7 +199,7 @@ TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   std::vector<V6TrainingData> output_frames;
   try {
     while (true) {
-      output_frames.push_back(sampler.output()->Get());
+      output_frames.push_back(sampler.output_queue()->Get());
     }
   } catch (const QueueClosedException&) {
     // Expected

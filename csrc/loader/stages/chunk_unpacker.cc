@@ -94,6 +94,7 @@ uint32_t GenerateRunSeed() {
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
                              const StageRegistry& existing_stages)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config, existing_stages),
+      SingleOutputStage<OutputType>(config.output()),
       position_sampling_rate_(
           config.has_position_sampling_rate()
               ? absl::make_optional(config.position_sampling_rate())
@@ -102,7 +103,6 @@ ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
                           ? absl::make_optional(config.position_count())
                           : absl::nullopt),
       run_seed_(GenerateRunSeed()),
-      output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   const bool has_rate = config.has_position_sampling_rate();
   const bool has_count = config.has_position_count();
@@ -121,15 +121,6 @@ ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config,
 
 ChunkUnpacker::~ChunkUnpacker() { Stop(); }
 
-Queue<ChunkUnpacker::OutputType>* ChunkUnpacker::output() {
-  return &output_queue_;
-}
-
-QueueBase* ChunkUnpacker::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
-
 void ChunkUnpacker::Start() {
   LOG(INFO) << "Starting ChunkUnpacker worker threads.";
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
@@ -145,7 +136,7 @@ void ChunkUnpacker::Stop() {
 
   LOG(INFO) << "Stopping ChunkUnpacker.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
   thread_pool_.WaitAll();
   thread_pool_.Shutdown();
   LOG(INFO) << "ChunkUnpacker stopped.";
@@ -153,7 +144,7 @@ void ChunkUnpacker::Stop() {
 
 void ChunkUnpacker::Worker(ThreadContext* context) {
   // Create a local producer for this worker thread.
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
@@ -199,7 +190,8 @@ StageMetricProto ChunkUnpacker::FlushMetrics() {
     UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

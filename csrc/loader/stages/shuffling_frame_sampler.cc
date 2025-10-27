@@ -17,7 +17,7 @@ ShufflingFrameSampler::ShufflingFrameSampler(
     const StageRegistry& existing_stages)
     : SingleInputStage<ShufflingFrameSamplerConfig, InputType>(config,
                                                                existing_stages),
-      output_queue_(config.queue_capacity()),
+      SingleOutputStage<OutputType>(config.output()),
       reservoir_size_per_thread_(config.reservoir_size_per_thread()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ShufflingFrameSampler with " << config.threads()
@@ -32,15 +32,6 @@ ShufflingFrameSampler::ShufflingFrameSampler(
 }
 
 ShufflingFrameSampler::~ShufflingFrameSampler() { Stop(); }
-
-Queue<ShufflingFrameSampler::OutputType>* ShufflingFrameSampler::output() {
-  return &output_queue_;
-}
-
-QueueBase* ShufflingFrameSampler::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
 
 void ShufflingFrameSampler::Start() {
   LOG(INFO) << "Starting ShufflingFrameSampler worker threads.";
@@ -57,7 +48,7 @@ void ShufflingFrameSampler::Stop() {
 
   LOG(INFO) << "Stopping ShufflingFrameSampler.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
   thread_pool_.WaitAll();
   thread_pool_.Shutdown();
   LOG(INFO) << "ShufflingFrameSampler stopped.";
@@ -66,7 +57,7 @@ void ShufflingFrameSampler::Stop() {
 void ShufflingFrameSampler::Worker(ThreadContext* context) {
   // Create producer early so that if input queue closes during reservoir
   // prefilling, the producer will be destroyed and close the output queue.
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
   absl::FixedArray<FrameType> reservoir(reservoir_size_per_thread_);
 
   try {
@@ -112,7 +103,8 @@ StageMetricProto ShufflingFrameSampler::FlushMetrics() {
     UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

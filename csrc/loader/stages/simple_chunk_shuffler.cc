@@ -15,15 +15,10 @@ SimpleChunkShuffler::SimpleChunkShuffler(
     const StageRegistry& existing_stages)
     : SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase>(
           config, existing_stages),
-      output_queue_(config.queue_capacity()),
+      SingleOutputStage<TrainingChunk>(config.output()),
       bitgen_(absl::MakeSeedSeq()) {}
 
 SimpleChunkShuffler::~SimpleChunkShuffler() { Stop(); }
-
-QueueBase* SimpleChunkShuffler::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
 
 void SimpleChunkShuffler::Start() {
   worker_thread_ = std::jthread([this]() { Worker(); });
@@ -32,11 +27,11 @@ void SimpleChunkShuffler::Start() {
 void SimpleChunkShuffler::Stop() {
   if (stop_requested_.exchange(true)) return;
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
 }
 
 void SimpleChunkShuffler::Worker() {
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
@@ -111,7 +106,7 @@ StageMetricProto SimpleChunkShuffler::FlushMetrics() {
   add_count("chunks_dropped", chunks_dropped_);
   add_count("sources_processed", sources_processed_);
 
-  *metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *metric.add_queue_metrics() = MetricsFromQueue("output", *output_queue());
   return metric;
 }
 

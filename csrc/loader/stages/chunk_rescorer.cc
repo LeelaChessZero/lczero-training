@@ -15,12 +15,12 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
                              const StageRegistry& existing_stages,
                              RescoreFn rescore_fn)
     : SingleInputStage<ChunkRescorerConfig, InputType>(config, existing_stages),
+      SingleOutputStage<OutputType>(config.output()),
       syzygy_paths_(config.syzygy_paths()),
       dist_temp_(config.dist_temp()),
       dist_offset_(config.dist_offset()),
       dtz_boost_(config.dtz_boost()),
       new_input_format_(config.new_input_format()),
-      output_queue_(config.queue_capacity()),
       thread_pool_(config.threads(), ThreadPoolOptions{}),
       rescore_fn_(std::move(rescore_fn)) {
   if (!rescore_fn_) {
@@ -35,8 +35,7 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
   }
 
   LOG(INFO) << "Initializing ChunkRescorer with " << config.threads()
-            << " worker thread(s) and queue capacity "
-            << config.queue_capacity();
+            << " worker thread(s)";
 
   thread_contexts_.reserve(config.threads());
   for (size_t i = 0; i < config.threads(); ++i) {
@@ -45,10 +44,6 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
 }
 
 ChunkRescorer::~ChunkRescorer() { Stop(); }
-
-Queue<ChunkRescorer::OutputType>* ChunkRescorer::output() {
-  return &output_queue_;
-}
 
 void ChunkRescorer::InitializeTablebase() {
   if (tablebase_initialized_) {
@@ -83,19 +78,14 @@ void ChunkRescorer::Stop() {
 
   LOG(INFO) << "Stopping ChunkRescorer.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
   thread_pool_.WaitAll();
   thread_pool_.Shutdown();
   LOG(INFO) << "ChunkRescorer stopped.";
 }
 
-QueueBase* ChunkRescorer::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
-
 void ChunkRescorer::Worker(ThreadContext* context) {
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
@@ -133,7 +123,8 @@ StageMetricProto ChunkRescorer::FlushMetrics() {
     UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

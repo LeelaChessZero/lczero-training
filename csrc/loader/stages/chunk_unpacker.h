@@ -27,7 +27,8 @@ using FrameType = V6TrainingData;
 // Takes parsed TrainingChunk objects as input and outputs individual
 // V6TrainingData frames.
 class ChunkUnpacker
-    : public SingleInputStage<ChunkUnpackerConfig, TrainingChunk> {
+    : public SingleInputStage<ChunkUnpackerConfig, TrainingChunk>,
+      public SingleOutputStage<FrameType> {
  public:
   using InputType = TrainingChunk;
   using OutputType = FrameType;
@@ -36,12 +37,9 @@ class ChunkUnpacker
                 const StageRegistry& existing_stages);
   ~ChunkUnpacker();
 
-  Queue<OutputType>* output();
   void Start() override;
   void Stop() override;
   StageMetricProto FlushMetrics() override;
-
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   struct ThreadContext {
@@ -53,7 +51,6 @@ class ChunkUnpacker
   const absl::optional<float> position_sampling_rate_;
   const absl::optional<uint32_t> position_count_;
   const uint32_t run_seed_;
-  Queue<OutputType> output_queue_;
   // thread_contexts_ must be declared before thread_pool_ to ensure
   // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;

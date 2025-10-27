@@ -25,29 +25,31 @@
 namespace lczero {
 namespace training {
 
+// Message types for FilePathProvider output.
+enum class FilePathProviderMessageType {
+  kFile,                // File discovered (initial scan or inotify)
+  kInitialScanComplete  // Initial scan is complete (empty filepath)
+};
+
+// Output type for FilePathProvider.
+struct FilePathProviderFile {
+  std::filesystem::path filepath;
+  FilePathProviderMessageType message_type;
+};
+
 // This class watches for new files in a directory (recursively) and notifies
 // registered observers when new files are either closed after writing or
 // renamed into.
 // Uses background thread to monitor the directory.
-class FilePathProvider : public Stage {
+class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
  public:
   using Path = std::filesystem::path;
+  using MessageType = FilePathProviderMessageType;
+  using File = FilePathProviderFile;
 
-  enum class MessageType {
-    kFile,                // File discovered (initial scan or inotify)
-    kInitialScanComplete  // Initial scan is complete (empty filepath)
-  };
-
-  struct File {
-    Path filepath;
-    MessageType message_type;
-  };
   explicit FilePathProvider(const FilePathProviderConfig& config,
                             const StageRegistry& existing_stages = {});
   ~FilePathProvider();
-
-  // Returns the output queue for this stage
-  Queue<File>* output();
 
   // Starts monitoring the directory
   void Start() override;
@@ -57,8 +59,6 @@ class FilePathProvider : public Stage {
 
   // Returns current metrics and clears them.
   StageMetricProto FlushMetrics() override;
-
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   // Starts monitoring the directory.
@@ -76,7 +76,6 @@ class FilePathProvider : public Stage {
   // Watch descriptor to directory path.
   absl::flat_hash_map<int, Path> watch_descriptors_;
 
-  Queue<File> output_queue_;
   Path directory_;  // Directory to monitor
   Queue<File>::Producer producer_;
 

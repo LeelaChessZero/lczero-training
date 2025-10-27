@@ -11,20 +11,6 @@
 namespace lczero {
 namespace training {
 
-static OverflowBehavior ToOverflowBehavior(
-    ChunkSourceSplitterConfig::OverflowBehavior behavior) {
-  using OB = OverflowBehavior;
-  switch (behavior) {
-    case ChunkSourceSplitterConfig::BLOCK:
-      return OB::BLOCK;
-    case ChunkSourceSplitterConfig::DROP_NEW:
-      return OB::DROP_NEW;
-    case ChunkSourceSplitterConfig::KEEP_NEWEST:
-      return OB::KEEP_NEWEST;
-  }
-  return OB::BLOCK;
-}
-
 ChunkSourceSplitter::ChunkSourceSplitter(
     const ChunkSourceSplitterConfig& config,
     const StageRegistry& existing_stages)
@@ -34,24 +20,36 @@ ChunkSourceSplitter::ChunkSourceSplitter(
     throw std::runtime_error("ChunkSourceSplitter requires at least 1 output.");
   }
 
-  // Create output queues per config.
+  // Validate parallel arrays have same size.
+  if (config.output_size() != config.weight_size()) {
+    throw std::runtime_error(absl::StrCat(
+        "ChunkSourceSplitter output and weight arrays must have same size: ",
+        config.output_size(), " vs ", config.weight_size()));
+  }
+
+  // Create output queues from parallel arrays.
   outputs_.reserve(config.output_size());
-  for (const auto& out_cfg : config.output()) {
+  for (size_t i = 0; i < static_cast<size_t>(config.output_size()); ++i) {
+    const auto& queue_cfg = config.output(static_cast<int>(i));
+    const uint64_t weight = i < static_cast<size_t>(config.weight_size())
+                                ? config.weight(static_cast<int>(i))
+                                : 1;
+
     if (absl::c_any_of(outputs_, [&](const auto& existing_out) {
-          return existing_out->name == out_cfg.name();
+          return existing_out->name == queue_cfg.name();
         })) {
       throw std::runtime_error(std::string(absl::StrCat(
-          "Duplicate output name in ChunkSourceSplitter: ", out_cfg.name())));
+          "Duplicate output name in ChunkSourceSplitter: ", queue_cfg.name())));
     }
-    auto* out =
-        outputs_
-            .emplace_back(std::make_unique<Output>(
-                out_cfg.name(), out_cfg.weight(), out_cfg.queue_capacity(),
-                ToOverflowBehavior(out_cfg.overflow_behavior())))
-            .get();
+
+    auto* out = outputs_
+                    .emplace_back(std::make_unique<Output>(
+                        queue_cfg.name(), weight, queue_cfg.queue_capacity(),
+                        ToOverflowBehavior(queue_cfg.overflow_behavior())))
+                    .get();
     LOG(INFO) << "ChunkSourceSplitter configured output '" << out->name
               << "' weight=" << out->weight
-              << " capacity=" << out_cfg.queue_capacity();
+              << " capacity=" << queue_cfg.queue_capacity();
   }
 
   // Precompute cumulative weights for fast assignment.

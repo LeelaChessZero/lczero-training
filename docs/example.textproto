@@ -9,33 +9,41 @@ data_loader {
     file_path_provider {
       # Directory with training data files.
       directory: "/home/crem/tmp/2025-07/lczero-training/data2"
-      queue_capacity: 16 # Internal file queue size
+      output {
+        queue_capacity: 16 # Internal file queue size
+      }
     }
   }
   stage {
     name: "chunk_source_loader"
     chunk_source_loader {
       input: "file_path_provider"
-      threads: 1          # Threads for loading chunks
-      queue_capacity: 16  # Output queue for chunk sources
+      threads: 1  # Threads for loading chunks
+      output {
+        queue_capacity: 16  # Output queue for chunk sources
+      }
     }
   }
   stage {
     name: "shuffling_chunk_pool"
     shuffling_chunk_pool {
       input: "chunk_source_loader"
-      chunk_pool_size: 50000     # Shuffle buffer size (chunks in memory)
-      source_ingestion_threads: 1  # Threads for ingesting new sources
-      chunk_loading_threads: 4     # Threads for loading chunk data
-      queue_capacity: 16           # Output queue for shuffled chunks
+      chunk_pool_size: 50000        # Shuffle buffer size (chunks in memory)
+      source_ingestion_threads: 1   # Threads for ingesting new sources
+      chunk_loading_threads: 4      # Threads for loading chunk data
+      output {
+        queue_capacity: 16  # Output queue for shuffled chunks
+      }
     }
   }
   stage {
     name: "chunk_rescorer"
     chunk_rescorer {
       input: "shuffling_chunk_pool"
-      threads: 1            # Threads for chunk rescoring
-      queue_capacity: 16    # Output queue for rescored chunks
+      threads: 1  # Threads for chunk rescoring
+      output {
+        queue_capacity: 16  # Output queue for rescored chunks
+      }
       syzygy_paths: "/path/to/tb"  # Tablebase search paths (comma-separated)
       dist_temp: 1.0        # Policy temperature applied during rescoring
       dist_offset: 0.0      # Policy offset applied during rescoring
@@ -49,10 +57,12 @@ data_loader {
     name: "chunk_unpacker"
     chunk_unpacker {
       input: "chunk_rescorer"
-      threads: 1          # Threads for unpacking chunks
+      threads: 1  # Threads for unpacking chunks
       # Probability of sampling each position within a chunk.
       position_sampling_rate: 0.03
-      queue_capacity: 16  # Output queue for unpacked frames
+      output {
+        queue_capacity: 16  # Output queue for unpacked frames
+      }
     }
   }
   stage {
@@ -61,16 +71,20 @@ data_loader {
       input: "chunk_unpacker"
       threads: 1                          # Threads for frame sampling
       reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
-      queue_capacity: 16                  # Output queue for sampled frames
+      output {
+        queue_capacity: 16  # Output queue for sampled frames
+      }
     }
   }
   stage {
     name: "tensor_generator"
     tensor_generator {
       input: "shuffling_frame_sampler"
-      threads: 1         # Threads for tensor generation
-      batch_size: 128    # Batch size for tensors
-      queue_capacity: 8  # Output queue for batched tensors
+      threads: 1       # Threads for tensor generation
+      batch_size: 128  # Batch size for tensors
+      output {
+        queue_capacity: 8  # Output queue for batched tensors
+      }
     }
   }
 }

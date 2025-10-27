@@ -30,7 +30,8 @@ struct ChunkSourceWithPhase {
 // Worker pool that converts FilePathProvider output to ChunkSource objects.
 // Takes FilePathProvider::File as input and outputs ChunkSourceWithPhase.
 class ChunkSourceLoader
-    : public SingleInputStage<ChunkSourceLoaderConfig, FilePathProvider::File> {
+    : public SingleInputStage<ChunkSourceLoaderConfig, FilePathProvider::File>,
+      public SingleOutputStage<ChunkSourceWithPhase> {
  public:
   using InputType = FilePathProvider::File;
   using OutputType = ChunkSourceWithPhase;
@@ -39,13 +40,10 @@ class ChunkSourceLoader
                     const StageRegistry& existing_stages);
   ~ChunkSourceLoader();
 
-  Queue<OutputType>* output();
   void Start() override;
   void Stop() override;
 
   StageMetricProto FlushMetrics() override;
-
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   struct ThreadContext {
@@ -53,7 +51,6 @@ class ChunkSourceLoader
   };
 
   void Worker(ThreadContext* context);
-  Queue<OutputType> output_queue_;
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   std::atomic<uint64_t> skipped_files_count_{0};

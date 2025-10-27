@@ -50,6 +50,8 @@ in the `builddir/`.
 
 * NEVER add `# type: ignore` or other ways to mask/silence errors instead of
   fixing them.
+* Rely on protobuf default values. DO NOT write code like
+  `config.has_foo() ? config.foo() : default_value;`
 
 ## Documentation
 

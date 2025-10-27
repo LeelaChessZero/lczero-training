@@ -24,7 +24,8 @@ namespace training {
 // Stage that takes TrainingChunk objects, applies tablebase-based rescoring and
 // forwards the updated chunks downstream.
 class ChunkRescorer
-    : public SingleInputStage<ChunkRescorerConfig, TrainingChunk> {
+    : public SingleInputStage<ChunkRescorerConfig, TrainingChunk>,
+      public SingleOutputStage<TrainingChunk> {
  public:
   using InputType = TrainingChunk;
   using OutputType = TrainingChunk;
@@ -36,13 +37,9 @@ class ChunkRescorer
                 RescoreFn rescore_fn = RescoreTrainingData);
   ~ChunkRescorer() override;
 
-  Queue<OutputType>* output();
-
   void Start() override;
   void Stop() override;
   StageMetricProto FlushMetrics() override;
-
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   struct ThreadContext {
@@ -60,7 +57,6 @@ class ChunkRescorer
   float dtz_boost_;
   int new_input_format_;
 
-  Queue<OutputType> output_queue_;
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   std::atomic<bool> stop_requested_{false};

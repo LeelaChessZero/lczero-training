@@ -145,7 +145,7 @@ class ShufflingChunkPoolTest : public ::testing::Test {
     config.set_chunk_pool_size(chunk_pool_size);
     config.set_source_ingestion_threads(source_ingestion_threads);
     config.set_chunk_loading_threads(loading_threads);
-    config.set_queue_capacity(queue_capacity);
+    config.mutable_output()->set_queue_capacity(queue_capacity);
     SetInputProvider(&config);
     return config;
   }
@@ -165,7 +165,7 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
 
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
@@ -194,7 +194,7 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   shuffling_chunk_pool.Start();
 
   // The initialization thread should handle the error case
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Give the initialization thread time to complete and discover the error
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -244,7 +244,7 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsReportsWindowAndTotalCounts) {
                                           stage_registry_);
   shuffling_chunk_pool.Start();
 
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
   output_queue->WaitForSizeAtLeast(1);
 
   uint64_t current_count = 0;
@@ -298,7 +298,7 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = shuffling_chunk_pool.output();
+    auto* output_queue = shuffling_chunk_pool.output_queue();
     EXPECT_NE(output_queue, nullptr);
   });
 }
@@ -319,7 +319,7 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
 
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Wait for output workers to produce at least one chunk
   output_queue->WaitForSizeAtLeast(1);
@@ -354,7 +354,7 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
   // Close input queue to stop input worker from waiting
   CloseInputQueue();
 
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
   output_queue->WaitForSizeAtLeast(1);
   auto chunk = output_queue->Get();
 
@@ -391,7 +391,7 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
   shuffling_chunk_pool.Start();
 
   // Verify chunks are being produced from initial sources
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
   output_queue->WaitForSizeAtLeast(1);
   EXPECT_NE(output_queue, nullptr);
   EXPECT_GT(output_queue->Size(), 0);
@@ -425,35 +425,12 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = shuffling_chunk_pool.output();
+    auto* output_queue = shuffling_chunk_pool.output_queue();
     EXPECT_NE(output_queue, nullptr);
   });
 }
 
 // Test the ShufflingChunkPoolConfig structure
-TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigDefaults) {
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(1000);
-
-  EXPECT_EQ(config.chunk_pool_size(), 1000);
-  EXPECT_EQ(config.source_ingestion_threads(), 1);  // Default value
-  EXPECT_EQ(config.chunk_loading_threads(), 4);     // Default value
-  EXPECT_EQ(config.queue_capacity(), 16);           // Default value
-}
-
-TEST_F(ShufflingChunkPoolTest, ShufflingChunkPoolConfigCustomValues) {
-  ShufflingChunkPoolConfig config;
-  config.set_chunk_pool_size(500);
-  config.set_source_ingestion_threads(3);
-  config.set_chunk_loading_threads(4);
-  config.set_queue_capacity(25);
-
-  EXPECT_EQ(config.chunk_pool_size(), 500);
-  EXPECT_EQ(config.source_ingestion_threads(), 3);
-  EXPECT_EQ(config.chunk_loading_threads(), 4);
-  EXPECT_EQ(config.queue_capacity(), 25);
-}
-
 TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   // Add chunk sources in non-sorted order (by sort key)
   AddMockChunkSourceToQueue("source_b", 20);
@@ -471,7 +448,7 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
     // Close input queue to stop input worker from waiting
     CloseInputQueue();
 
-    auto* output_queue = shuffling_chunk_pool.output();
+    auto* output_queue = shuffling_chunk_pool.output_queue();
     EXPECT_NE(output_queue, nullptr);
   });
 }
@@ -488,7 +465,7 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
   shuffling_chunk_pool.Start();
 
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Collect chunks continuously and count total chunks received
   struct ChunkRecord {
@@ -547,7 +524,7 @@ TEST_F(ShufflingChunkPoolTest, HanseMetrics_NoRejection_CacheAndReshuffles) {
   ShufflingChunkPool pool(config, stage_registry_);
   pool.Start();
 
-  auto* output_queue = pool.output();
+  auto* output_queue = pool.output_queue();
   // Wait for multiple outputs to exercise cache hits and reshuffles.
   output_queue->WaitForSizeAtLeast(3);
   // Drain a few items.
@@ -588,7 +565,7 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
   shuffling_chunk_pool.Start();
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Wait for workers to produce some chunks
   output_queue->WaitForSizeAtLeast(1);
@@ -620,7 +597,7 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
   shuffling_chunk_pool.Start();
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Wait for workers to produce chunks
   output_queue->WaitForSizeAtLeast(1);
@@ -673,7 +650,7 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   {
     ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
     shuffling_chunk_pool.Start();
-    auto* output_queue = shuffling_chunk_pool.output();
+    auto* output_queue = shuffling_chunk_pool.output_queue();
 
     // Wait for workers to produce some chunks
     output_queue->WaitForSizeAtLeast(1);
@@ -699,7 +676,7 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
 
   ShufflingChunkPool shuffling_chunk_pool(config, stage_registry_);
   shuffling_chunk_pool.Start();
-  auto* output_queue = shuffling_chunk_pool.output();
+  auto* output_queue = shuffling_chunk_pool.output_queue();
 
   // Wait for workers to produce some chunks
   output_queue->WaitForSizeAtLeast(1);
@@ -753,7 +730,7 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
   pool.Start();
 
   // Wait for initialization to complete
-  pool.output()->WaitForSizeAtLeast(1);
+  pool.output_queue()->WaitForSizeAtLeast(1);
 
   // Now test ResetAnchor
   auto [anchor, count_before] = pool.ResetAnchor();
@@ -780,7 +757,7 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterIncrement) {
   pool.SetAnchor("non_matching_key");
 
   // Wait for initial load to complete
-  pool.output()->WaitForSizeAtLeast(1);
+  pool.output_queue()->WaitForSizeAtLeast(1);
 
   // Now add new sources (these should increment the counter)
   // Note: We can't add more sources after initial scan complete in the current
@@ -815,7 +792,7 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
   MarkInitialScanComplete();
 
   // Wait for initial load to complete
-  pool.output()->WaitForSizeAtLeast(1);
+  pool.output_queue()->WaitForSizeAtLeast(1);
 
   int final_count = pool.ChunksSinceAnchor();
 

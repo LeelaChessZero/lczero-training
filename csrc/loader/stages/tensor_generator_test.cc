@@ -42,7 +42,7 @@ class TensorGeneratorTest : public ::testing::Test {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_batch_size(4);
     config_.set_threads(1);
-    config_.set_queue_capacity(10);
+    config_.mutable_output()->set_queue_capacity(10);
     config_.set_input("source");
   }
 
@@ -234,7 +234,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
   }
   producer.Close();
 
-  auto tensors = generator.output()->Get();
+  auto tensors = generator.output_queue()->Get();
   VerifyTensorTuple(tensors, frames);
 }
 
@@ -253,7 +253,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
   }
   producer.Close();
 
-  auto tensors = generator.output()->Get();
+  auto tensors = generator.output_queue()->Get();
   VerifyTensorTuple(tensors, frames);
   VerifyTensorData(tensors, frames);
 }
@@ -280,19 +280,19 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
   producer.Close();
 
   // Get first batch.
-  auto tensors1 = generator.output()->Get();
+  auto tensors1 = generator.output_queue()->Get();
   std::vector<V6TrainingData> batch1_frames(
       all_frames.begin(), all_frames.begin() + config_.batch_size());
   VerifyTensorTuple(tensors1, batch1_frames);
 
   // Get second batch.
-  auto tensors2 = generator.output()->Get();
+  auto tensors2 = generator.output_queue()->Get();
   std::vector<V6TrainingData> batch2_frames(
       all_frames.begin() + config_.batch_size(), all_frames.end());
   VerifyTensorTuple(tensors2, batch2_frames);
 
   // No more batches should be available.
-  EXPECT_THROW(generator.output()->Get(), QueueClosedException);
+  EXPECT_THROW(generator.output_queue()->Get(), QueueClosedException);
 }
 
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
@@ -311,7 +311,7 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   }
   producer.Close();
 
-  auto tensors = generator.output()->Get();
+  auto tensors = generator.output_queue()->Get();
   VerifyTensorTuple(tensors, frames);
 }
 
@@ -326,7 +326,7 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
   input_queue_->Close();
 
   // Should not output any tensors.
-  EXPECT_THROW(generator.output()->Get(), QueueClosedException);
+  EXPECT_THROW(generator.output_queue()->Get(), QueueClosedException);
 }
 
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
@@ -350,7 +350,7 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   producer.Put(frame);
   producer.Close();
 
-  auto tensors = generator.output()->Get();
+  auto tensors = generator.output_queue()->Get();
   const auto* planes_tensor =
       dynamic_cast<const TypedTensor<float>*>(tensors[0].get());
 
@@ -390,7 +390,7 @@ TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   producer.Put(frame);
   producer.Close();
 
-  auto tensors = generator.output()->Get();
+  auto tensors = generator.output_queue()->Get();
   const auto* winner_tensor =
       dynamic_cast<const TypedTensor<float>*>(tensors[2].get());
   const auto* best_q_tensor =

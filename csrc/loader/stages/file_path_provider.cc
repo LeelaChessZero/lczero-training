@@ -36,9 +36,9 @@ bool ShouldSkipPathEntry(const FilePathProvider::Path& path) {
 
 FilePathProvider::FilePathProvider(const FilePathProviderConfig& config,
                                    const StageRegistry& existing_stages)
-    : output_queue_(config.queue_capacity()),
+    : SingleOutputStage<File>(config.output()),
       directory_(config.directory()),
-      producer_(output_queue_.CreateProducer()),
+      producer_(output_queue()->CreateProducer()),
       load_metric_updater_() {
   (void)existing_stages;
   LOG(INFO) << "Initializing FilePathProvider for directory: "
@@ -53,15 +53,6 @@ FilePathProvider::~FilePathProvider() {
   Stop();
   if (inotify_fd_ != -1) close(inotify_fd_);
   LOG(INFO) << "FilePathProvider shutdown complete.";
-}
-
-Queue<FilePathProvider::File>* FilePathProvider::output() {
-  return &output_queue_;
-}
-
-QueueBase* FilePathProvider::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
 }
 
 void FilePathProvider::Start() {
@@ -98,7 +89,8 @@ StageMetricProto FilePathProvider::FlushMetrics() {
   auto load_metrics = load_metric_updater_.FlushMetrics();
   load_metrics.set_name("load");
   *stage_metric.add_load_metrics() = std::move(load_metrics);
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

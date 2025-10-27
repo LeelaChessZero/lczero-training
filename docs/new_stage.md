@@ -20,6 +20,11 @@ configurations.
 - Add a new `message <YourStage>Config` to
   `proto/data_loader_config.proto`, including an `optional string input` field
   if the stage consumes upstream data.
+- For single-output stages, add `optional QueueConfig output = N` to configure
+  the output queue. `QueueConfig` provides `queue_capacity` (default 4),
+  `overflow_behavior` (BLOCK, DROP_NEW, KEEP_NEWEST), and optional `name`.
+- For multi-output stages, use `repeated QueueConfig output` with parallel
+  configuration arrays (see `ChunkSourceSplitterConfig` for reference).
 - Update `StageConfig` with an `optional <YourStage>Config` entry so the stage
   can be referenced from the `repeated stage` list.
 - If the stage emits custom metrics, extend `StageMetricProto` in
@@ -32,26 +37,45 @@ configurations.
 
 ## 3. Choose a Base Class
 
-- **Use `SingleInputStage`** when the stage consumes exactly one upstream queue.
-  The helper resolves the input binding, performs the `dynamic_cast`, and
-  surfaces the typed `Queue<InputT>*` via `input_queue()`.
-- **Inherit `Stage` directly** when the stage has multiple inputs, produces
-  outputs without upstream data, or manages more complex wiring. In that case
-  you must implement any input discovery logic yourself using the
-  `Stage::StageList` supplied to the constructor.
+- **Use `SingleInputStage<ConfigT, InputT>`** when the stage consumes exactly
+  one upstream queue. The helper resolves the input binding, performs the
+  `dynamic_cast`, and surfaces the typed `Queue<InputT>*` via `input_queue()`.
+- **Use `SingleOutputStage<OutputT>`** when the stage produces exactly one
+  output queue. The helper manages the output queue, implements `GetOutput()`
+  with name validation, and surfaces the typed `Queue<OutputT>*` via
+  `output_queue()`.
+- **Most stages inherit from both** `SingleInputStage` and `SingleOutputStage`
+  using virtual inheritance (both base classes virtually inherit from `Stage`
+  to avoid the diamond problem). Example:
+  ```cpp
+  class MyStage : public SingleInputStage<MyStageConfig, InputType>,
+                  public SingleOutputStage<OutputType> {
+   public:
+    MyStage(const MyStageConfig& config, const StageRegistry& existing_stages)
+        : SingleInputStage<MyStageConfig, InputType>(config, existing_stages),
+          SingleOutputStage<OutputType>(config.output()) {}
+  };
+  ```
+- **Inherit `Stage` directly** when the stage has multiple inputs, multiple
+  outputs, or manages more complex wiring. In that case you must implement
+  input/output discovery and `GetOutput()` yourself.
 - Place declarations in `csrc/loader/stages/<stage_name>.h` and definitions in
   the matching `.cc` file.
 
 ## 4. Implement the Stage API
 
-- **Constructor**: Store the config, resolve input queues (if applicable), and
-  initialise queues or worker pools. Avoid starting threads here.
-- **`Start()`**: Launch background work. Acquire `Queue::Producer` instances for
-  emitting data and honour `stop_requested_` flags so shutdown is cooperative.
-- **`Stop()`**: Close output queues, signal workers to exit, and join threads.
-  Remember that downstream stages expect `Queue::Close()` to signal completion.
-- **`GetOutput(std::string_view name)`**: Return the appropriate `QueueBase*`.
-  If the stage offers multiple outputs, switch on `name` to choose.
+- **Constructor**: Initialize base classes with config and `config.output()` (or
+  `config.input()` for `SingleInputStage`). Store additional config fields and
+  initialize worker pools. Avoid starting threads here.
+- **`Start()`**: Launch background work. Acquire `Queue::Producer` instances
+  from `output_queue()->CreateProducer()` for emitting data and honour
+  `stop_requested_` flags so shutdown is cooperative.
+- **`Stop()`**: Close queues via `output_queue()->Close()`, signal workers to
+  exit, and join threads. Remember that downstream stages expect
+  `Queue::Close()` to signal completion.
+- **`GetOutput(std::string_view name)`**: Only implement if the stage has
+  multiple outputs. `SingleOutputStage` provides this automatically for
+  single-output stages, including name validation.
 - **`Control()`**: Handle relevant `StageControlRequest` sub-messages and return
   a populated `StageControlResponse` wrapped in `std::optional`. Return
   `std::nullopt` for requests the stage does not recognise.
@@ -63,8 +87,8 @@ configurations.
 - **`FlushMetrics()`** should snapshot the current values, reset internal
   counters as needed, and populate `StageMetricProto`. Set the
   `stage_type` field so the UI can identify the stage kind. Use helpers like
-  `MetricsFromQueue("output", queue)` to expose queue utilisation under
-  `queue_metrics`, and append load information via `load_metrics`.
+  `MetricsFromQueue("output", *output_queue())` to expose queue utilisation
+  under `queue_metrics`, and append load information via `load_metrics`.
 - For multiple queues or distinct metric groups, add additional entries with
   meaningful names (`"output"`, `"prefetch"`, etc.) so downstream tooling can
   pick the right series.

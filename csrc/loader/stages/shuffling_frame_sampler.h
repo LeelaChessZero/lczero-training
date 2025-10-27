@@ -26,7 +26,8 @@ using FrameType = V6TrainingData;
 // Takes V6TrainingData frames as input and outputs them in shuffled order
 // using reservoir sampling algorithm.
 class ShufflingFrameSampler
-    : public SingleInputStage<ShufflingFrameSamplerConfig, FrameType> {
+    : public SingleInputStage<ShufflingFrameSamplerConfig, FrameType>,
+      public SingleOutputStage<FrameType> {
  public:
   using InputType = FrameType;
   using OutputType = FrameType;
@@ -35,12 +36,9 @@ class ShufflingFrameSampler
                         const StageRegistry& existing_stages);
   ~ShufflingFrameSampler();
 
-  Queue<OutputType>* output();
   void Start() override;
   void Stop() override;
   StageMetricProto FlushMetrics() override;
-
-  QueueBase* GetOutput(std::string_view name = "") override;
 
  private:
   struct ThreadContext {
@@ -52,7 +50,6 @@ class ShufflingFrameSampler
                         Queue<OutputType>::Producer& producer,
                         ThreadContext* context);
 
-  Queue<OutputType> output_queue_;
   size_t reservoir_size_per_thread_;
   absl::BitGen gen_;
   // thread_contexts_ must be declared before thread_pool_ to ensure

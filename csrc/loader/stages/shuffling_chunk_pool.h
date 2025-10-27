@@ -30,19 +30,18 @@ namespace lczero {
 namespace training {
 
 class ShufflingChunkPool
-    : public SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase> {
+    : public SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>,
+      public SingleOutputStage<TrainingChunk> {
  public:
   ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
                      const StageRegistry& existing_stages);
   ~ShufflingChunkPool();
 
-  Queue<TrainingChunk>* output();
   void Start() override;
   void Stop() override;
 
   StageMetricProto FlushMetrics() override;
 
-  QueueBase* GetOutput(std::string_view name = "") override;
   std::optional<StageControlResponse> Control(
       const StageControlRequest& request) override;
 
@@ -94,7 +93,6 @@ class ShufflingChunkPool
   const ShufflingChunkPoolConfig config_;
   ThreadPool source_ingestion_pool_;
   ThreadPool chunk_loading_pool_;
-  Queue<TrainingChunk> output_queue_;
 
   std::atomic<int64_t> dropped_chunks_metric_{0};
 

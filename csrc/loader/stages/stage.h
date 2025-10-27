@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/strings/str_cat.h"
+#include "proto/data_loader_config.pb.h"
 #include "proto/stage_control.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
@@ -74,9 +75,24 @@ class StageRegistry {
   std::vector<std::pair<std::string, std::unique_ptr<Stage>>> stages_;
 };
 
+// Helper to convert QueueConfig::OverflowBehavior to OverflowBehavior.
+inline OverflowBehavior ToOverflowBehavior(
+    QueueConfig::OverflowBehavior behavior) {
+  switch (behavior) {
+    case QueueConfig::BLOCK:
+      return OverflowBehavior::BLOCK;
+    case QueueConfig::DROP_NEW:
+      return OverflowBehavior::DROP_NEW;
+    case QueueConfig::KEEP_NEWEST:
+      return OverflowBehavior::KEEP_NEWEST;
+  }
+  throw std::runtime_error(absl::StrCat("Unknown OverflowBehavior value: ",
+                                        static_cast<int>(behavior)));
+}
+
 // Helper for stages that consume a single upstream queue.
 template <typename ConfigT, typename InputT>
-class SingleInputStage : public Stage {
+class SingleInputStage : virtual public Stage {
  protected:
   explicit SingleInputStage(const ConfigT& config,
                             const StageRegistry& existing_stages)
@@ -92,6 +108,32 @@ class SingleInputStage : public Stage {
 
  private:
   Queue<InputT>* input_queue_;
+};
+
+// Helper for stages that produce a single output queue.
+template <typename OutputT>
+class SingleOutputStage : virtual public Stage {
+ public:
+  Queue<OutputT>* output_queue() { return &output_queue_; }
+
+  QueueBase* GetOutput(std::string_view name = "") override {
+    if (name != output_name_) {
+      throw std::runtime_error(absl::StrCat("Output name '", name,
+                                            "' does not match configured '",
+                                            output_name_, "'"));
+    }
+    return &output_queue_;
+  }
+
+ protected:
+  explicit SingleOutputStage(const QueueConfig& config)
+      : output_name_(config.name()),
+        output_queue_(config.queue_capacity(),
+                      ToOverflowBehavior(config.overflow_behavior())) {}
+
+ private:
+  std::string output_name_;
+  Queue<OutputT> output_queue_;
 };
 
 }  // namespace training

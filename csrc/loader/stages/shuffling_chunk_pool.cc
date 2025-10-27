@@ -32,24 +32,17 @@ ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
                                        const StageRegistry& existing_stages)
     : SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>(
           config, existing_stages),
+      SingleOutputStage<TrainingChunk>(config.output()),
       chunk_pool_size_(config.chunk_pool_size()),
       config_(config),
       source_ingestion_pool_(config.source_ingestion_threads(),
                              ThreadPoolOptions{}),
-      chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}),
-      output_queue_(config.queue_capacity()) {
+      chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ShufflingChunkPool with pool size "
             << config.chunk_pool_size();
 }
 
 ShufflingChunkPool::~ShufflingChunkPool() { Stop(); }
-
-Queue<TrainingChunk>* ShufflingChunkPool::output() { return &output_queue_; }
-
-QueueBase* ShufflingChunkPool::GetOutput(std::string_view name) {
-  (void)name;
-  return &output_queue_;
-}
 
 void ShufflingChunkPool::Start() {
   LOG(INFO) << "Starting ShufflingChunkPool initialization thread.";
@@ -84,10 +77,10 @@ void ShufflingChunkPool::Start() {
     } catch (const QueueClosedException&) {
       LOG(INFO) << "ShufflingChunkPool initialization interrupted, input "
                    "queue closed.";
-      output_queue_.Close();
+      output_queue()->Close();
     } catch (const std::exception& e) {
       LOG(ERROR) << "ShufflingChunkPool initialization failed: " << e.what();
-      output_queue_.Close();
+      output_queue()->Close();
     }
   });
 }
@@ -100,7 +93,7 @@ void ShufflingChunkPool::Stop() {
 
   LOG(INFO) << "Stopping ShufflingChunkPool.";
   input_queue()->Close();
-  output_queue_.Close();
+  output_queue()->Close();
 
   if (initialization_thread_.joinable()) {
     initialization_thread_.join();
@@ -155,7 +148,7 @@ ShufflingChunkPool::InitializeChunkSources() {
   }
 
   for (auto& source : uninitialized_sources) {
-    if (output_queue_.IsClosed()) {
+    if (output_queue()->IsClosed()) {
       LOG(INFO) << "Output queue closed, stopping source ingestion.";
       break;
     }
@@ -179,7 +172,7 @@ ShufflingChunkPool::InitializeChunkSources() {
             << " chunk(s) across " << sources_to_keep
             << " source(s) during startup.";
 
-  if (total_chunks < chunk_pool_size_ && !output_queue_.IsClosed()) {
+  if (total_chunks < chunk_pool_size_ && !output_queue()->IsClosed()) {
     LOG(ERROR) << "ShufflingChunkPool startup chunk requirement not met: "
                << total_chunks.load() << " < " << chunk_pool_size_;
   }
@@ -261,13 +254,13 @@ void ShufflingChunkPool::SourceIngestionWorker(
 
 void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
   // Create a local producer for this worker
-  auto producer = output_queue_.CreateProducer();
+  auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
       auto chunk = GetNextChunkData();
       if (!chunk) {
-        if (output_queue_.IsClosed()) break;
+        if (output_queue()->IsClosed()) break;
         continue;
       }
       LoadMetricPauser pauser(context->load_metric_updater);
@@ -553,7 +546,8 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     resh->set_count(reshuffles_.exchange(0, std::memory_order_acq_rel));
   }
 
-  *stage_metric.add_queue_metrics() = MetricsFromQueue("output", output_queue_);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
   return stage_metric;
 }
 

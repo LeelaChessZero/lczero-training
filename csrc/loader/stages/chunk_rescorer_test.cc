@@ -51,7 +51,7 @@ class ChunkRescorerTest : public ::testing::Test {
   void SetUp() override {
     input_queue_ = std::make_unique<Queue<TrainingChunk>>(10);
     config_.set_threads(1);
-    config_.set_queue_capacity(10);
+    config_.mutable_output()->set_queue_capacity(10);
     config_.set_input("source");
     config_.set_syzygy_paths("");
     config_.set_dist_temp(0.75f);
@@ -89,7 +89,7 @@ TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
   producer.Put(MakeChunk({frame}));
   producer.Close();
 
-  auto output_chunk = rescorer.output()->Get();
+  auto output_chunk = rescorer.output_queue()->Get();
   ASSERT_EQ(output_chunk.frames.size(), 1);
   EXPECT_FLOAT_EQ(output_chunk.frames[0].result_q, config_.dist_temp());
   EXPECT_EQ(output_chunk.sort_key, "alpha");
@@ -109,7 +109,7 @@ TEST_F(ChunkRescorerTest, HandlesInputQueueClosure) {
 
   input_queue_->Close();
 
-  EXPECT_THROW(rescorer.output()->Get(), QueueClosedException);
+  EXPECT_THROW(rescorer.output_queue()->Get(), QueueClosedException);
 
   rescorer.Stop();
 }

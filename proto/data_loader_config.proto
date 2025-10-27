@@ -2,14 +2,31 @@ syntax = "proto2";
 
 package lczero.training;
 
+// Configuration for output queue used by stages.
+message QueueConfig {
+  // Queue overflow behavior.
+  enum OverflowBehavior {
+    BLOCK = 0;
+    DROP_NEW = 1;
+    KEEP_NEWEST = 2;
+  }
+
+  // Optional name for the output (used for multi-output stages).
+  optional string name = 1;
+  // Size of the output queue.
+  optional uint64 queue_capacity = 2 [default = 4];
+  // Overflow behavior of the output queue.
+  optional OverflowBehavior overflow_behavior = 3;
+}
+
 // Configuration for file path provider that watches directories for new
 // training files. Maps to FilePathProviderOptions in
 // csrc/loader/chunk_feed/file_path_provider.h
 message FilePathProviderConfig {
-  // Size of the internal file queue.
-  optional uint64 queue_capacity = 1 [default = 16];
   // Path to directory containing training data files.
-  optional string directory = 2;
+  optional string directory = 1;
+  // Output queue configuration.
+  optional QueueConfig output = 2;
 }
 
 // Configuration for chunk source loader that converts file paths to chunk
@@ -20,8 +37,8 @@ message ChunkSourceLoaderConfig {
   optional string input = 1;
   // Number of worker threads for loading.
   optional uint64 threads = 2 [default = 1];
-  // Size of the output queue.
-  optional uint64 queue_capacity = 3 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 3;
 }
 
 // Configuration for shuffling chunk pool that manages chunk shuffling and
@@ -36,8 +53,8 @@ message ShufflingChunkPoolConfig {
   optional uint64 source_ingestion_threads = 4 [default = 1];
   // Threads for loading chunk data.
   optional uint64 chunk_loading_threads = 5 [default = 4];
-  // Size of the output queue.
-  optional uint64 queue_capacity = 6 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 6;
   // When set to a positive value, enable Hanse single-position sampling.
   // Probability to accept a chunk is
   //   min(1.0, num_records / hanse_sampling_threshold) ** hanse_sampling_gamma
@@ -54,8 +71,8 @@ message ChunkRescorerConfig {
   optional string input = 1;
   // Number of worker threads for rescoring.
   optional uint64 threads = 2 [default = 1];
-  // Size of the output queue.
-  optional uint64 queue_capacity = 3 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 3;
   // Comma-separated list of Syzygy tablebase directories.
   optional string syzygy_paths = 4;
   // Policy reshaping temperature.
@@ -83,8 +100,8 @@ message ChunkUnpackerConfig {
   optional float position_sampling_rate = 3 [default = 1.0];
   // Number of positions to take from each chunk.
   optional uint32 position_count = 4;
-  // Size of the output queue.
-  optional uint64 queue_capacity = 5 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 5;
 }
 
 // Configuration for shuffling frame sampler using reservoir sampling.
@@ -96,30 +113,21 @@ message ShufflingFrameSamplerConfig {
   optional uint64 threads = 2 [default = 1];
   // Size of sampling reservoir per thread.
   optional uint64 reservoir_size_per_thread = 3 [default = 1000000];
-  // Size of the output queue.
-  optional uint64 queue_capacity = 4 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 4;
 }
 
 // Configuration for tensor generator that converts frames to batched tensors.
 // Maps to TensorGeneratorOptions in csrc/loader/tensor_generator.h
 message TensorGeneratorConfig {
-  // Queue overflow behavior.
-  enum OverflowBehavior {
-    BLOCK = 0;
-    DROP_NEW = 1;
-    KEEP_NEWEST = 2;
-  }
-
   // Name of the stage providing input to this generator.
   optional string input = 1;
   // Number of worker threads for tensor generation.
   optional uint64 threads = 2 [default = 1];
   // Batch size for tensor generation.
   optional uint64 batch_size = 3 [default = 1024];
-  // Size of the output queue.
-  optional uint64 queue_capacity = 4 [default = 4];
-  // Overflow behavior of the output queue.
-  optional OverflowBehavior overflow_behavior = 5;
+  // Output queue configuration.
+  optional QueueConfig output = 4;
 }
 
 // Configuration for a stage that splits incoming ChunkSources into several
@@ -129,27 +137,10 @@ message TensorGeneratorConfig {
 message ChunkSourceSplitterConfig {
   // Name of the upstream stage producing ChunkSourceWithPhase.
   optional string input = 1;
-
-  // Queue overflow behavior.
-  enum OverflowBehavior {
-    BLOCK = 0;
-    DROP_NEW = 1;
-    KEEP_NEWEST = 2;
-  }
-
-  message OutputConfig {
-    // Name of this output (referenced as "<stage>.<name>").
-    optional string name = 1;
-    // Relative weight used for hash-based assignment.
-    optional uint64 weight = 2 [default = 1];
-    // Capacity of the output queue.
-    optional uint64 queue_capacity = 3 [default = 16];
-    // Overflow behavior of the output queue.
-    optional OverflowBehavior overflow_behavior = 4;
-  }
-
-  // List of outputs to produce.
-  repeated OutputConfig output = 2;
+  // List of output queue configurations.
+  repeated QueueConfig output = 2;
+  // Relative weights for hash-based assignment (parallel to output).
+  repeated uint64 weight = 3;
 }
 
 // Configuration for simple chunk shuffler that processes one chunk source at a
@@ -157,8 +148,8 @@ message ChunkSourceSplitterConfig {
 message SimpleChunkShufflerConfig {
   // Name of the stage providing input to this shuffler.
   optional string input = 1;
-  // Size of the output queue.
-  optional uint64 queue_capacity = 2 [default = 16];
+  // Output queue configuration.
+  optional QueueConfig output = 2;
 }
 
 // Stage-level configuration providing a name and stage-specific options.
