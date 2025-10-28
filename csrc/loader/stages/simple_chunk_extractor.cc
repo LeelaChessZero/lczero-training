@@ -1,4 +1,4 @@
-#include "loader/stages/simple_chunk_shuffler.h"
+#include "loader/stages/simple_chunk_extractor.h"
 
 #include <absl/algorithm/container.h>
 #include <absl/log/log.h>
@@ -10,27 +10,27 @@
 namespace lczero {
 namespace training {
 
-SimpleChunkShuffler::SimpleChunkShuffler(
-    const SimpleChunkShufflerConfig& config,
+SimpleChunkExtractor::SimpleChunkExtractor(
+    const SimpleChunkExtractorConfig& config,
     const StageRegistry& existing_stages)
-    : SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase>(
+    : SingleInputStage<SimpleChunkExtractorConfig, ChunkSourceWithPhase>(
           config, existing_stages),
       SingleOutputStage<TrainingChunk>(config.output()),
       bitgen_(absl::MakeSeedSeq()) {}
 
-SimpleChunkShuffler::~SimpleChunkShuffler() { Stop(); }
+SimpleChunkExtractor::~SimpleChunkExtractor() { Stop(); }
 
-void SimpleChunkShuffler::Start() {
+void SimpleChunkExtractor::Start() {
   worker_thread_ = std::jthread([this]() { Worker(); });
 }
 
-void SimpleChunkShuffler::Stop() {
+void SimpleChunkExtractor::Stop() {
   if (stop_requested_.exchange(true)) return;
   input_queue()->Close();
   output_queue()->Close();
 }
 
-void SimpleChunkShuffler::Worker() {
+void SimpleChunkExtractor::Worker() {
   auto producer = output_queue()->CreateProducer();
 
   try {
@@ -47,7 +47,7 @@ void SimpleChunkShuffler::Worker() {
   }
 }
 
-void SimpleChunkShuffler::ProcessSource(
+void SimpleChunkExtractor::ProcessSource(
     Queue<TrainingChunk>::Producer& producer,
     std::unique_ptr<ChunkSource> source) {
   const size_t chunk_count = source->GetChunkCount();
@@ -67,7 +67,7 @@ void SimpleChunkShuffler::ProcessSource(
   ++sources_processed_;
 }
 
-std::optional<TrainingChunk> SimpleChunkShuffler::LoadChunk(
+std::optional<TrainingChunk> SimpleChunkExtractor::LoadChunk(
     ChunkSource& source, const std::string& sort_key, size_t index) {
   auto data = source.GetChunkData(index);
   if (!data || data->empty() || data->size() % sizeof(FrameType) != 0) {
@@ -92,9 +92,9 @@ std::optional<TrainingChunk> SimpleChunkShuffler::LoadChunk(
   return chunk;
 }
 
-StageMetricProto SimpleChunkShuffler::FlushMetrics() {
+StageMetricProto SimpleChunkExtractor::FlushMetrics() {
   StageMetricProto metric;
-  metric.set_stage_type("simple_chunk_shuffler");
+  metric.set_stage_type("simple_chunk_extractor");
 
   auto add_count = [&](const char* name, std::atomic<uint64_t>& counter) {
     auto* m = metric.add_count_metrics();

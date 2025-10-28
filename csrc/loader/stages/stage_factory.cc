@@ -10,7 +10,7 @@
 #include "loader/stages/file_path_provider.h"
 #include "loader/stages/shuffling_chunk_pool.h"
 #include "loader/stages/shuffling_frame_sampler.h"
-#include "loader/stages/simple_chunk_shuffler.h"
+#include "loader/stages/simple_chunk_extractor.h"
 #include "loader/stages/tensor_generator.h"
 
 namespace lczero {
@@ -27,7 +27,7 @@ int CountStageConfigs(const StageConfig& config) {
          static_cast<int>(config.has_shuffling_frame_sampler()) +
          static_cast<int>(config.has_tensor_generator()) +
          static_cast<int>(config.has_chunk_source_splitter()) +
-         static_cast<int>(config.has_simple_chunk_shuffler());
+         static_cast<int>(config.has_simple_chunk_extractor());
 }
 
 }  // namespace
@@ -71,9 +71,9 @@ std::unique_ptr<Stage> CreateStage(const StageConfig& config,
     return std::make_unique<ChunkSourceSplitter>(config.chunk_source_splitter(),
                                                  existing_stages);
   }
-  if (config.has_simple_chunk_shuffler()) {
-    return std::make_unique<SimpleChunkShuffler>(config.simple_chunk_shuffler(),
-                                                 existing_stages);
+  if (config.has_simple_chunk_extractor()) {
+    return std::make_unique<SimpleChunkExtractor>(
+        config.simple_chunk_extractor(), existing_stages);
   }
 
   throw std::runtime_error(

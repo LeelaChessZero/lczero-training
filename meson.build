@@ -125,7 +125,7 @@ files = [
   'csrc/loader/stages/file_path_provider.cc',
   'csrc/loader/stages/shuffling_chunk_pool.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
-  'csrc/loader/stages/simple_chunk_shuffler.cc',
+  'csrc/loader/stages/simple_chunk_extractor.cc',
   'csrc/loader/stages/stage_factory.cc',
   'csrc/loader/stages/stage.cc',
   'csrc/loader/stages/tensor_generator.cc',
@@ -215,9 +215,9 @@ shuffling_chunk_pool_test = executable(
   link_with : loader_lib,
 )
 
-# simple_chunk_shuffler_test = executable(
-#   'simple_chunk_shuffler_test',
-#   'csrc/loader/stages/simple_chunk_shuffler_test.cc',
+# simple_chunk_extractor_test = executable(
+#   'simple_chunk_extractor_test',
+#   'csrc/loader/stages/simple_chunk_extractor_test.cc',
 #   include_directories : includes,
 #   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
 #   link_with : loader_lib,
@@ -306,7 +306,7 @@ chunk_source_splitter_test = executable(
 )
 test('chunk_source_splitter_test', chunk_source_splitter_test)
 test('shuffling_chunk_pool_test', shuffling_chunk_pool_test)
-# test('simple_chunk_shuffler_test', simple_chunk_shuffler_test)
+# test('simple_chunk_extractor_test', simple_chunk_extractor_test)
 test('chunk_rescorer_test', chunk_rescorer_test)
 test('chunk_unpacker_test', chunk_unpacker_test)
 test('shuffling_frame_sampler_test', shuffling_frame_sampler_test)

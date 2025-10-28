@@ -145,7 +145,7 @@ message ChunkSourceSplitterConfig {
 
 // Configuration for simple chunk shuffler that processes one chunk source at a
 // time and outputs all chunks in shuffled order.
-message SimpleChunkShufflerConfig {
+message SimpleChunkExtractorConfig {
   // Name of the stage providing input to this shuffler.
   optional string input = 1;
   // Output queue configuration.
@@ -164,7 +164,7 @@ message StageConfig {
   optional TensorGeneratorConfig tensor_generator = 7;
   optional ChunkRescorerConfig chunk_rescorer = 8;
   optional ChunkSourceSplitterConfig chunk_source_splitter = 9;
-  optional SimpleChunkShufflerConfig simple_chunk_shuffler = 10;
+  optional SimpleChunkExtractorConfig simple_chunk_extractor = 10;
 }
 
 // Main configuration class for the DataLoader containing all component

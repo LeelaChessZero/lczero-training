@@ -1,4 +1,4 @@
-#include "loader/stages/simple_chunk_shuffler.h"
+#include "loader/stages/simple_chunk_extractor.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -46,7 +46,7 @@ class MockChunkSource : public ChunkSource {
   std::vector<std::string> chunks_;
 };
 
-class SimpleChunkShufflerTest : public ::testing::Test {
+class SimpleChunkExtractorTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Create input queue.
@@ -59,12 +59,12 @@ class SimpleChunkShufflerTest : public ::testing::Test {
                        std::make_unique<DummyStage>(input_queue_.get()));
 
     // Create the shuffler config.
-    SimpleChunkShufflerConfig config;
+    SimpleChunkExtractorConfig config;
     config.set_input("dummy_input");
     config.set_queue_capacity(10);
 
     // Create the shuffler stage.
-    shuffler_ = std::make_unique<SimpleChunkShuffler>(config, registry_);
+    shuffler_ = std::make_unique<SimpleChunkExtractor>(config, registry_);
   }
 
   void TearDown() override {
@@ -92,10 +92,10 @@ class SimpleChunkShufflerTest : public ::testing::Test {
 
   StageRegistry registry_;
   std::unique_ptr<Queue<ChunkSourceWithPhase>> input_queue_;
-  std::unique_ptr<SimpleChunkShuffler> shuffler_;
+  std::unique_ptr<SimpleChunkExtractor> shuffler_;
 };
 
-TEST_F(SimpleChunkShufflerTest, ProcessesSingleSource) {
+TEST_F(SimpleChunkExtractorTest, ProcessesSingleSource) {
   shuffler_->Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -137,7 +137,7 @@ TEST_F(SimpleChunkShufflerTest, ProcessesSingleSource) {
   EXPECT_THAT(indices, ::testing::ElementsAre(0, 1, 2, 3, 4));
 }
 
-TEST_F(SimpleChunkShufflerTest, ProcessesMultipleSources) {
+TEST_F(SimpleChunkExtractorTest, ProcessesMultipleSources) {
   shuffler_->Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -179,7 +179,7 @@ TEST_F(SimpleChunkShufflerTest, ProcessesMultipleSources) {
   EXPECT_EQ(source2_count, 2);
 }
 
-TEST_F(SimpleChunkShufflerTest, SkipsNonFileMessages) {
+TEST_F(SimpleChunkExtractorTest, SkipsNonFileMessages) {
   shuffler_->Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -210,7 +210,7 @@ TEST_F(SimpleChunkShufflerTest, SkipsNonFileMessages) {
   EXPECT_EQ(chunks.size(), 2);
 }
 
-TEST_F(SimpleChunkShufflerTest, MetricsAreRecorded) {
+TEST_F(SimpleChunkExtractorTest, MetricsAreRecorded) {
   shuffler_->Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -232,7 +232,7 @@ TEST_F(SimpleChunkShufflerTest, MetricsAreRecorded) {
   // Flush metrics.
   auto metrics = shuffler_->FlushMetrics();
 
-  EXPECT_EQ(metrics.stage_type(), "simple_chunk_shuffler");
+  EXPECT_EQ(metrics.stage_type(), "simple_chunk_extractor");
   EXPECT_GT(metrics.count_metrics_size(), 0);
 
   // Check that chunks_processed metric exists.

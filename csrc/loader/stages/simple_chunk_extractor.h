@@ -20,13 +20,13 @@ namespace lczero {
 namespace training {
 
 // Single-threaded stage that shuffles chunks within each source.
-class SimpleChunkShuffler
-    : public SingleInputStage<SimpleChunkShufflerConfig, ChunkSourceWithPhase>,
+class SimpleChunkExtractor
+    : public SingleInputStage<SimpleChunkExtractorConfig, ChunkSourceWithPhase>,
       public SingleOutputStage<TrainingChunk> {
  public:
-  SimpleChunkShuffler(const SimpleChunkShufflerConfig& config,
-                      const StageRegistry& existing_stages);
-  ~SimpleChunkShuffler();
+  SimpleChunkExtractor(const SimpleChunkExtractorConfig& config,
+                       const StageRegistry& existing_stages);
+  ~SimpleChunkExtractor();
 
   void Start() override;
   void Stop() override;
