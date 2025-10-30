@@ -27,7 +27,7 @@ import attention_policy_map as apm
 import proto.net_pb2 as pb
 from functools import reduce
 import operator
-
+from gradient_accumulator import GradientAccumulator, AdaptiveGradientAccumulator
 from net import Net
 
 
@@ -148,6 +148,27 @@ class TFProcess:
 
     def __init__(self, cfg):
         self.cfg = cfg
+        self.use_gradient_accumulation = self.cfg['training'].get('gradient_accumulation', False)
+        if self.use_gradient_accumulation:
+            accumulation_steps = self.cfg['training'].get('accumulation_steps', 4)
+            use_adaptive = self.cfg['training'].get('adaptive_accumulation', False)
+            
+            if use_adaptive:
+                self.gradient_accumulator = AdaptiveGradientAccumulator(
+                    self.optimizer,
+                    initial_accumulation_steps=accumulation_steps,
+                    min_accumulation_steps=self.cfg['training'].get('min_accumulation_steps', 1),
+                    max_accumulation_steps=self.cfg['training'].get('max_accumulation_steps', 16),
+                    memory_threshold=self.cfg['training'].get('memory_threshold', 0.8),
+                    use_mixed_precision=self.model_dtype == tf.float16
+                )
+            else:
+                self.gradient_accumulator = GradientAccumulator(
+                    self.optimizer,
+                    accumulation_steps=accumulation_steps,
+                    use_mixed_precision=self.model_dtype == tf.float16
+                )
+
         self.net = Net()
         self.root_dir = os.path.join(self.cfg['training']['path'],
                                      self.cfg['name'])
@@ -768,6 +789,8 @@ class TFProcess:
                 moves_left_loss = tf.constant(0.)
             total_loss = self.lossMix(policy_loss, value_loss, moves_left_loss,
                                       reg_term)
+            if self.use_gradient_accumulation:
+                total_loss = total_loss / tf.cast(self.gradient_accumulator.accumulation_steps, total_loss.dtype)
             if self.loss_scale != 1:
                 total_loss = self.optimizer.get_scaled_loss(total_loss)
         if self.wdl:
@@ -847,13 +870,23 @@ class TFProcess:
             if not grads:
                 grads = new_grads
             else:
-                if self.strategy is not None:
-                    grads = self.strategy_merge_grads(grads, new_grads)
+                if self.use_gradient_accumulation:
+                    self.gradient_accumulator.accumulate_gradients(grads)
+                    
+                    # Apply gradients if accumulation is complete
+                    if self.gradient_accumulator.should_apply_gradients():
+                        grad_norm = self.gradient_accumulator.apply_gradients(
+                            self.model.trainable_weights
+                        )
                 else:
-                    grads = self.merge_grads(grads, new_grads)
-            # Keep running averages
-            for acc, val in zip(self.train_metrics, metrics):
-                acc.accumulate(val)
+                    # Original gradient application
+                    if self.strategy is not None:
+                        grad_norm = self.strategy_apply_grads(grads, batch_splits)
+                    else:
+                        grad_norm = self.apply_grads(grads, batch_splits)
+                    # Keep running averages
+                    for acc, val in zip(self.train_metrics, metrics):
+                        acc.accumulate(val)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         effective_batch_splits = batch_splits
         if self.strategy is not None:
