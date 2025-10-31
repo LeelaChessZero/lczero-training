@@ -38,7 +38,7 @@ void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
 
 void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src) {
   if (src.has_name()) dest.set_name(src.name());
-  if (src.has_count()) dest.set_count(src.count());
+  if (src.has_count()) dest.set_count(dest.count() + src.count());
   if (src.has_capacity()) dest.set_capacity(src.capacity());
 }
 
