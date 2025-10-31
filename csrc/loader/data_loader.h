@@ -35,7 +35,6 @@ class DataLoader {
   std::pair<std::string, float> GetAggregateEndingNow(
       float duration_seconds, bool include_pending) const;
 
-  void AddStage(const StageConfig& stage_config);
   void AddStages(const DataLoaderConfig& config);
   void AddStages(const std::string& serialized_data_loader_config);
 
@@ -43,6 +42,8 @@ class DataLoader {
       const StageControlRequest& request);
 
  private:
+  void AddStage(const StageConfig& stage_config);
+  void SetStageInputs(const StageConfig& stage_config);
   static DataLoaderConfig ParseConfig(
       const std::string& serialized_data_loader_config);
   void MetricsThread(std::stop_token stop_token);

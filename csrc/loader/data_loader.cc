@@ -41,6 +41,7 @@ void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
 
 void DataLoader::AddStages(const DataLoaderConfig& config) {
   for (const auto& stage_config : config.stage()) AddStage(stage_config);
+  for (const auto& stage_config : config.stage()) SetStageInputs(stage_config);
 }
 
 void DataLoader::AddStage(const StageConfig& stage_config) {
@@ -53,6 +54,11 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
     throw std::runtime_error("Stage configuration is missing name.");
   }
 
+  LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
+  stage_registry_.AddStage(stage_config.name(), std::move(stage));
+}
+
+void DataLoader::SetStageInputs(const StageConfig& stage_config) {
   // Resolve input names to queue pointers.
   std::vector<QueueBase*> input_queues;
   input_queues.reserve(stage_config.input_size());
@@ -67,10 +73,14 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
   }
 
   // Wire up inputs.
-  stage->SetInputs(absl::MakeSpan(input_queues));
-
-  LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
-  stage_registry_.AddStage(stage_config.name(), std::move(stage));
+  auto it = absl::c_find_if(stage_registry_.stages(), [&](const auto& p) {
+    return p.first == stage_config.name();
+  });
+  if (it == stage_registry_.stages().end()) {
+    throw std::runtime_error(absl::StrCat("Stage '", stage_config.name(),
+                                          "' not found in registry."));
+  }
+  it->second->SetInputs(absl::MakeSpan(input_queues));
 }
 
 void DataLoader::Start() {
