@@ -450,7 +450,7 @@ class QueueWidget(BaseRowWidget):
         self._drop_chip = Static("dropped --", classes="metric-chip")
         self._fill_bar = ProgressBar(
             classes="queue-fill",
-            show_percentage=True,
+            show_percentage=False,
             show_eta=False,
         )
         self._fill_text = Static("--/--", classes="metric-chip queue-fill-text")
