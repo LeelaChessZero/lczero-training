@@ -123,6 +123,7 @@ files = [
   'csrc/loader/stages/chunk_source_splitter.cc',
   'csrc/loader/stages/chunk_unpacker.cc',
   'csrc/loader/stages/file_path_provider.cc',
+  'csrc/loader/stages/join_stage.cc',
   'csrc/loader/stages/shuffling_chunk_pool.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
   'csrc/loader/stages/simple_chunk_extractor.cc',
@@ -293,6 +294,14 @@ data_loader_test = executable(
   dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
   link_with : loader_lib,
 )
+
+join_stage_test = executable(
+  'join_stage_test',
+  'csrc/loader/stages/join_stage_test.cc',
+  include_directories : includes,
+  dependencies : test_deps + [absl_deps['synchronization'], absl_deps['log']],
+  link_with : loader_lib,
+)
 test('stream_shuffler_test', stream_shuffler_test)
 test('queue_test', queue_test)
 test('file_path_provider_test', file_path_provider_test)
@@ -316,6 +325,7 @@ test('stats_test', stats_test)
 test('load_metric_test', load_metric_test)
 test('stage_factory_test', stage_factory_test)
 test('data_loader_test', data_loader_test)
+test('join_stage_test', join_stage_test)
 
 file_path_provider_main = executable(
   'file_path_provider_main',

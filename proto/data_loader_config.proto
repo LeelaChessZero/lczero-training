@@ -136,6 +136,12 @@ message SimpleChunkExtractorConfig {
   optional QueueConfig output = 1;
 }
 
+// Configuration for join stage that merges multiple input streams.
+message JoinPositionsConfig {
+  // Output queue configuration.
+  optional QueueConfig output = 1;
+}
+
 // Stage-level configuration providing a name and stage-specific options.
 message StageConfig {
   // Unique name used to reference the stage output.
@@ -152,6 +158,7 @@ message StageConfig {
   optional ChunkRescorerConfig chunk_rescorer = 10;
   optional ChunkSourceSplitterConfig chunk_source_splitter = 11;
   optional SimpleChunkExtractorConfig simple_chunk_extractor = 12;
+  optional JoinPositionsConfig join_positions = 13;
 }
 
 // Main configuration class for the DataLoader containing all component

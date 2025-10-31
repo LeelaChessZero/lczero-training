@@ -8,6 +8,7 @@
 #include "loader/stages/chunk_source_splitter.h"
 #include "loader/stages/chunk_unpacker.h"
 #include "loader/stages/file_path_provider.h"
+#include "loader/stages/join_stage.h"
 #include "loader/stages/shuffling_chunk_pool.h"
 #include "loader/stages/shuffling_frame_sampler.h"
 #include "loader/stages/simple_chunk_extractor.h"
@@ -27,7 +28,8 @@ int CountStageConfigs(const StageConfig& config) {
          static_cast<int>(config.has_shuffling_frame_sampler()) +
          static_cast<int>(config.has_tensor_generator()) +
          static_cast<int>(config.has_chunk_source_splitter()) +
-         static_cast<int>(config.has_simple_chunk_extractor());
+         static_cast<int>(config.has_simple_chunk_extractor()) +
+         static_cast<int>(config.has_join_positions());
 }
 
 }  // namespace
@@ -67,6 +69,9 @@ std::unique_ptr<Stage> CreateStage(const StageConfig& config) {
   if (config.has_simple_chunk_extractor()) {
     return std::make_unique<SimpleChunkExtractor>(
         config.simple_chunk_extractor());
+  }
+  if (config.has_join_positions()) {
+    return std::make_unique<JoinPositions>(config.join_positions());
   }
 
   throw std::runtime_error(
