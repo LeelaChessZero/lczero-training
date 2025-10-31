@@ -16,8 +16,8 @@ data_loader {
   }
   stage {
     name: "chunk_source_loader"
+    input: "file_path_provider"
     chunk_source_loader {
-      input: "file_path_provider"
       threads: 1  # Threads for loading chunks
       output {
         queue_capacity: 16  # Output queue for chunk sources
@@ -26,8 +26,8 @@ data_loader {
   }
   stage {
     name: "shuffling_chunk_pool"
+    input: "chunk_source_loader"
     shuffling_chunk_pool {
-      input: "chunk_source_loader"
       chunk_pool_size: 50000        # Shuffle buffer size (chunks in memory)
       source_ingestion_threads: 1   # Threads for ingesting new sources
       chunk_loading_threads: 4      # Threads for loading chunk data
@@ -38,8 +38,8 @@ data_loader {
   }
   stage {
     name: "chunk_rescorer"
+    input: "shuffling_chunk_pool"
     chunk_rescorer {
-      input: "shuffling_chunk_pool"
       threads: 1  # Threads for chunk rescoring
       output {
         queue_capacity: 16  # Output queue for rescored chunks
@@ -55,8 +55,8 @@ data_loader {
   }
   stage {
     name: "chunk_unpacker"
+    input: "chunk_rescorer"
     chunk_unpacker {
-      input: "chunk_rescorer"
       threads: 1  # Threads for unpacking chunks
       # Probability of sampling each position within a chunk.
       position_sampling_rate: 0.03
@@ -67,8 +67,8 @@ data_loader {
   }
   stage {
     name: "shuffling_frame_sampler"
+    input: "chunk_unpacker"
     shuffling_frame_sampler {
-      input: "chunk_unpacker"
       threads: 1                          # Threads for frame sampling
       reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
       output {
@@ -78,8 +78,8 @@ data_loader {
   }
   stage {
     name: "tensor_generator"
+    input: "shuffling_frame_sampler"
     tensor_generator {
-      input: "shuffling_frame_sampler"
       threads: 1       # Threads for tensor generation
       batch_size: 128  # Batch size for tensors
       output {
@@ -118,18 +118,16 @@ training {
   }
   lr_schedule {
     starting_step: 0
+    duration_steps: 0  # 0 means indefinite duration
     lr: 0.001
   }
+  # Example multi-phase schedule with warmup:
   # lr_schedule {
   #   starting_step: 0
-  #   duration_steps: 1500
-  #   duration_steps: 500
-  #   lr: 0.0           # Start at zero to warm up.
-  #   lr: 0.0005        # Ramp linearly from 0 to 0.0005.
-  #   lr: 0.0005        # Hold the same rate after warmup.
-  #   transition: LINEAR
-  #   # Missing transitions default to CONSTANT. The last duration may be
-  #   # omitted or set to 0 to keep the final rate indefinitely.
+  #   duration_steps: [1500, 500, 0]  # Warmup, transition, then indefinite
+  #   lr: [0.0, 0.0005, 0.0005]       # Start at 0, ramp to 0.0005, hold
+  #   transition: [LINEAR, CONSTANT]  # Linear warmup, then constant
+  #   # Missing transitions default to CONSTANT. Last duration 0 = indefinite.
   # }
   checkpoint {
     path: "/home/crem/tmp/2025-09/lc0_training/checkpoint"
@@ -157,8 +155,10 @@ training {
     movesleft { name: "main" weight: 1.0 }
   }
 }
+metrics {
+  tensorboard_path: "/tmp/tensorboard/myrun"
+}
 export {
   path: "/home/crem/tmp/2025-08/lc0_training/exported_models/"
   upload_training_run: 3
-  tensorboard_path: "/tmp/tensorboard/myrun"
 }
