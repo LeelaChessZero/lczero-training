@@ -149,25 +149,7 @@ class TFProcess:
     def __init__(self, cfg):
         self.cfg = cfg
         self.use_gradient_accumulation = self.cfg['training'].get('gradient_accumulation', False)
-        if self.use_gradient_accumulation:
-            accumulation_steps = self.cfg['training'].get('accumulation_steps', 4)
-            use_adaptive = self.cfg['training'].get('adaptive_accumulation', False)
-            
-            if use_adaptive:
-                self.gradient_accumulator = AdaptiveGradientAccumulator(
-                    self.optimizer,
-                    initial_accumulation_steps=accumulation_steps,
-                    min_accumulation_steps=self.cfg['training'].get('min_accumulation_steps', 1),
-                    max_accumulation_steps=self.cfg['training'].get('max_accumulation_steps', 16),
-                    memory_threshold=self.cfg['training'].get('memory_threshold', 0.8),
-                    use_mixed_precision=self.model_dtype == tf.float16
-                )
-            else:
-                self.gradient_accumulator = GradientAccumulator(
-                    self.optimizer,
-                    accumulation_steps=accumulation_steps,
-                    use_mixed_precision=self.model_dtype == tf.float16
-                )
+        
 
         self.net = Net()
         self.root_dir = os.path.join(self.cfg['training']['path'],
@@ -443,6 +425,25 @@ class TFProcess:
         if self.cfg['training'].get('lookahead_optimizer'):
             import tensorflow_addons as tfa
             self.optimizer = tfa.optimizers.Lookahead(self.optimizer)
+        if self.use_gradient_accumulation:
+            accumulation_steps = self.cfg['training'].get('accumulation_steps', 4)
+            use_adaptive = self.cfg['training'].get('adaptive_accumulation', False)
+            
+            if use_adaptive:
+                self.gradient_accumulator = AdaptiveGradientAccumulator(
+                    self.optimizer,
+                    initial_accumulation_steps=accumulation_steps,
+                    min_accumulation_steps=self.cfg['training'].get('min_accumulation_steps', 1),
+                    max_accumulation_steps=self.cfg['training'].get('max_accumulation_steps', 16),
+                    memory_threshold=self.cfg['training'].get('memory_threshold', 0.8),
+                    use_mixed_precision=self.model_dtype == tf.float16
+                )
+            else:
+                self.gradient_accumulator = GradientAccumulator(
+                    self.optimizer,
+                    accumulation_steps=accumulation_steps,
+                    use_mixed_precision=self.model_dtype == tf.float16
+                )
 
         def correct_policy(target, output):
             output = tf.cast(output, tf.float32)
