@@ -8,8 +8,7 @@
 namespace lczero {
 namespace training {
 
-std::unique_ptr<Stage> CreateStage(const StageConfig& config,
-                                   const StageRegistry& existing_stages);
+std::unique_ptr<Stage> CreateStage(const StageConfig& config);
 
 }  // namespace training
 }  // namespace lczero

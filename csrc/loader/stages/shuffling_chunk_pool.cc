@@ -28,10 +28,8 @@ namespace training {
 
 thread_local absl::BitGen ShufflingChunkPool::bitgen_{absl::MakeSeedSeq()};
 
-ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
-                                       const StageRegistry& existing_stages)
-    : SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>(
-          config, existing_stages),
+ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config)
+    : SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>(config),
       SingleOutputStage<TrainingChunk>(config.output()),
       chunk_pool_size_(config.chunk_pool_size()),
       config_(config),

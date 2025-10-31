@@ -33,8 +33,7 @@ class ShufflingChunkPool
     : public SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>,
       public SingleOutputStage<TrainingChunk> {
  public:
-  ShufflingChunkPool(const ShufflingChunkPoolConfig& config,
-                     const StageRegistry& existing_stages);
+  explicit ShufflingChunkPool(const ShufflingChunkPoolConfig& config);
   ~ShufflingChunkPool();
 
   void Start() override;

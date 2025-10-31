@@ -48,10 +48,27 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
     throw std::runtime_error("Cannot add stages after DataLoader has started.");
   }
 
-  auto stage = CreateStage(stage_config, stage_registry_);
+  auto stage = CreateStage(stage_config);
   if (!stage_config.has_name()) {
     throw std::runtime_error("Stage configuration is missing name.");
   }
+
+  // Resolve input names to queue pointers.
+  std::vector<QueueBase*> input_queues;
+  input_queues.reserve(stage_config.input_size());
+  for (const auto& input_name : stage_config.input()) {
+    QueueBase* queue = stage_registry_.GetStageOutput(input_name);
+    if (!queue) {
+      throw std::runtime_error(absl::StrCat("Input stage '", input_name,
+                                            "' not found for stage '",
+                                            stage_config.name(), "'."));
+    }
+    input_queues.push_back(queue);
+  }
+
+  // Wire up inputs.
+  stage->SetStages(absl::MakeSpan(input_queues));
+
   LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
   stage_registry_.AddStage(stage_config.name(), std::move(stage));
 }

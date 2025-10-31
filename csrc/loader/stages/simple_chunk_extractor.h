@@ -24,8 +24,7 @@ class SimpleChunkExtractor
     : public SingleInputStage<SimpleChunkExtractorConfig, ChunkSourceWithPhase>,
       public SingleOutputStage<TrainingChunk> {
  public:
-  SimpleChunkExtractor(const SimpleChunkExtractorConfig& config,
-                       const StageRegistry& existing_stages);
+  explicit SimpleChunkExtractor(const SimpleChunkExtractorConfig& config);
   ~SimpleChunkExtractor();
 
   void Start() override;

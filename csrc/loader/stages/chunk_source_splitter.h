@@ -30,8 +30,7 @@ class ChunkSourceSplitter
   using InputType = ChunkSourceWithPhase;
   using OutputType = ChunkSourceWithPhase;
 
-  explicit ChunkSourceSplitter(const ChunkSourceSplitterConfig& config,
-                               const StageRegistry& existing_stages);
+  explicit ChunkSourceSplitter(const ChunkSourceSplitterConfig& config);
   ~ChunkSourceSplitter();
 
   void Start() override;

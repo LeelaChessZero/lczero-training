@@ -47,8 +47,7 @@ class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
   using MessageType = FilePathProviderMessageType;
   using File = FilePathProviderFile;
 
-  explicit FilePathProvider(const FilePathProviderConfig& config,
-                            const StageRegistry& existing_stages = {});
+  explicit FilePathProvider(const FilePathProviderConfig& config);
   ~FilePathProvider();
 
   // Starts monitoring the directory
@@ -59,6 +58,9 @@ class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
 
   // Returns current metrics and clears them.
   StageMetricProto FlushMetrics() override;
+
+  // FilePathProvider has no inputs.
+  void SetStages(absl::Span<QueueBase* const> inputs) override;
 
  private:
   // Starts monitoring the directory.

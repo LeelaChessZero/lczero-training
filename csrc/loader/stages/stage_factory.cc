@@ -32,48 +32,41 @@ int CountStageConfigs(const StageConfig& config) {
 
 }  // namespace
 
-std::unique_ptr<Stage> CreateStage(const StageConfig& config,
-                                   const StageRegistry& existing_stages) {
+std::unique_ptr<Stage> CreateStage(const StageConfig& config) {
   if (CountStageConfigs(config) != 1) {
     throw std::runtime_error(
         "StageConfig must have exactly one stage-specific config set.");
   }
 
   if (config.has_file_path_provider()) {
-    return std::make_unique<FilePathProvider>(config.file_path_provider(),
-                                              existing_stages);
+    return std::make_unique<FilePathProvider>(config.file_path_provider());
   }
   if (config.has_chunk_source_loader()) {
-    return std::make_unique<ChunkSourceLoader>(config.chunk_source_loader(),
-                                               existing_stages);
+    return std::make_unique<ChunkSourceLoader>(config.chunk_source_loader());
   }
   if (config.has_shuffling_chunk_pool()) {
-    return std::make_unique<ShufflingChunkPool>(config.shuffling_chunk_pool(),
-                                                existing_stages);
+    return std::make_unique<ShufflingChunkPool>(config.shuffling_chunk_pool());
   }
   if (config.has_chunk_rescorer()) {
-    return std::make_unique<ChunkRescorer>(config.chunk_rescorer(),
-                                           existing_stages);
+    return std::make_unique<ChunkRescorer>(config.chunk_rescorer());
   }
   if (config.has_chunk_unpacker()) {
-    return std::make_unique<ChunkUnpacker>(config.chunk_unpacker(),
-                                           existing_stages);
+    return std::make_unique<ChunkUnpacker>(config.chunk_unpacker());
   }
   if (config.has_shuffling_frame_sampler()) {
     return std::make_unique<ShufflingFrameSampler>(
-        config.shuffling_frame_sampler(), existing_stages);
+        config.shuffling_frame_sampler());
   }
   if (config.has_tensor_generator()) {
-    return std::make_unique<TensorGenerator>(config.tensor_generator(),
-                                             existing_stages);
+    return std::make_unique<TensorGenerator>(config.tensor_generator());
   }
   if (config.has_chunk_source_splitter()) {
-    return std::make_unique<ChunkSourceSplitter>(config.chunk_source_splitter(),
-                                                 existing_stages);
+    return std::make_unique<ChunkSourceSplitter>(
+        config.chunk_source_splitter());
   }
   if (config.has_simple_chunk_extractor()) {
     return std::make_unique<SimpleChunkExtractor>(
-        config.simple_chunk_extractor(), existing_stages);
+        config.simple_chunk_extractor());
   }
 
   throw std::runtime_error(

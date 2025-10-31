@@ -36,8 +36,7 @@ class ChunkSourceLoader
   using InputType = FilePathProvider::File;
   using OutputType = ChunkSourceWithPhase;
 
-  ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
-                    const StageRegistry& existing_stages);
+  explicit ChunkSourceLoader(const ChunkSourceLoaderConfig& config);
   ~ChunkSourceLoader();
 
   void Start() override;

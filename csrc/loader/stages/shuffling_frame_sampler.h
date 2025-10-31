@@ -32,8 +32,7 @@ class ShufflingFrameSampler
   using InputType = FrameType;
   using OutputType = FrameType;
 
-  ShufflingFrameSampler(const ShufflingFrameSamplerConfig& config,
-                        const StageRegistry& existing_stages);
+  explicit ShufflingFrameSampler(const ShufflingFrameSamplerConfig& config);
   ~ShufflingFrameSampler();
 
   void Start() override;

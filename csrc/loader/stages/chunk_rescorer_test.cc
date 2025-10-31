@@ -39,6 +39,11 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (!inputs.empty()) {
+      throw std::runtime_error("PassthroughStage expects no inputs");
+    }
+  }
 
  private:
   Queue<T>* queue_;
@@ -52,7 +57,6 @@ class ChunkRescorerTest : public ::testing::Test {
     input_queue_ = std::make_unique<Queue<TrainingChunk>>(10);
     config_.set_threads(1);
     config_.mutable_output()->set_queue_capacity(10);
-    config_.set_input("source");
     config_.set_syzygy_paths("");
     config_.set_dist_temp(0.75f);
     config_.set_dist_offset(0.1f);
@@ -76,11 +80,8 @@ class ChunkRescorerTest : public ::testing::Test {
 };
 
 TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
-                                  input_queue_.get()));
-  ChunkRescorer rescorer(config_, registry, StubRescore);
-
+  ChunkRescorer rescorer(config_, StubRescore);
+  rescorer.SetStages({input_queue_.get()});
   rescorer.Start();
 
   V6TrainingData frame{};
@@ -100,11 +101,8 @@ TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
 }
 
 TEST_F(ChunkRescorerTest, HandlesInputQueueClosure) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<TrainingChunk>>(
-                                  input_queue_.get()));
-  ChunkRescorer rescorer(config_, registry, StubRescore);
-
+  ChunkRescorer rescorer(config_, StubRescore);
+  rescorer.SetStages({input_queue_.get()});
   rescorer.Start();
 
   input_queue_->Close();

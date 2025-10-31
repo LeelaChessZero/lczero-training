@@ -30,10 +30,8 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
   return nullptr;
 }
 
-ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config,
-                                     const StageRegistry& existing_stages)
-    : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config,
-                                                           existing_stages),
+ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config)
+    : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config),
       SingleOutputStage<OutputType>(config.output()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {
   LOG(INFO) << "Initializing ChunkSourceLoader with " << config.threads()

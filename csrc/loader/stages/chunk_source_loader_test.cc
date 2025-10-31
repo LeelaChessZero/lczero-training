@@ -24,6 +24,11 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (!inputs.empty()) {
+      throw std::runtime_error("PassthroughStage expects no inputs");
+    }
+  }
 
  private:
   Queue<T>* queue_;
@@ -36,12 +41,8 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
-  config.set_input("source");
-  StageRegistry registry;
-  registry.AddStage(
-      "source",
-      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
-  ChunkSourceLoader feed(config, registry);
+  ChunkSourceLoader feed(config);
+  feed.SetStages({&input_queue});
   feed.Start();
 
   {
@@ -74,12 +75,8 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
-  config.set_input("source");
-  StageRegistry registry;
-  registry.AddStage(
-      "source",
-      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
-  ChunkSourceLoader feed(config, registry);
+  ChunkSourceLoader feed(config);
+  feed.SetStages({&input_queue});
   feed.Start();
 
   {
@@ -110,12 +107,8 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   ChunkSourceLoaderConfig config;
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
-  config.set_input("source");
-  StageRegistry registry;
-  registry.AddStage(
-      "source",
-      std::make_unique<PassthroughStage<FilePathProvider::File>>(&input_queue));
-  ChunkSourceLoader feed(config, registry);
+  ChunkSourceLoader feed(config);
+  feed.SetStages({&input_queue});
   feed.Start();
 
   {

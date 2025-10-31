@@ -17,10 +17,8 @@
 namespace lczero {
 namespace training {
 
-TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config,
-                                 const StageRegistry& existing_stages)
-    : SingleInputStage<TensorGeneratorConfig, InputType>(config,
-                                                         existing_stages),
+TensorGenerator::TensorGenerator(const TensorGeneratorConfig& config)
+    : SingleInputStage<TensorGeneratorConfig, InputType>(config),
       SingleOutputStage<OutputType>(config.output()),
       batch_size_(config.batch_size()),
       thread_pool_(config.threads(), ThreadPoolOptions{}) {

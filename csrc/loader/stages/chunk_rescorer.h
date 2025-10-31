@@ -32,9 +32,8 @@ class ChunkRescorer
   using RescoreFn = std::function<std::vector<V6TrainingData>(
       std::vector<V6TrainingData>, SyzygyTablebase*, float, float, float, int)>;
 
-  ChunkRescorer(const ChunkRescorerConfig& config,
-                const StageRegistry& existing_stages,
-                RescoreFn rescore_fn = RescoreTrainingData);
+  explicit ChunkRescorer(const ChunkRescorerConfig& config,
+                         RescoreFn rescore_fn = RescoreTrainingData);
   ~ChunkRescorer() override;
 
   void Start() override;

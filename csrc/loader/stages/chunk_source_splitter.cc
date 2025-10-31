@@ -12,10 +12,8 @@ namespace lczero {
 namespace training {
 
 ChunkSourceSplitter::ChunkSourceSplitter(
-    const ChunkSourceSplitterConfig& config,
-    const StageRegistry& existing_stages)
-    : SingleInputStage<ChunkSourceSplitterConfig, InputType>(config,
-                                                             existing_stages) {
+    const ChunkSourceSplitterConfig& config)
+    : SingleInputStage<ChunkSourceSplitterConfig, InputType>(config) {
   if (config.output().empty()) {
     throw std::runtime_error("ChunkSourceSplitter requires at least 1 output.");
   }

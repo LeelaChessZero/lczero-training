@@ -17,9 +17,7 @@ configurations.
 
 ## 2. Extend the Protobufs
 
-- Add a new `message <YourStage>Config` to
-  `proto/data_loader_config.proto`, including an `optional string input` field
-  if the stage consumes upstream data.
+- Add a new `message <YourStage>Config` to `proto/data_loader_config.proto`.
 - For single-output stages, add `optional QueueConfig output = N` to configure
   the output queue. `QueueConfig` provides `queue_capacity` (default 4),
   `overflow_behavior` (BLOCK, DROP_NEW, KEEP_NEWEST), and optional `name`.
@@ -38,8 +36,9 @@ configurations.
 ## 3. Choose a Base Class
 
 - **Use `SingleInputStage<ConfigT, InputT>`** when the stage consumes exactly
-  one upstream queue. The helper resolves the input binding, performs the
-  `dynamic_cast`, and surfaces the typed `Queue<InputT>*` via `input_queue()`.
+  one upstream queue. The helper provides `input_queue()` to access the typed
+  `Queue<InputT>*` and implements `SetStages()` to wire the input during
+  initialization.
 - **Use `SingleOutputStage<OutputT>`** when the stage produces exactly one
   output queue. The helper manages the output queue, implements `GetOutput()`
   with name validation, and surfaces the typed `Queue<OutputT>*` via
@@ -51,25 +50,30 @@ configurations.
   class MyStage : public SingleInputStage<MyStageConfig, InputType>,
                   public SingleOutputStage<OutputType> {
    public:
-    MyStage(const MyStageConfig& config, const StageRegistry& existing_stages)
-        : SingleInputStage<MyStageConfig, InputType>(config, existing_stages),
+    explicit MyStage(const MyStageConfig& config)
+        : SingleInputStage<MyStageConfig, InputType>(config),
           SingleOutputStage<OutputType>(config.output()) {}
   };
   ```
 - **Inherit `Stage` directly** when the stage has multiple inputs, multiple
   outputs, or manages more complex wiring. In that case you must implement
-  input/output discovery and `GetOutput()` yourself.
+  `SetStages()`, input/output discovery, and `GetOutput()` yourself.
 - Place declarations in `csrc/loader/stages/<stage_name>.h` and definitions in
   the matching `.cc` file.
 
 ## 4. Implement the Stage API
 
-- **Constructor**: Initialize base classes with config and `config.output()` (or
-  `config.input()` for `SingleInputStage`). Store additional config fields and
-  initialize worker pools. Avoid starting threads here.
+- **Constructor**: Initialize base classes with config and `config.output()`.
+  Store additional config fields and initialize worker pools.
+  Avoid starting threads here.
+- **`SetStages(absl::Span<QueueBase* const> inputs)`**: Only implement if you
+  inherit from `Stage` directly. `SingleInputStage` provides this automatically
+  and validates that exactly one input is provided. For stages with no inputs,
+  validate that the span is empty.
 - **`Start()`**: Launch background work. Acquire `Queue::Producer` instances
   from `output_queue()->CreateProducer()` for emitting data and honour
-  `stop_requested_` flags so shutdown is cooperative.
+  `stop_requested_` flags so shutdown is cooperative. The input queue is
+  available via `input_queue()` at this point.
 - **`Stop()`**: Close queues via `output_queue()->Close()`, signal workers to
   exit, and join threads. Remember that downstream stages expect
   `Queue::Close()` to signal completion.
@@ -100,8 +104,8 @@ configurations.
 
 ## 6. Register the Stage
 
-- Update `CreateStage` in `csrc/loader/stages/stage_factory.cc` to construct
-  the new class when its config is present. Enforce the “exactly one sub-config”
+- Update `CreateStage` in `csrc/loader/stages/stage_factory.cc` to construct the
+  new class when its config is present. Enforce the "exactly one sub-config"
   rule by keeping the existing `CountStageConfigs()` logic in sync.
 - Ensure `meson.build` lists the new source files so the static library rebuilds.
 

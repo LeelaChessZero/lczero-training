@@ -31,8 +31,7 @@ class TensorGenerator
   using InputType = FrameType;
   using OutputType = TensorTuple;
 
-  TensorGenerator(const TensorGeneratorConfig& config,
-                  const StageRegistry& existing_stages);
+  explicit TensorGenerator(const TensorGeneratorConfig& config);
   ~TensorGenerator();
 
   void Start() override;

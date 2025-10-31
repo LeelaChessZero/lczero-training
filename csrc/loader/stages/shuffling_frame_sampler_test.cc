@@ -24,6 +24,11 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (!inputs.empty()) {
+      throw std::runtime_error("PassthroughStage expects no inputs");
+    }
+  }
 
  private:
   Queue<T>* queue_;
@@ -37,7 +42,6 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
     input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
     config_.set_reservoir_size_per_thread(10);  // Small size for testing
     config_.mutable_output()->set_queue_capacity(20);
-    config_.set_input("source");
   }
 
   V6TrainingData CreateTestFrame(uint32_t version) {
@@ -53,10 +57,8 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
 };
 
 TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  ShufflingFrameSampler sampler(config_, registry);
+  ShufflingFrameSampler sampler(config_);
+  sampler.SetStages({input_queue_.get()});
   sampler.Start();
 
   // Send 5 frames (less than reservoir size)
@@ -84,10 +86,8 @@ TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  ShufflingFrameSampler sampler(config_, registry);
+  ShufflingFrameSampler sampler(config_);
+  sampler.SetStages({input_queue_.get()});
   sampler.Start();
 
   // Send 20 frames (more than reservoir size of 10)
@@ -122,10 +122,8 @@ TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  ShufflingFrameSampler sampler(config_, registry);
+  ShufflingFrameSampler sampler(config_);
+  sampler.SetStages({input_queue_.get()});
   sampler.Start();
 
   // Close input queue without sending data
@@ -136,10 +134,8 @@ TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
 }
 
 TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  ShufflingFrameSampler sampler(config_, registry);
+  ShufflingFrameSampler sampler(config_);
+  sampler.SetStages({input_queue_.get()});
   sampler.Start();
 
   // Send exactly reservoir_size_per_thread frames
@@ -169,10 +165,8 @@ TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
 
 TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   config_.set_reservoir_size_per_thread(2);
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  ShufflingFrameSampler sampler(config_, registry);
+  ShufflingFrameSampler sampler(config_);
+  sampler.SetStages({input_queue_.get()});
   sampler.Start();
 
   auto producer = input_queue_->CreateProducer();

@@ -34,13 +34,11 @@ bool ShouldSkipPathEntry(const FilePathProvider::Path& path) {
 
 }  // namespace
 
-FilePathProvider::FilePathProvider(const FilePathProviderConfig& config,
-                                   const StageRegistry& existing_stages)
+FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
     : SingleOutputStage<File>(config.output()),
       directory_(config.directory()),
       producer_(output_queue()->CreateProducer()),
       load_metric_updater_() {
-  (void)existing_stages;
   LOG(INFO) << "Initializing FilePathProvider for directory: "
             << config.directory();
   inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
@@ -53,6 +51,14 @@ FilePathProvider::~FilePathProvider() {
   Stop();
   if (inotify_fd_ != -1) close(inotify_fd_);
   LOG(INFO) << "FilePathProvider shutdown complete.";
+}
+
+void FilePathProvider::SetStages(absl::Span<QueueBase* const> inputs) {
+  if (!inputs.empty()) {
+    throw std::runtime_error(
+        "FilePathProvider expects no inputs, but received " +
+        std::to_string(inputs.size()));
+  }
 }
 
 void FilePathProvider::Start() {

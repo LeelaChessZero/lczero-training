@@ -37,37 +37,37 @@ void Run() {
   // Configure chunk source loader stage.
   auto* chunk_loader_stage = config.add_stage();
   chunk_loader_stage->set_name("chunk_source_loader");
-  auto* chunk_source_loader = chunk_loader_stage->mutable_chunk_source_loader();
-  chunk_source_loader->set_input(file_stage->name());
+  chunk_loader_stage->add_input(file_stage->name());
+  chunk_loader_stage->mutable_chunk_source_loader();
 
   // Configure shuffling chunk pool stage.
   auto* chunk_pool_stage = config.add_stage();
   chunk_pool_stage->set_name("shuffling_chunk_pool");
+  chunk_pool_stage->add_input(chunk_loader_stage->name());
   auto* shuffling_chunk_pool = chunk_pool_stage->mutable_shuffling_chunk_pool();
-  shuffling_chunk_pool->set_input(chunk_loader_stage->name());
   shuffling_chunk_pool->set_chunk_pool_size(
       absl::GetFlag(FLAGS_chunk_pool_size));
 
   // Configure chunk unpacker stage.
   auto* unpacker_stage = config.add_stage();
   unpacker_stage->set_name("chunk_unpacker");
-  auto* chunk_unpacker = unpacker_stage->mutable_chunk_unpacker();
-  chunk_unpacker->set_input(chunk_pool_stage->name());
+  unpacker_stage->add_input(chunk_pool_stage->name());
+  unpacker_stage->mutable_chunk_unpacker();
 
   // Configure shuffling frame sampler stage.
   auto* sampler_stage = config.add_stage();
   sampler_stage->set_name("shuffling_frame_sampler");
+  sampler_stage->add_input(unpacker_stage->name());
   auto* shuffling_frame_sampler =
       sampler_stage->mutable_shuffling_frame_sampler();
-  shuffling_frame_sampler->set_input(unpacker_stage->name());
   shuffling_frame_sampler->set_reservoir_size_per_thread(
       absl::GetFlag(FLAGS_reservoir_size_per_thread));
 
   // Configure tensor generator stage.
   auto* tensor_stage = config.add_stage();
   tensor_stage->set_name("tensor_generator");
-  auto* tensor_generator = tensor_stage->mutable_tensor_generator();
-  tensor_generator->set_input(sampler_stage->name());
+  tensor_stage->add_input(sampler_stage->name());
+  tensor_stage->mutable_tensor_generator();
 
   // Serialize config and create loader
   config.add_output("tensor_generator");

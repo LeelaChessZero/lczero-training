@@ -11,7 +11,7 @@ TEST(StageFactoryTest, CreatesFilePathProviderStage) {
   StageConfig config;
   config.mutable_file_path_provider()->set_directory(".");
 
-  auto stage = CreateStage(config, {});
+  auto stage = CreateStage(config);
 
   ASSERT_NE(stage, nullptr);
   EXPECT_NE(stage->GetOutput(), nullptr);
@@ -20,7 +20,7 @@ TEST(StageFactoryTest, CreatesFilePathProviderStage) {
 TEST(StageFactoryTest, ThrowsWhenNoStageConfigSet) {
   StageConfig config;
 
-  EXPECT_THROW(CreateStage(config, {}), std::runtime_error);
+  EXPECT_THROW(CreateStage(config), std::runtime_error);
 }
 
 TEST(StageFactoryTest, ThrowsWhenMultipleStageConfigsSet) {
@@ -28,7 +28,7 @@ TEST(StageFactoryTest, ThrowsWhenMultipleStageConfigsSet) {
   config.mutable_file_path_provider()->set_directory(".");
   config.mutable_tensor_generator();
 
-  EXPECT_THROW(CreateStage(config, {}), std::runtime_error);
+  EXPECT_THROW(CreateStage(config), std::runtime_error);
 }
 
 }  // namespace training

@@ -33,8 +33,7 @@ class ChunkUnpacker
   using InputType = TrainingChunk;
   using OutputType = FrameType;
 
-  ChunkUnpacker(const ChunkUnpackerConfig& config,
-                const StageRegistry& existing_stages);
+  explicit ChunkUnpacker(const ChunkUnpackerConfig& config);
   ~ChunkUnpacker();
 
   void Start() override;

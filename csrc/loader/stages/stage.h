@@ -34,6 +34,10 @@ class Stage {
   // Returns the output queue for downstream stages.
   virtual QueueBase* GetOutput(std::string_view name = "") = 0;
 
+  // Sets the input queues for this stage. Called after construction but before
+  // Start(). For stages with no inputs, the span will be empty.
+  virtual void SetStages(absl::Span<QueueBase* const> inputs) = 0;
+
   // Handles control-plane messages specific to the stage.
   virtual std::optional<StageControlResponse> Control(
       const StageControlRequest& request) {
@@ -93,16 +97,19 @@ inline OverflowBehavior ToOverflowBehavior(
 // Helper for stages that consume a single upstream queue.
 template <typename ConfigT, typename InputT>
 class SingleInputStage : virtual public Stage {
- protected:
-  explicit SingleInputStage(const ConfigT& config,
-                            const StageRegistry& existing_stages)
-      : input_queue_(nullptr) {
-    input_queue_ = existing_stages.GetTypedStageOutput<InputT>(config.input());
-    if (!input_queue_) {
-      throw std::runtime_error(absl::StrCat("Input stage '", config.input(),
-                                            "' not found or has wrong type."));
+ public:
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (inputs.size() != 1) {
+      throw std::runtime_error(absl::StrCat(
+          "SingleInputStage expects exactly 1 input, got ", inputs.size()));
     }
+    auto* typed_queue = dynamic_cast<Queue<InputT>*>(inputs[0]);
+    if (!typed_queue) throw std::runtime_error("Input queue type mismatch");
+    input_queue_ = typed_queue;
   }
+
+ protected:
+  explicit SingleInputStage(const ConfigT&) : input_queue_(nullptr) {}
 
   Queue<InputT>* input_queue() { return input_queue_; }
 

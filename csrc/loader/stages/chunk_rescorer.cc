@@ -12,9 +12,8 @@ namespace lczero {
 namespace training {
 
 ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
-                             const StageRegistry& existing_stages,
                              RescoreFn rescore_fn)
-    : SingleInputStage<ChunkRescorerConfig, InputType>(config, existing_stages),
+    : SingleInputStage<ChunkRescorerConfig, InputType>(config),
       SingleOutputStage<OutputType>(config.output()),
       syzygy_paths_(config.syzygy_paths()),
       dist_temp_(config.dist_temp()),

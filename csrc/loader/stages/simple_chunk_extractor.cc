@@ -11,10 +11,9 @@ namespace lczero {
 namespace training {
 
 SimpleChunkExtractor::SimpleChunkExtractor(
-    const SimpleChunkExtractorConfig& config,
-    const StageRegistry& existing_stages)
+    const SimpleChunkExtractorConfig& config)
     : SingleInputStage<SimpleChunkExtractorConfig, ChunkSourceWithPhase>(
-          config, existing_stages),
+          config),
       SingleOutputStage<TrainingChunk>(config.output()),
       bitgen_(absl::MakeSeedSeq()) {}
 

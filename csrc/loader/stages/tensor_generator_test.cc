@@ -29,6 +29,11 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (!inputs.empty()) {
+      throw std::runtime_error("PassthroughStage expects no inputs");
+    }
+  }
 
  private:
   Queue<T>* queue_;
@@ -43,7 +48,6 @@ class TensorGeneratorTest : public ::testing::Test {
     config_.set_batch_size(4);
     config_.set_threads(1);
     config_.mutable_output()->set_queue_capacity(10);
-    config_.set_input("source");
   }
 
   V6TrainingData CreateTestFrame() {
@@ -220,10 +224,8 @@ class TensorGeneratorTest : public ::testing::Test {
 };
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -239,10 +241,8 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 }
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -259,10 +259,8 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -297,10 +295,8 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   config_.set_batch_size(2);
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -316,10 +312,8 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 }
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   // Close input queue without sending data.
@@ -331,10 +325,8 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   config_.set_batch_size(1);
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -372,10 +364,8 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   config_.set_batch_size(1);
-  StageRegistry registry;
-  registry.AddStage("source", std::make_unique<PassthroughStage<FrameType>>(
-                                  input_queue_.get()));
-  TensorGenerator generator(config_, registry);
+  TensorGenerator generator(config_);
+  generator.SetStages({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();

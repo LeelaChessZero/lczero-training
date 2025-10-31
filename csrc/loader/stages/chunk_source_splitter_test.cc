@@ -43,6 +43,11 @@ class PassthroughStage : public Stage {
   void Stop() override {}
   StageMetricProto FlushMetrics() override { return StageMetricProto(); }
   QueueBase* GetOutput(std::string_view) override { return queue_; }
+  void SetStages(absl::Span<QueueBase* const> inputs) override {
+    if (!inputs.empty()) {
+      throw std::runtime_error("PassthroughStage expects no inputs");
+    }
+  }
 
  private:
   Queue<T>* queue_;
@@ -51,16 +56,11 @@ class PassthroughStage : public Stage {
 }  // namespace
 
 TEST(ChunkSourceSplitterTest, SplitsByHashAndWeight) {
-  // Upstream queue and registry wiring.
+  // Upstream queue.
   auto input_queue = std::make_unique<Queue<ChunkSourceWithPhase>>(8);
-  StageRegistry registry;
-  registry.AddStage("src",
-                    std::make_unique<PassthroughStage<ChunkSourceWithPhase>>(
-                        input_queue.get()));
 
   // Configure splitter with two outputs A:1, B:2.
   ChunkSourceSplitterConfig cfg;
-  cfg.set_input("src");
   auto* outA = cfg.add_output();
   outA->set_name("A");
   outA->set_queue_capacity(8);
@@ -70,9 +70,8 @@ TEST(ChunkSourceSplitterTest, SplitsByHashAndWeight) {
   outB->set_queue_capacity(8);
   cfg.add_weight(2);
 
-  ChunkSourceSplitter splitter(cfg, registry);
-  registry.AddStage(
-      "split", std::unique_ptr<Stage>(new ChunkSourceSplitter(cfg, registry)));
+  ChunkSourceSplitter splitter(cfg);
+  splitter.SetStages({input_queue.get()});
 
   splitter.Start();
 
@@ -122,13 +121,8 @@ TEST(ChunkSourceSplitterTest, SplitsByHashAndWeight) {
 
 TEST(ChunkSourceSplitterTest, BroadcastsInitialScanComplete) {
   auto input_queue = std::make_unique<Queue<ChunkSourceWithPhase>>(4);
-  StageRegistry registry;
-  registry.AddStage("src",
-                    std::make_unique<PassthroughStage<ChunkSourceWithPhase>>(
-                        input_queue.get()));
 
   ChunkSourceSplitterConfig cfg;
-  cfg.set_input("src");
   auto* outA = cfg.add_output();
   outA->set_name("A");
   cfg.add_weight(1);
@@ -136,7 +130,8 @@ TEST(ChunkSourceSplitterTest, BroadcastsInitialScanComplete) {
   outB->set_name("B");
   cfg.add_weight(1);
 
-  ChunkSourceSplitter splitter(cfg, registry);
+  ChunkSourceSplitter splitter(cfg);
+  splitter.SetStages({input_queue.get()});
   splitter.Start();
 
   ChunkSourceWithPhase marker;
