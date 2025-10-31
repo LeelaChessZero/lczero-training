@@ -886,8 +886,8 @@ class TFProcess:
                     else:
                         grad_norm = self.apply_grads(grads, batch_splits)
                     # Keep running averages
-                    for acc, val in zip(self.train_metrics, metrics):
-                        acc.accumulate(val)
+            for acc, val in zip(self.train_metrics, metrics):
+                acc.accumulate(val)
         # Gradients of batch splits are summed, not averaged like usual, so need to scale lr accordingly to correct for this.
         effective_batch_splits = batch_splits
         if self.strategy is not None:
