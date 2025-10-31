@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import ProgressBar, Static
 
@@ -185,8 +184,10 @@ def _canonical_stage_name(
     return "--"
 
 
-class BaseRowWidget(Horizontal):
+class BaseRowWidget(Widget):
     """Base class for pipeline rows that renders a name and content widgets."""
+
+    MAX_GRID_ROWS = 8  # Supports up to 35 chips (5 per row, 7 content rows)
 
     def __init__(
         self,
@@ -203,24 +204,25 @@ class BaseRowWidget(Horizontal):
             _canonical_stage_name(None, fallback_name, stage_key),
             classes="row-label",
         )
-        self._row_content: Horizontal | None = None
         self._content_widgets: list[Widget] = []
+        self._spacers: list[Static] = []
 
     def compose(self) -> ComposeResult:
-        row_content = Horizontal(classes="row-content")
-        self._row_content = row_content
-        yield Horizontal(
-            self._name_label,
-            row_content,
-            classes="row-wrapper",
-        )
+        # Name label goes in first cell (row 0, col 0)
+        yield self._name_label
 
     def on_mount(self) -> None:
-        row_content = self._row_content
-        if self._content_widgets and row_content is not None:
+        if self._content_widgets:
 
             async def _mount_initial() -> None:
-                await row_content.mount(*self._content_widgets)
+                # Mount chips with spacers interleaved at the start of each row
+                for i, widget in enumerate(self._content_widgets):
+                    # After every 5 chips, add a spacer for the next row's column 0
+                    if i > 0 and i % 5 == 0:
+                        spacer = Static("", classes="grid-spacer")
+                        self._spacers.append(spacer)
+                        await self.mount(spacer)
+                    await self.mount(widget)
 
             self.call_later(_mount_initial)
 
@@ -228,14 +230,6 @@ class BaseRowWidget(Horizontal):
         if widget in self._content_widgets:
             return
         self._content_widgets.append(widget)
-        row_content = self._row_content
-        if row_content is not None:
-
-            async def _mount_widget() -> None:
-                if widget.parent is None:
-                    await row_content.mount(widget)
-
-            self.call_later(_mount_widget)
 
     def _update_name(
         self,
@@ -285,13 +279,26 @@ class StageWidget(BaseRowWidget):
         if not has_field:
             return
 
-        chip = self._ensure_chip("info:dropped", "dropped --", "warning-chip")
+        chip = self._ensure_chip("info:dropped", "dropped --", "info-chip")
+        has_drops = False
         if stage_1s and stage_1s.HasField("dropped") and stage_1s.dropped:
             chip.update(f"dropped {format_si(stage_1s.dropped)}/s")
-        elif stage_total and stage_total.HasField("dropped"):
+            has_drops = True
+        elif (
+            stage_total
+            and stage_total.HasField("dropped")
+            and stage_total.dropped
+        ):
             chip.update(f"dropped {format_full_number(stage_total.dropped)}")
+            has_drops = True
         else:
             chip.update("dropped 0")
+            has_drops = False
+
+        if has_drops:
+            chip.add_class("warning-chip")
+        else:
+            chip.remove_class("warning-chip")
 
     def _update_skipped_chip(
         self,
@@ -440,12 +447,10 @@ class QueueWidget(BaseRowWidget):
         )
         self._rate_chip = Static("rate --/s", classes="metric-chip queue-rate")
         self._total_chip = Static("total --", classes="metric-chip queue-total")
-        self._drop_chip = Static(
-            "dropped --", classes="metric-chip warning-chip"
-        )
+        self._drop_chip = Static("dropped --", classes="metric-chip")
         self._fill_bar = ProgressBar(
             classes="queue-fill",
-            show_percentage=False,
+            show_percentage=True,
             show_eta=False,
         )
         self._fill_text = Static("--/--", classes="metric-chip queue-fill-text")
@@ -455,6 +460,20 @@ class QueueWidget(BaseRowWidget):
         self.add_content_widget(self._drop_chip)
         self.add_content_widget(self._fill_bar)
         self.add_content_widget(self._fill_text)
+
+    def compose(self) -> ComposeResult:
+        # Queue widgets don't show the name label - use all 6 columns
+        return
+        yield  # Make this a generator
+
+    def on_mount(self) -> None:
+        # Mount all content widgets without spacers (use all 6 columns per row)
+        if self._content_widgets:
+
+            async def _mount_initial() -> None:
+                await self.mount(*self._content_widgets)
+
+            self.call_later(_mount_initial)
 
     def update_metrics(
         self,
@@ -466,6 +485,7 @@ class QueueWidget(BaseRowWidget):
             self._rate_chip.update("rate --/s")
             self._total_chip.update("total --")
             self._drop_chip.update("dropped --")
+            self._drop_chip.remove_class("warning-chip")
             self._fill_bar.total = 1
             self._fill_bar.progress = 0
             self._fill_text.update("--/--")
@@ -503,16 +523,25 @@ class QueueWidget(BaseRowWidget):
         else:
             self._total_chip.update("total --")
 
+        has_drops = False
         if queue_1sec and queue_1sec.drop_count:
             self._drop_chip.update(
                 f"dropped {format_si(queue_1sec.drop_count)}/s"
             )
+            has_drops = True
         elif queue_total and queue_total.drop_count:
             self._drop_chip.update(
                 f"dropped {format_full_number(queue_total.drop_count)}"
             )
+            has_drops = True
         else:
             self._drop_chip.update("dropped --")
+            has_drops = False
+
+        if has_drops:
+            self._drop_chip.add_class("warning-chip")
+        else:
+            self._drop_chip.remove_class("warning-chip")
 
         size = _average_queue_fullness(queue_1sec)
         capacity: int | None = None

@@ -17,7 +17,7 @@ DataPipelinePane {
     padding: 0 1;
     layout: vertical;
     overflow-y: auto;
-    height: 18;
+    height: 27;
 }
 
 #training-status-container {
@@ -55,13 +55,16 @@ RichLog {
 }
 
 .dataloader-row {
-    layout: horizontal;
+    layout: grid;
+    grid-size: 6 8;
+    grid-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
+    grid-rows: 1;
+    grid-gutter: 0;
     border: none;
     padding: 0;
     margin: 0;
     height: auto;
     min-height: 1;
-    content-align: left middle;
     width: 100%;
 }
 
@@ -73,29 +76,27 @@ RichLog {
 .queue-row {
     background: $surface-darken-2;
     color: $text;
+    grid-size: 6 1;
 }
 
 .row-label {
     padding: 0 1 0 0;
     margin: 0;
-    width: 18;
+    height: 1;
+    max-height: 1;
     text-style: bold;
     color: $text;
-}
-
-.row-content {
-    layout: horizontal;
     content-align: left middle;
-    width: 1fr;
-    padding: 0;
-    margin: 0;
+    text-wrap: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.row-wrapper {
-    layout: horizontal;
+.grid-spacer {
+    width: 1;
     height: 1;
-    min-height: 1;
-    content-align: left middle;
+    max-height: 1;
+    background: transparent;
 }
 
 .metric-chip {
@@ -104,10 +105,13 @@ RichLog {
     padding: 0 1;
     margin: 0 1 0 0;
     height: 1;
+    max-height: 1;
     border: none;
     content-align: center middle;
     width: auto;
     min-width: 10;
+    text-wrap: nowrap;
+    overflow: hidden;
 }
 
 .load-chip {
@@ -130,10 +134,15 @@ RichLog {
     color: $text-muted;
     padding: 0;
     margin-right: 1;
+    height: 1;
+    max-height: 1;
+    text-wrap: nowrap;
+    overflow: hidden;
 }
 
 .queue-fill {
     height: 1;
+    max-height: 1;
     width: 1fr;
     margin-right: 1;
 }
@@ -143,10 +152,19 @@ RichLog {
     color: $text;
     margin: 0;
     padding: 0;
+    height: 1;
+    max-height: 1;
+    text-wrap: nowrap;
+    overflow: hidden;
+    width: auto;
 }
 
 .queue-rate--zero {
     color: $error;
+}
+
+.queue-rate, .queue-total {
+    text-wrap: nowrap;
 }
 
 
