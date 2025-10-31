@@ -60,7 +60,7 @@ class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
   StageMetricProto FlushMetrics() override;
 
   // FilePathProvider has no inputs.
-  void SetStages(absl::Span<QueueBase* const> inputs) override;
+  void SetInputs(absl::Span<QueueBase* const> inputs) override;
 
  private:
   // Starts monitoring the directory.

@@ -43,7 +43,7 @@ class PassthroughStage : public Stage {
   void Stop() override {}
   StageMetricProto FlushMetrics() override { return StageMetricProto(); }
   QueueBase* GetOutput(std::string_view) override { return queue_; }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -71,7 +71,7 @@ TEST(ChunkSourceSplitterTest, SplitsByHashAndWeight) {
   cfg.add_weight(2);
 
   ChunkSourceSplitter splitter(cfg);
-  splitter.SetStages({input_queue.get()});
+  splitter.SetInputs({input_queue.get()});
 
   splitter.Start();
 
@@ -131,7 +131,7 @@ TEST(ChunkSourceSplitterTest, BroadcastsInitialScanComplete) {
   cfg.add_weight(1);
 
   ChunkSourceSplitter splitter(cfg);
-  splitter.SetStages({input_queue.get()});
+  splitter.SetInputs({input_queue.get()});
   splitter.Start();
 
   ChunkSourceWithPhase marker;

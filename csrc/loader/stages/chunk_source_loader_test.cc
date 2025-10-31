@@ -24,7 +24,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -42,7 +42,7 @@ TEST(ChunkSourceLoaderTest, ProcessesFiles) {
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
   ChunkSourceLoader feed(config);
-  feed.SetStages({&input_queue});
+  feed.SetInputs({&input_queue});
   feed.Start();
 
   {
@@ -76,7 +76,7 @@ TEST(ChunkSourceLoaderTest, HandlesPhases) {
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
   ChunkSourceLoader feed(config);
-  feed.SetStages({&input_queue});
+  feed.SetInputs({&input_queue});
   feed.Start();
 
   {
@@ -108,7 +108,7 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   config.set_threads(1);
   config.mutable_output()->set_queue_capacity(10);
   ChunkSourceLoader feed(config);
-  feed.SetStages({&input_queue});
+  feed.SetInputs({&input_queue});
   feed.Start();
 
   {

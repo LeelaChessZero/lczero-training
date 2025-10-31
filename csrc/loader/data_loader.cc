@@ -67,7 +67,7 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
   }
 
   // Wire up inputs.
-  stage->SetStages(absl::MakeSpan(input_queues));
+  stage->SetInputs(absl::MakeSpan(input_queues));
 
   LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
   stage_registry_.AddStage(stage_config.name(), std::move(stage));

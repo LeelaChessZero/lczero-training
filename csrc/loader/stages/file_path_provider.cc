@@ -53,7 +53,7 @@ FilePathProvider::~FilePathProvider() {
   LOG(INFO) << "FilePathProvider shutdown complete.";
 }
 
-void FilePathProvider::SetStages(absl::Span<QueueBase* const> inputs) {
+void FilePathProvider::SetInputs(absl::Span<QueueBase* const> inputs) {
   if (!inputs.empty()) {
     throw std::runtime_error(
         "FilePathProvider expects no inputs, but received " +

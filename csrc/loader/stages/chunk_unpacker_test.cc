@@ -32,7 +32,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -78,7 +78,7 @@ class ChunkUnpackerTest : public ::testing::Test {
 
 TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
   ChunkUnpacker unpacker(config_);
-  unpacker.SetStages({input_queue_.get()});
+  unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
   V6TrainingData test_frame = CreateTestFrame(6);
@@ -94,7 +94,7 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
   ChunkUnpacker unpacker(config_);
-  unpacker.SetStages({input_queue_.get()});
+  unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
   std::vector<V6TrainingData> test_frames = {
@@ -125,7 +125,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
 
 TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
   ChunkUnpacker unpacker(config_);
-  unpacker.SetStages({input_queue_.get()});
+  unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -159,7 +159,7 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
 
 TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
   ChunkUnpacker unpacker(config_);
-  unpacker.SetStages({input_queue_.get()});
+  unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -175,7 +175,7 @@ TEST_F(ChunkUnpackerTest, HandlesEmptyChunk) {
 
 TEST_F(ChunkUnpackerTest, HandlesQueueClosure) {
   ChunkUnpacker unpacker(config_);
-  unpacker.SetStages({input_queue_.get()});
+  unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
   // Close input queue without sending data

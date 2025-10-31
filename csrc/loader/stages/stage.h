@@ -35,8 +35,8 @@ class Stage {
   virtual QueueBase* GetOutput(std::string_view name = "") = 0;
 
   // Sets the input queues for this stage. Called after construction but before
-  // Start(). For stages with no inputs, the span will be empty.
-  virtual void SetStages(absl::Span<QueueBase* const> inputs) = 0;
+  // Start().
+  virtual void SetInputs(absl::Span<QueueBase* const> inputs) = 0;
 
   // Handles control-plane messages specific to the stage.
   virtual std::optional<StageControlResponse> Control(
@@ -98,7 +98,7 @@ inline OverflowBehavior ToOverflowBehavior(
 template <typename ConfigT, typename InputT>
 class SingleInputStage : virtual public Stage {
  public:
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (inputs.size() != 1) {
       throw std::runtime_error(absl::StrCat(
           "SingleInputStage expects exactly 1 input, got ", inputs.size()));

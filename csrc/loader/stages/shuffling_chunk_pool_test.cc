@@ -36,7 +36,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -161,7 +161,7 @@ TEST_F(ShufflingChunkPoolTest, ConstructorCreatesOutputQueue) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
 
   auto* output_queue = shuffling_chunk_pool.output_queue();
 
@@ -190,7 +190,7 @@ TEST_F(ShufflingChunkPoolTest, HandlesEmptyInputQueue) {
   // Constructor should now succeed (initialization is asynchronous)
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   // The initialization thread should handle the error case
@@ -215,7 +215,7 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsHandlesEmptyChunkSources) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
 
   auto metrics = shuffling_chunk_pool.FlushMetrics();
   bool found_current = false;
@@ -243,7 +243,7 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsReportsWindowAndTotalCounts) {
 
   const int chunk_pool_size = 20;
   ShufflingChunkPool shuffling_chunk_pool(MakeConfig(chunk_pool_size));
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   auto* output_queue = shuffling_chunk_pool.output_queue();
@@ -296,7 +296,7 @@ TEST_F(ShufflingChunkPoolTest, ProcessesInitialScanChunkSources) {
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config);
 
-    shuffling_chunk_pool.SetStages({input_queue_.get()});
+    shuffling_chunk_pool.SetInputs({input_queue_.get()});
     shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
@@ -319,7 +319,7 @@ TEST_F(ShufflingChunkPoolTest, OutputWorkerProducesChunks) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   // Close input queue to stop input worker from waiting
@@ -356,7 +356,7 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   // Close input queue to stop input worker from waiting
@@ -397,7 +397,7 @@ TEST_F(ShufflingChunkPoolTest, NewChunkSourceProcessing) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   // Verify chunks are being produced from initial sources
@@ -431,7 +431,7 @@ TEST_F(ShufflingChunkPoolTest, ChunkWindowManagement) {
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config);
 
-    shuffling_chunk_pool.SetStages({input_queue_.get()});
+    shuffling_chunk_pool.SetInputs({input_queue_.get()});
     shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
@@ -456,7 +456,7 @@ TEST_F(ShufflingChunkPoolTest, ChunkSorting) {
   EXPECT_NO_THROW({
     ShufflingChunkPool shuffling_chunk_pool(config);
 
-    shuffling_chunk_pool.SetStages({input_queue_.get()});
+    shuffling_chunk_pool.SetInputs({input_queue_.get()});
     shuffling_chunk_pool.Start();
 
     // Close input queue to stop input worker from waiting
@@ -478,7 +478,7 @@ TEST_F(ShufflingChunkPoolTest, StreamShufflerResetWhenExhausted) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   auto* output_queue = shuffling_chunk_pool.output_queue();
@@ -539,7 +539,7 @@ TEST_F(ShufflingChunkPoolTest, HanseMetrics_NoRejection_CacheAndReshuffles) {
 
   ShufflingChunkPool pool(config);
 
-  pool.SetStages({input_queue_.get()});
+  pool.SetInputs({input_queue_.get()});
   pool.Start();
 
   auto* output_queue = pool.output_queue();
@@ -583,7 +583,7 @@ TEST_F(ShufflingChunkPoolTest, ExplicitClose) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output_queue();
 
@@ -617,7 +617,7 @@ TEST_F(ShufflingChunkPoolTest, CloseStopsOutputWorkers) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output_queue();
 
@@ -652,7 +652,7 @@ TEST_F(ShufflingChunkPoolTest, CloseIsIdempotent) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
 
   // Stop multiple times - should not crash or cause issues
@@ -674,7 +674,7 @@ TEST_F(ShufflingChunkPoolTest, DestructorCallsClose) {
   {
     ShufflingChunkPool shuffling_chunk_pool(config);
 
-    shuffling_chunk_pool.SetStages({input_queue_.get()});
+    shuffling_chunk_pool.SetInputs({input_queue_.get()});
     shuffling_chunk_pool.Start();
     auto* output_queue = shuffling_chunk_pool.output_queue();
 
@@ -702,7 +702,7 @@ TEST_F(ShufflingChunkPoolTest, InputQueueClosureDoesNotCloseOutputQueue) {
 
   ShufflingChunkPool shuffling_chunk_pool(config);
 
-  shuffling_chunk_pool.SetStages({input_queue_.get()});
+  shuffling_chunk_pool.SetInputs({input_queue_.get()});
   shuffling_chunk_pool.Start();
   auto* output_queue = shuffling_chunk_pool.output_queue();
 
@@ -731,7 +731,7 @@ TEST_F(ShufflingChunkPoolTest, BasicAnchorFunctionality) {
 
   ShufflingChunkPool pool(config);
 
-  pool.SetStages({input_queue_.get()});
+  pool.SetInputs({input_queue_.get()});
   pool.Start();
 
   // Test initial state
@@ -758,7 +758,7 @@ TEST_F(ShufflingChunkPoolTest, ResetAnchor) {
 
   ShufflingChunkPool pool(config);
 
-  pool.SetStages({input_queue_.get()});
+  pool.SetInputs({input_queue_.get()});
   pool.Start();
 
   // Wait for initialization to complete
@@ -784,7 +784,7 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterIncrement) {
 
   ShufflingChunkPool pool(config);
 
-  pool.SetStages({input_queue_.get()});
+  pool.SetInputs({input_queue_.get()});
   pool.Start();
 
   // Set anchor to a key that won't match our new sources
@@ -818,7 +818,7 @@ TEST_F(ShufflingChunkPoolTest, AnchorCounterResetDuringInitialLoad) {
 
   ShufflingChunkPool pool(config);
 
-  pool.SetStages({input_queue_.get()});
+  pool.SetInputs({input_queue_.get()});
   pool.Start();
 
   // Set anchor to middle source before marking scan complete

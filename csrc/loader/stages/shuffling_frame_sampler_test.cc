@@ -24,7 +24,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -58,7 +58,7 @@ class ShufflingFrameSamplerTest : public ::testing::Test {
 
 TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
   ShufflingFrameSampler sampler(config_);
-  sampler.SetStages({input_queue_.get()});
+  sampler.SetInputs({input_queue_.get()});
   sampler.Start();
 
   // Send 5 frames (less than reservoir size)
@@ -87,7 +87,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsNoFramesWithSmallInput) {
 
 TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
   ShufflingFrameSampler sampler(config_);
-  sampler.SetStages({input_queue_.get()});
+  sampler.SetInputs({input_queue_.get()});
   sampler.Start();
 
   // Send 20 frames (more than reservoir size of 10)
@@ -123,7 +123,7 @@ TEST_F(ShufflingFrameSamplerTest, OutputsFramesWithLargeInput) {
 
 TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
   ShufflingFrameSampler sampler(config_);
-  sampler.SetStages({input_queue_.get()});
+  sampler.SetInputs({input_queue_.get()});
   sampler.Start();
 
   // Close input queue without sending data
@@ -135,7 +135,7 @@ TEST_F(ShufflingFrameSamplerTest, HandlesEmptyInput) {
 
 TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
   ShufflingFrameSampler sampler(config_);
-  sampler.SetStages({input_queue_.get()});
+  sampler.SetInputs({input_queue_.get()});
   sampler.Start();
 
   // Send exactly reservoir_size_per_thread frames
@@ -166,7 +166,7 @@ TEST_F(ShufflingFrameSamplerTest, HandlesExactReservoirSize) {
 TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   config_.set_reservoir_size_per_thread(2);
   ShufflingFrameSampler sampler(config_);
-  sampler.SetStages({input_queue_.get()});
+  sampler.SetInputs({input_queue_.get()});
   sampler.Start();
 
   auto producer = input_queue_->CreateProducer();

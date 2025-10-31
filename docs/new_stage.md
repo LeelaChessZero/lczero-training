@@ -37,7 +37,7 @@ configurations.
 
 - **Use `SingleInputStage<ConfigT, InputT>`** when the stage consumes exactly
   one upstream queue. The helper provides `input_queue()` to access the typed
-  `Queue<InputT>*` and implements `SetStages()` to wire the input during
+  `Queue<InputT>*` and implements `SetInputs()` to wire the input during
   initialization.
 - **Use `SingleOutputStage<OutputT>`** when the stage produces exactly one
   output queue. The helper manages the output queue, implements `GetOutput()`
@@ -57,7 +57,7 @@ configurations.
   ```
 - **Inherit `Stage` directly** when the stage has multiple inputs, multiple
   outputs, or manages more complex wiring. In that case you must implement
-  `SetStages()`, input/output discovery, and `GetOutput()` yourself.
+  `SetInputs()`, input/output discovery, and `GetOutput()` yourself.
 - Place declarations in `csrc/loader/stages/<stage_name>.h` and definitions in
   the matching `.cc` file.
 
@@ -66,7 +66,7 @@ configurations.
 - **Constructor**: Initialize base classes with config and `config.output()`.
   Store additional config fields and initialize worker pools.
   Avoid starting threads here.
-- **`SetStages(absl::Span<QueueBase* const> inputs)`**: Only implement if you
+- **`SetInputs(absl::Span<QueueBase* const> inputs)`**: Only implement if you
   inherit from `Stage` directly. `SingleInputStage` provides this automatically
   and validates that exactly one input is provided. For stages with no inputs,
   validate that the span is empty.

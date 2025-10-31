@@ -39,7 +39,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -81,7 +81,7 @@ class ChunkRescorerTest : public ::testing::Test {
 
 TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
   ChunkRescorer rescorer(config_, StubRescore);
-  rescorer.SetStages({input_queue_.get()});
+  rescorer.SetInputs({input_queue_.get()});
   rescorer.Start();
 
   V6TrainingData frame{};
@@ -102,7 +102,7 @@ TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
 
 TEST_F(ChunkRescorerTest, HandlesInputQueueClosure) {
   ChunkRescorer rescorer(config_, StubRescore);
-  rescorer.SetStages({input_queue_.get()});
+  rescorer.SetInputs({input_queue_.get()});
   rescorer.Start();
 
   input_queue_->Close();

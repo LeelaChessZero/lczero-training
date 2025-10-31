@@ -29,7 +29,7 @@ class PassthroughStage : public Stage {
     (void)name;
     return queue_;
   }
-  void SetStages(absl::Span<QueueBase* const> inputs) override {
+  void SetInputs(absl::Span<QueueBase* const> inputs) override {
     if (!inputs.empty()) {
       throw std::runtime_error("PassthroughStage expects no inputs");
     }
@@ -225,7 +225,7 @@ class TensorGeneratorTest : public ::testing::Test {
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -242,7 +242,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -260,7 +260,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
 
 TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -296,7 +296,7 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
 TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   config_.set_batch_size(2);
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -313,7 +313,7 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   // Close input queue without sending data.
@@ -326,7 +326,7 @@ TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
 TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
   config_.set_batch_size(1);
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
@@ -365,7 +365,7 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   config_.set_batch_size(1);
   TensorGenerator generator(config_);
-  generator.SetStages({input_queue_.get()});
+  generator.SetInputs({input_queue_.get()});
   generator.Start();
 
   auto producer = input_queue_->CreateProducer();
