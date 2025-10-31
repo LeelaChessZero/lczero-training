@@ -47,7 +47,6 @@ message CountMetricProto {
 // Top-level metrics for the DataLoader.
 message StageMetricProto {
   optional string name = 1;
-  optional string stage_type = 2;
   repeated LoadMetricProto load_metrics = 3;
   repeated QueueMetricProto queue_metrics = 4;
   repeated CountMetricProto count_metrics = 5;

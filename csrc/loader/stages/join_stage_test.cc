@@ -132,7 +132,6 @@ TEST_F(JoinStageTest, FlushesMetrics) {
   join_stage.Stop();
 
   auto metrics = join_stage.FlushMetrics();
-  EXPECT_EQ(metrics.stage_type(), "join_positions");
   EXPECT_EQ(metrics.load_metrics_size(), 1);
   EXPECT_EQ(metrics.queue_metrics_size(), 1);
 }

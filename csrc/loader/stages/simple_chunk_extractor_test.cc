@@ -232,7 +232,6 @@ TEST_F(SimpleChunkExtractorTest, MetricsAreRecorded) {
   // Flush metrics.
   auto metrics = shuffler_->FlushMetrics();
 
-  EXPECT_EQ(metrics.stage_type(), "simple_chunk_extractor");
   EXPECT_GT(metrics.count_metrics_size(), 0);
 
   // Check that chunks_processed metric exists.

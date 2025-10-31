@@ -69,8 +69,6 @@ void JoinStage<T>::Stop() {
 template <typename T>
 StageMetricProto JoinStage<T>::FlushMetrics() {
   StageMetricProto metrics;
-  metrics.set_stage_type("join_positions");
-
   LoadMetricProto aggregated_load;
   aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {

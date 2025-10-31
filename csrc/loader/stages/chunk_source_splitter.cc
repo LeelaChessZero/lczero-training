@@ -96,7 +96,6 @@ QueueBase* ChunkSourceSplitter::GetOutput(std::string_view name) {
 
 StageMetricProto ChunkSourceSplitter::FlushMetrics() {
   StageMetricProto metric;
-  metric.set_stage_type("chunk_source_splitter");
   for (auto& out : outputs_) {
     *metric.add_queue_metrics() = MetricsFromQueue(out->name, out->queue);
   }

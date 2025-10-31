@@ -182,7 +182,6 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
 
 StageMetricProto ChunkUnpacker::FlushMetrics() {
   StageMetricProto stage_metric;
-  stage_metric.set_stage_type("chunk_unpacker");
   LoadMetricProto aggregated_load;
   aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {

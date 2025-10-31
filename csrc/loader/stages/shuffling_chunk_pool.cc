@@ -468,8 +468,6 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
 
 StageMetricProto ShufflingChunkPool::FlushMetrics() {
   StageMetricProto stage_metric;
-  stage_metric.set_stage_type("shuffling_chunk_pool");
-
   // Aggregate source ingestion load metrics from all ingestion threads.
   LoadMetricProto ingestion_load;
   ingestion_load.set_name("source_ingestion");

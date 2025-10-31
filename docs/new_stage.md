@@ -89,8 +89,7 @@ configurations.
 - **Accumulate state** while workers run (e.g., load metrics, counters,
   queue statistics).
 - **`FlushMetrics()`** should snapshot the current values, reset internal
-  counters as needed, and populate `StageMetricProto`. Set the
-  `stage_type` field so the UI can identify the stage kind. Use helpers like
+  counters as needed, and populate `StageMetricProto`. Use helpers like
   `MetricsFromQueue("output", *output_queue())` to expose queue utilisation
   under `queue_metrics`, and append load information via `load_metrics`.
 - For multiple queues or distinct metric groups, add additional entries with

@@ -93,8 +93,6 @@ std::optional<TrainingChunk> SimpleChunkExtractor::LoadChunk(
 
 StageMetricProto SimpleChunkExtractor::FlushMetrics() {
   StageMetricProto metric;
-  metric.set_stage_type("simple_chunk_extractor");
-
   auto add_count = [&](const char* name, std::atomic<uint64_t>& counter) {
     auto* m = metric.add_count_metrics();
     m->set_name(name);

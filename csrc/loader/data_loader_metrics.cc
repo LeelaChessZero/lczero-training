@@ -44,7 +44,6 @@ void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src) {
 
 void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
   if (src.has_name()) dest.set_name(src.name());
-  if (src.has_stage_type()) dest.set_stage_type(src.stage_type());
 
   for (const auto& load_metrics : src.load_metrics()) {
     LoadMetricProto* dest_load =

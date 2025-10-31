@@ -199,7 +199,6 @@ void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
 
 StageMetricProto TensorGenerator::FlushMetrics() {
   StageMetricProto stage_metric;
-  stage_metric.set_stage_type("tensor_generator");
   LoadMetricProto aggregated_load;
   aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {

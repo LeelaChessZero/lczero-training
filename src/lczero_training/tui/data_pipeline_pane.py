@@ -45,13 +45,12 @@ class DataPipelinePane(Container):
     def _ensure_stage_widget(
         self,
         stage_key: str,
-        stage_type: str,
     ) -> tuple[StageWidget, bool]:
         created = False
         if stage_key not in self._stage_widgets:
             stage_widget = StageWidget(
                 stage_key=stage_key,
-                fallback_name=self._friendly_title(stage_type),
+                fallback_name=self._friendly_title(stage_key),
             )
             self._stage_widgets[stage_key] = stage_widget
             self._queue_widgets[stage_key] = {}
@@ -66,14 +65,13 @@ class DataPipelinePane(Container):
     def _ensure_queue_widgets(
         self,
         stage_key: str,
-        stage_type: str,
         stage_metric: training_metrics_pb2.StageMetricProto,
     ) -> list[QueueWidget]:
         stage_queue_widgets = self._queue_widgets.setdefault(stage_key, {})
         queue_order = self._queue_order.setdefault(stage_key, [])
         new_widgets: list[QueueWidget] = []
 
-        friendly = self._friendly_title(stage_type)
+        friendly = self._friendly_title(stage_key)
         for index, queue_metric in enumerate(stage_metric.queue_metrics):
             queue_identifier = queue_metric.name or f"__index__{index}"
             if queue_identifier in stage_queue_widgets:
@@ -112,16 +110,11 @@ class DataPipelinePane(Container):
             if not stage_key:
                 continue
 
-            stage_type = stage_metric.stage_type or stage_key
-            stage_widget, created = self._ensure_stage_widget(
-                stage_key, stage_type
-            )
+            stage_widget, created = self._ensure_stage_widget(stage_key)
             if created:
                 new_widgets.append(stage_widget)
 
-            queue_widgets = self._ensure_queue_widgets(
-                stage_key, stage_type, stage_metric
-            )
+            queue_widgets = self._ensure_queue_widgets(stage_key, stage_metric)
             new_widgets.extend(queue_widgets)
 
         if new_widgets:

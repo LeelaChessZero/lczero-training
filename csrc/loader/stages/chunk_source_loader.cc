@@ -129,7 +129,6 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
 
 StageMetricProto ChunkSourceLoader::FlushMetrics() {
   StageMetricProto stage_metric;
-  stage_metric.set_stage_type("chunk_source_loader");
   LoadMetricProto aggregated_load;
   aggregated_load.set_name("load");
   for (const auto& context : thread_contexts_) {
