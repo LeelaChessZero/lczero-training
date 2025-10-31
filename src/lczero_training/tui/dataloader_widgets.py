@@ -130,16 +130,30 @@ def _format_load(
 
 
 def _format_count(
-    count_metric: training_metrics_pb2.CountMetricProto | None,
+    count_metric_1s: training_metrics_pb2.CountMetricProto | None,
+    count_metric_total: training_metrics_pb2.CountMetricProto | None,
     label: str,
 ) -> str:
-    if not count_metric:
-        return f"{label} --"
-    count_text = format_full_number(count_metric.count)
-    if count_metric.HasField("capacity"):
-        capacity_text = format_full_number(count_metric.capacity)
+    # Check for capacity in either metric - if present, use current behavior.
+    if count_metric_1s and count_metric_1s.HasField("capacity"):
+        count_text = format_full_number(count_metric_1s.count)
+        capacity_text = format_full_number(count_metric_1s.capacity)
         return f"{label} {count_text}/{capacity_text}"
-    return f"{label} {count_text}"
+    if count_metric_total and count_metric_total.HasField("capacity"):
+        count_text = format_full_number(count_metric_total.count)
+        capacity_text = format_full_number(count_metric_total.capacity)
+        return f"{label} {count_text}/{capacity_text}"
+
+    # New behavior for simple count metrics: show rate/s (total).
+    if count_metric_1s and count_metric_total:
+        rate = format_si(count_metric_1s.count)
+        total = format_full_number(count_metric_total.count)
+        return f"{label} {rate}/s ({total} total)"
+    if count_metric_total:
+        return f"{label} {format_full_number(count_metric_total.count)}"
+    if count_metric_1s:
+        return f"{label} {format_si(count_metric_1s.count)}/s"
+    return f"{label} --"
 
 
 def _average_queue_fullness(
@@ -386,15 +400,16 @@ class StageWidget(BaseRowWidget):
         )
         for count_name in count_names:
             label = count_name or "count"
-            count_metric = _find_count_metric(stage_metric_1s, count_name)
-            if count_metric is None:
-                count_metric = _find_count_metric(
-                    stage_metric_total, count_name
-                )
+            count_metric_1s = _find_count_metric(stage_metric_1s, count_name)
+            count_metric_total = _find_count_metric(
+                stage_metric_total, count_name
+            )
             chip = self._ensure_chip(
                 f"count:{count_name}", f"{label} --", "info-chip"
             )
-            chip.update(_format_count(count_metric, label=label))
+            chip.update(
+                _format_count(count_metric_1s, count_metric_total, label=label)
+            )
 
         self._update_dropped_chip(stage_metric_1s, stage_metric_total)
         self._update_skipped_chip(stage_metric_1s, stage_metric_total)
