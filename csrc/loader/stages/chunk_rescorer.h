@@ -5,6 +5,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -45,7 +46,7 @@ class ChunkRescorer
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(ThreadContext* context);
+  void Worker(std::stop_token stop_token, ThreadContext* context);
   void InitializeTablebase();
 
   SyzygyTablebase tablebase_;
@@ -58,7 +59,6 @@ class ChunkRescorer
 
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
-  std::atomic<bool> stop_requested_{false};
   RescoreFn rescore_fn_;
 };
 

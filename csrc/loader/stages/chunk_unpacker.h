@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <stop_token>
 #include <vector>
 
 #include "absl/random/random.h"
@@ -45,7 +46,7 @@ class ChunkUnpacker
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(ThreadContext* context);
+  void Worker(std::stop_token stop_token, ThreadContext* context);
 
   const absl::optional<float> position_sampling_rate_;
   const absl::optional<uint32_t> position_count_;
@@ -54,7 +55,6 @@ class ChunkUnpacker
   // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   ThreadPool thread_pool_;
-  std::atomic<bool> stop_requested_{false};
 };
 
 std::vector<uint32_t> PickSampledPositions(int32_t n, double p,

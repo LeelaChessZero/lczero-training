@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <memory>
+#include <stop_token>
 #include <vector>
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
@@ -43,7 +44,7 @@ class TensorGenerator
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(ThreadContext* context);
+  void Worker(std::stop_token stop_token, ThreadContext* context);
   void ConvertFramesToTensors(const std::vector<FrameType>& frames,
                               TensorTuple& tensors);
   void ProcessPlanes(const std::vector<FrameType>& frames,
@@ -54,7 +55,6 @@ class TensorGenerator
   // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   ThreadPool thread_pool_;
-  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace training

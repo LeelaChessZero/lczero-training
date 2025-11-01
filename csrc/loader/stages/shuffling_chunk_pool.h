@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -71,8 +72,10 @@ class ShufflingChunkPool
   std::vector<std::unique_ptr<ChunkSource>> InitializeChunkSources();
   void ProcessInputFiles(
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources);
-  void SourceIngestionWorker(SourceIngestionThreadContext* context);
-  void OutputWorker(ChunkLoadingThreadContext* context);
+  void SourceIngestionWorker(std::stop_token stop_token,
+                             SourceIngestionThreadContext* context);
+  void OutputWorker(std::stop_token stop_token,
+                    ChunkLoadingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
   std::optional<TrainingChunk> GetNextChunkData()
@@ -90,6 +93,8 @@ class ShufflingChunkPool
 
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
+  // stop_source_ must be declared before ThreadPools that reference it.
+  std::stop_source stop_source_;
   ThreadPool source_ingestion_pool_;
   ThreadPool chunk_loading_pool_;
 
@@ -109,7 +114,6 @@ class ShufflingChunkPool
   absl::Mutex anchor_mutex_;
   std::string anchor_ ABSL_GUARDED_BY(anchor_mutex_);
   std::atomic<int> chunks_since_anchor_{0};
-  std::atomic<bool> stop_requested_{false};
 
   // Thread-local RNG for Hanse sampling.
   static thread_local absl::BitGen bitgen_;

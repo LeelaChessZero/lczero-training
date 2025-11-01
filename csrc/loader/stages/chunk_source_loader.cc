@@ -49,25 +49,23 @@ ChunkSourceLoader::~ChunkSourceLoader() { Stop(); }
 void ChunkSourceLoader::Start() {
   LOG(INFO) << "Starting ChunkSourceLoader worker threads.";
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+    thread_pool_.Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, thread_contexts_[i].get());
+    });
   }
 }
 
 void ChunkSourceLoader::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
 
   LOG(INFO) << "Stopping ChunkSourceLoader.";
-  input_queue()->Close();
-  output_queue()->Close();
-  thread_pool_.WaitAll();
   thread_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "ChunkSourceLoader stopped.";
 }
 
-void ChunkSourceLoader::Worker(ThreadContext* context) {
+void ChunkSourceLoader::Worker(std::stop_token stop_token,
+                               ThreadContext* context) {
   // Create a local producer for this worker thread
   auto producer = output_queue()->CreateProducer();
   LOG(INFO) << "ChunkSourceLoader worker@" << static_cast<const void*>(context)
@@ -77,14 +75,15 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
     while (true) {
       auto file = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue()->Get();
+        return input_queue()->Get(stop_token);
       }();
 
       if (file.message_type ==
           FilePathProvider::MessageType::kInitialScanComplete) {
         LOG(INFO)
             << "ChunkSourceLoader received initial scan completion marker.";
-        producer.Put({.source = nullptr, .message_type = file.message_type});
+        producer.Put({.source = nullptr, .message_type = file.message_type},
+                     stop_token);
         continue;
       }
 
@@ -102,7 +101,7 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
         ChunkSourceWithPhase output{.source = std::move(source),
                                     .message_type = file.message_type};
         LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(output));
+        producer.Put(std::move(output), stop_token);
       } else {
         LOG_EVERY_N(INFO, 100)
             << "ChunkSourceLoader skipping unsupported file: " << file.filepath;
@@ -113,9 +112,10 @@ void ChunkSourceLoader::Worker(ThreadContext* context) {
     LOG(INFO) << "ChunkSourceLoader worker@"
               << static_cast<const void*>(context)
               << " stopping, queue closed.";
-    // Input queue is closed, the local producer will be destroyed when this
-    // function exits which may close the output queue if this is the last
-    // producer
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "ChunkSourceLoader worker@"
+              << static_cast<const void*>(context)
+              << " stopping, request cancelled.";
   } catch (const std::exception& e) {
     LOG(ERROR) << "ChunkSourceLoader worker@"
                << static_cast<const void*>(context)

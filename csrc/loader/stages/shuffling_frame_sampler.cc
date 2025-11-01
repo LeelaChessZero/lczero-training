@@ -34,25 +34,23 @@ ShufflingFrameSampler::~ShufflingFrameSampler() { Stop(); }
 void ShufflingFrameSampler::Start() {
   LOG(INFO) << "Starting ShufflingFrameSampler worker threads.";
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+    thread_pool_.Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, thread_contexts_[i].get());
+    });
   }
 }
 
 void ShufflingFrameSampler::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
 
   LOG(INFO) << "Stopping ShufflingFrameSampler.";
-  input_queue()->Close();
-  output_queue()->Close();
-  thread_pool_.WaitAll();
   thread_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "ShufflingFrameSampler stopped.";
 }
 
-void ShufflingFrameSampler::Worker(ThreadContext* context) {
+void ShufflingFrameSampler::Worker(std::stop_token stop_token,
+                                   ThreadContext* context) {
   // Create producer early so that if input queue closes during reservoir
   // prefilling, the producer will be destroyed and close the output queue.
   auto producer = output_queue()->CreateProducer();
@@ -61,21 +59,22 @@ void ShufflingFrameSampler::Worker(ThreadContext* context) {
   try {
     // Phase 1: Prefill the reservoir
     LOG(INFO) << "ShufflingFrameSampler worker prefilling reservoir";
-    absl::c_generate(reservoir, [this, context]() {
+    absl::c_generate(reservoir, [this, context, stop_token]() {
       LoadMetricPauser pauser(context->load_metric_updater);
-      return input_queue()->Get();
+      return input_queue()->Get(stop_token);
     });
 
     // Phase 2: Main sampling loop
-    MainSamplingLoop(reservoir, producer, context);
+    MainSamplingLoop(stop_token, reservoir, producer, context);
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "ShufflingFrameSampler worker stopping, input queue closed.";
-    // Input queue is closed.
+    LOG(INFO) << "ShufflingFrameSampler worker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "ShufflingFrameSampler worker stopping, request cancelled.";
   }
 }
 
 void ShufflingFrameSampler::MainSamplingLoop(
-    absl::FixedArray<FrameType>& reservoir,
+    std::stop_token stop_token, absl::FixedArray<FrameType>& reservoir,
     Queue<OutputType>::Producer& producer, ThreadContext* context) {
   absl::uniform_int_distribution<size_t> dist(0, reservoir.size() - 1);
 
@@ -83,11 +82,11 @@ void ShufflingFrameSampler::MainSamplingLoop(
     const size_t random_index = dist(gen_);
     {
       LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(reservoir[random_index]));
+      producer.Put(std::move(reservoir[random_index]), stop_token);
     }
     {
       LoadMetricPauser pauser(context->load_metric_updater);
-      reservoir[random_index] = input_queue()->Get();
+      reservoir[random_index] = input_queue()->Get(stop_token);
     }
   }
 }

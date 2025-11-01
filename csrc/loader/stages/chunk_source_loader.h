@@ -3,6 +3,7 @@
 #include <atomic>
 #include <filesystem>
 #include <memory>
+#include <stop_token>
 
 #include "absl/synchronization/mutex.h"
 #include "loader/chunk_source/chunk_source.h"
@@ -49,13 +50,12 @@ class ChunkSourceLoader
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(ThreadContext* context);
+  void Worker(std::stop_token stop_token, ThreadContext* context);
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   std::atomic<uint64_t> skipped_files_count_{0};
   absl::Mutex last_chunk_key_mutex_;
   std::string last_chunk_key_;
-  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace training

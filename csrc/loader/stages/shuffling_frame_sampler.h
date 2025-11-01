@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <memory>
+#include <stop_token>
 #include <vector>
 
 #include "absl/container/fixed_array.h"
@@ -44,8 +45,9 @@ class ShufflingFrameSampler
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(ThreadContext* context);
-  void MainSamplingLoop(absl::FixedArray<FrameType>& reservoir,
+  void Worker(std::stop_token stop_token, ThreadContext* context);
+  void MainSamplingLoop(std::stop_token stop_token,
+                        absl::FixedArray<FrameType>& reservoir,
                         Queue<OutputType>::Producer& producer,
                         ThreadContext* context);
 
@@ -55,7 +57,6 @@ class ShufflingFrameSampler
   // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   ThreadPool thread_pool_;
-  std::atomic<bool> stop_requested_{false};
 };
 
 }  // namespace training

@@ -37,25 +37,23 @@ TensorGenerator::~TensorGenerator() { Stop(); }
 void TensorGenerator::Start() {
   LOG(INFO) << "Starting TensorGenerator worker threads.";
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+    thread_pool_.Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, thread_contexts_[i].get());
+    });
   }
 }
 
 void TensorGenerator::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
 
   LOG(INFO) << "Stopping TensorGenerator.";
-  input_queue()->Close();
-  output_queue()->Close();
-  thread_pool_.WaitAll();
   thread_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "TensorGenerator stopped.";
 }
 
-void TensorGenerator::Worker(ThreadContext* context) {
+void TensorGenerator::Worker(std::stop_token stop_token,
+                             ThreadContext* context) {
   auto producer = output_queue()->CreateProducer();
   std::vector<FrameType> batch;
   batch.reserve(batch_size_);
@@ -66,7 +64,7 @@ void TensorGenerator::Worker(ThreadContext* context) {
       batch.clear();
       for (size_t i = 0; i < batch_size_; ++i) {
         LoadMetricPauser pauser(context->load_metric_updater);
-        batch.push_back(input_queue()->Get());
+        batch.push_back(input_queue()->Get(stop_token));
       }
 
       // Convert batch to tensors.
@@ -74,12 +72,13 @@ void TensorGenerator::Worker(ThreadContext* context) {
       ConvertFramesToTensors(batch, tensors);
       {
         LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(tensors));
+        producer.Put(std::move(tensors), stop_token);
       }
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "TensorGenerator worker stopping, input queue closed.";
-    // Input queue is closed.
+    LOG(INFO) << "TensorGenerator worker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "TensorGenerator worker stopping, request cancelled.";
   }
 }
 

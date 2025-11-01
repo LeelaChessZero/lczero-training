@@ -34,8 +34,9 @@ ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config)
       chunk_pool_size_(config.chunk_pool_size()),
       config_(config),
       source_ingestion_pool_(config.source_ingestion_threads(),
-                             ThreadPoolOptions{}),
-      chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{}) {
+                             ThreadPoolOptions{}, stop_source_),
+      chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{},
+                          stop_source_) {
   LOG(INFO) << "Initializing ShufflingChunkPool with pool size "
             << config.chunk_pool_size();
 }
@@ -59,7 +60,9 @@ void ShufflingChunkPool::Start() {
                 .emplace_back(std::make_unique<SourceIngestionThreadContext>())
                 .get();
         source_ingestion_pool_.Enqueue(
-            [this, context]() { SourceIngestionWorker(context); });
+            [this, context](std::stop_token stop_token) {
+              SourceIngestionWorker(stop_token, context);
+            });
       }
 
       // Start output workers after everything is fully initialized.
@@ -70,7 +73,9 @@ void ShufflingChunkPool::Start() {
                 .emplace_back(std::make_unique<ChunkLoadingThreadContext>())
                 .get();
         chunk_loading_pool_.Enqueue(
-            [this, context]() { OutputWorker(context); });
+            [this, context](std::stop_token stop_token) {
+              OutputWorker(stop_token, context);
+            });
       }
     } catch (const QueueClosedException&) {
       LOG(INFO) << "ShufflingChunkPool initialization interrupted, input "
@@ -84,23 +89,18 @@ void ShufflingChunkPool::Start() {
 }
 
 void ShufflingChunkPool::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (stop_source_.stop_requested()) return;
 
   LOG(INFO) << "Stopping ShufflingChunkPool.";
-  input_queue()->Close();
-  output_queue()->Close();
-
+  stop_source_.request_stop();
   if (initialization_thread_.joinable()) {
+    initialization_thread_.request_stop();
     initialization_thread_.join();
   }
 
-  source_ingestion_pool_.WaitAll();
-  chunk_loading_pool_.WaitAll();
   source_ingestion_pool_.Shutdown();
   chunk_loading_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 
@@ -227,12 +227,12 @@ void ShufflingChunkPool::ProcessInputFiles(
 }
 
 void ShufflingChunkPool::SourceIngestionWorker(
-    SourceIngestionThreadContext* context) {
+    std::stop_token stop_token, SourceIngestionThreadContext* context) {
   try {
     while (true) {
       auto chunk_source_with_phase = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue()->Get();
+        return input_queue()->Get(stop_token);
       }();
 
       if (chunk_source_with_phase.message_type ==
@@ -246,11 +246,14 @@ void ShufflingChunkPool::SourceIngestionWorker(
       }
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "Input queue closed, stopping input worker.";
+    LOG(INFO) << "SourceIngestionWorker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "SourceIngestionWorker stopping, request cancelled.";
   }
 }
 
-void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
+void ShufflingChunkPool::OutputWorker(std::stop_token stop_token,
+                                      ChunkLoadingThreadContext* context) {
   // Create a local producer for this worker
   auto producer = output_queue()->CreateProducer();
 
@@ -262,13 +265,14 @@ void ShufflingChunkPool::OutputWorker(ChunkLoadingThreadContext* context) {
         continue;
       }
       LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(*chunk));
+      producer.Put(std::move(*chunk), stop_token);
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "ShufflingChunkPool output worker stopping, queue closed.";
-    // Output queue was closed, stop this worker
+    LOG(INFO) << "OutputWorker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "OutputWorker stopping, request cancelled.";
   } catch (const std::exception& e) {
-    LOG(FATAL) << "Output worker encountered an error: " << e.what();
+    LOG(FATAL) << "OutputWorker encountered an error: " << e.what();
   }
 }
 

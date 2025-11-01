@@ -22,10 +22,14 @@ struct ThreadPoolOptions {
 class ThreadPool {
  public:
   ThreadPool(size_t initial_threads = 0,
-             const ThreadPoolOptions& options = ThreadPoolOptions());
+             const ThreadPoolOptions& options = ThreadPoolOptions(),
+             std::stop_source stop_source = std::stop_source());
 
   // Blocks until all tasks are completed and threads are joined.
   ~ThreadPool();
+
+  // Returns the stop_token for this thread pool.
+  std::stop_token stop_token() const;
 
   // Enqueues a task for execution and returns a std::future.
   // If the provided function accepts a std::stop_token as its first argument,
@@ -108,15 +112,16 @@ class ThreadPool {
   absl::CondVar work_available_;
   absl::CondVar work_done_;
 
-  std::stop_source stop_source_{};
+  std::stop_source stop_source_;
   std::vector<std::jthread> threads_ ABSL_GUARDED_BY(mutex_);
   std::deque<absl::AnyInvocable<void()>> pending_tasks_ ABSL_GUARDED_BY(mutex_);
   size_t running_tasks_ ABSL_GUARDED_BY(mutex_) = 0;
 };
 
 inline ThreadPool::ThreadPool(size_t initial_threads,
-                              const ThreadPoolOptions& options)
-    : options_(options) {
+                              const ThreadPoolOptions& options,
+                              std::stop_source stop_source)
+    : options_(options), stop_source_(std::move(stop_source)) {
   absl::MutexLock lock(&mutex_);
   for (size_t i = 0; i < initial_threads; ++i) {
     StartWorkerThread();
@@ -124,6 +129,10 @@ inline ThreadPool::ThreadPool(size_t initial_threads,
 }
 
 inline ThreadPool::~ThreadPool() { Shutdown(); }
+
+inline std::stop_token ThreadPool::stop_token() const {
+  return stop_source_.get_token();
+}
 
 inline void ThreadPool::WorkerLoop() {
   while (true) {

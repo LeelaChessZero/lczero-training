@@ -123,25 +123,22 @@ ChunkUnpacker::~ChunkUnpacker() { Stop(); }
 void ChunkUnpacker::Start() {
   LOG(INFO) << "Starting ChunkUnpacker worker threads.";
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+    thread_pool_.Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, thread_contexts_[i].get());
+    });
   }
 }
 
 void ChunkUnpacker::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
 
   LOG(INFO) << "Stopping ChunkUnpacker.";
-  input_queue()->Close();
-  output_queue()->Close();
-  thread_pool_.WaitAll();
   thread_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "ChunkUnpacker stopped.";
 }
 
-void ChunkUnpacker::Worker(ThreadContext* context) {
+void ChunkUnpacker::Worker(std::stop_token stop_token, ThreadContext* context) {
   // Create a local producer for this worker thread.
   auto producer = output_queue()->CreateProducer();
 
@@ -149,7 +146,7 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
     while (true) {
       auto chunk = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue()->Get();
+        return input_queue()->Get(stop_token);
       }();
 
       absl::BitGen gen(
@@ -169,14 +166,13 @@ void ChunkUnpacker::Worker(ThreadContext* context) {
 
       for (uint32_t pos : positions) {
         LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(chunk.frames[pos]));
+        producer.Put(std::move(chunk.frames[pos]), stop_token);
       }
     }
   } catch (const QueueClosedException&) {
-    LOG(INFO) << "ChunkUnpacker worker stopping, input queue closed.";
-    // Input queue is closed, the local producer will be destroyed when this
-    // function exits which may close the output queue if this is the last
-    // producer.
+    LOG(INFO) << "ChunkUnpacker worker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "ChunkUnpacker worker stopping, request cancelled.";
   }
 }
 

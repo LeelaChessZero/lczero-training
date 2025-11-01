@@ -65,39 +65,36 @@ void ChunkRescorer::Start() {
   LOG(INFO) << "Starting ChunkRescorer worker threads.";
   InitializeTablebase();
   for (size_t i = 0; i < thread_contexts_.size(); ++i) {
-    thread_pool_.Enqueue([this, i]() { Worker(thread_contexts_[i].get()); });
+    thread_pool_.Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, thread_contexts_[i].get());
+    });
   }
 }
 
 void ChunkRescorer::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
 
   LOG(INFO) << "Stopping ChunkRescorer.";
-  input_queue()->Close();
-  output_queue()->Close();
-  thread_pool_.WaitAll();
   thread_pool_.Shutdown();
+  output_queue()->Close();
   LOG(INFO) << "ChunkRescorer stopped.";
 }
 
-void ChunkRescorer::Worker(ThreadContext* context) {
+void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
   auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
       TrainingChunk chunk = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue()->Get();
+        return input_queue()->Get(stop_token);
       }();
 
       try {
         chunk.frames = rescore_fn_(chunk.frames, &tablebase_, dist_temp_,
                                    dist_offset_, dtz_boost_, new_input_format_);
         LoadMetricPauser pauser(context->load_metric_updater);
-        producer.Put(std::move(chunk));
+        producer.Put(std::move(chunk), stop_token);
       } catch (const std::exception& exception) {
         LOG(ERROR) << "ChunkRescorer failed to rescore chunk: "
                    << exception.what() << "; sort_key=" << chunk.sort_key
@@ -110,6 +107,8 @@ void ChunkRescorer::Worker(ThreadContext* context) {
     }
   } catch (const QueueClosedException&) {
     LOG(INFO) << "ChunkRescorer worker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "ChunkRescorer worker stopping, request cancelled.";
   }
 }
 
