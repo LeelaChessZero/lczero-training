@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <stop_token>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/fixed_array.h"
@@ -29,6 +30,12 @@ class QueueBase {
 class QueueClosedException : public std::runtime_error {
  public:
   QueueClosedException() : std::runtime_error("Queue is closed") {}
+};
+
+// Exception thrown when queue operation is cancelled via stop_token.
+class QueueRequestCancelled : public std::runtime_error {
+ public:
+  QueueRequestCancelled() : std::runtime_error("Queue request cancelled") {}
 };
 
 enum class OverflowBehavior { BLOCK, DROP_NEW, KEEP_NEWEST };
@@ -64,12 +71,12 @@ class Queue : public QueueBase {
     Producer& operator=(const Producer&) = delete;
 
     // Puts a single element into the queue. Blocks if queue is full.
-    void Put(const T& item);
-    void Put(T&& item);
+    void Put(const T& item, std::stop_token stop_token = {});
+    void Put(T&& item, std::stop_token stop_token = {});
 
     // Puts multiple elements into the queue. Blocks if not enough space.
-    void Put(absl::Span<const T> items);
-    void Put(absl::Span<T> items);
+    void Put(absl::Span<const T> items, std::stop_token stop_token = {});
+    void Put(absl::Span<T> items, std::stop_token stop_token = {});
 
     // Explicitly close this producer, decrementing the producer count
     void Close();
@@ -82,11 +89,11 @@ class Queue : public QueueBase {
   Producer CreateProducer();
 
   // Gets a single element from the queue. Blocks if queue is empty.
-  T Get();
+  T Get(std::stop_token stop_token = {});
 
   // Gets exactly count elements from the queue. Blocks until count elements
   // available.
-  absl::FixedArray<T> Get(size_t count);
+  absl::FixedArray<T> Get(size_t count, std::stop_token stop_token = {});
 
   // Gets a single element from the queue if available, returns std::nullopt
   // if empty.
@@ -105,16 +112,16 @@ class Queue : public QueueBase {
   bool IsClosed() const override;
 
   // Wait until queue has at least the specified amount of free space.
-  void WaitForRoomAtLeast(size_t room);
+  void WaitForRoomAtLeast(size_t room, std::stop_token stop_token = {});
 
   // Wait until queue has at most the specified amount of free space.
-  void WaitForRoomAtMost(size_t room);
+  void WaitForRoomAtMost(size_t room, std::stop_token stop_token = {});
 
   // Wait until queue has at least the specified number of elements.
-  void WaitForSizeAtLeast(size_t size);
+  void WaitForSizeAtLeast(size_t size, std::stop_token stop_token = {});
 
   // Wait until queue has at most the specified number of elements.
-  void WaitForSizeAtMost(size_t size);
+  void WaitForSizeAtMost(size_t size, std::stop_token stop_token = {});
 
   // Returns the total number of elements that have been put into the queue.
   // If reset is true, resets the counter to 0 after returning the value.
@@ -144,15 +151,16 @@ class Queue : public QueueBase {
   size_t total_drop_count_ ABSL_GUARDED_BY(mutex_) = 0;
 
   mutable absl::Mutex mutex_;
+  absl::CondVar cond_var_;
 
   // Internal methods for producer management
   void RemoveProducer();
 
   // Internal Put methods (called by Producer)
-  void PutInternal(const T& item);
-  void PutInternal(T&& item);
-  void PutInternal(absl::Span<const T> items);
-  void PutInternal(absl::Span<T> items);
+  void PutInternal(const T& item, std::stop_token stop_token = {});
+  void PutInternal(T&& item, std::stop_token stop_token = {});
+  void PutInternal(absl::Span<const T> items, std::stop_token stop_token = {});
+  void PutInternal(absl::Span<T> items, std::stop_token stop_token = {});
 
   // Condition predicates for blocking operations
   bool CanPutOne() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -209,23 +217,24 @@ typename Queue<T>::Producer& Queue<T>::Producer::operator=(
 }
 
 template <typename T>
-void Queue<T>::Producer::Put(const T& item) {
-  queue_->PutInternal(item);
+void Queue<T>::Producer::Put(const T& item, std::stop_token stop_token) {
+  queue_->PutInternal(item, stop_token);
 }
 
 template <typename T>
-void Queue<T>::Producer::Put(T&& item) {
-  queue_->PutInternal(std::move(item));
+void Queue<T>::Producer::Put(T&& item, std::stop_token stop_token) {
+  queue_->PutInternal(std::move(item), stop_token);
 }
 
 template <typename T>
-void Queue<T>::Producer::Put(absl::Span<const T> items) {
-  queue_->PutInternal(items);
+void Queue<T>::Producer::Put(absl::Span<const T> items,
+                             std::stop_token stop_token) {
+  queue_->PutInternal(items, stop_token);
 }
 
 template <typename T>
-void Queue<T>::Producer::Put(absl::Span<T> items) {
-  queue_->PutInternal(items);
+void Queue<T>::Producer::Put(absl::Span<T> items, std::stop_token stop_token) {
+  queue_->PutInternal(items, stop_token);
 }
 
 template <typename T>
@@ -255,11 +264,12 @@ void Queue<T>::RemoveProducer() {
     closed_ = true;
     LOG(INFO) << "Queue@" << static_cast<const void*>(this)
               << " closed after last producer removed.";
+    cond_var_.SignalAll();
   }
 }
 
 template <typename T>
-void Queue<T>::PutInternal(const T& item) {
+void Queue<T>::PutInternal(const T& item, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
   if (closed_) {
     LOG(INFO) << "Queue@" << static_cast<const void*>(this)
@@ -270,20 +280,23 @@ void Queue<T>::PutInternal(const T& item) {
   ++total_put_count_;
 
   switch (overflow_behavior_) {
-    case OverflowBehavior::BLOCK:
-      mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-      // Second check needed: queue might have closed while waiting.
+    case OverflowBehavior::BLOCK: {
+      std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+      while (!CanPutOne()) {
+        if (closed_) throw QueueClosedException();
+        if (stop_token.stop_requested()) throw QueueRequestCancelled();
+        cond_var_.Wait(&mutex_);
+      }
       if (closed_) throw QueueClosedException();
       break;
+    }
     case OverflowBehavior::DROP_NEW:
-      // No blocking: return immediately if full.
       if (size_ >= capacity_) {
         ++total_drop_count_;
         return;
       }
       break;
     case OverflowBehavior::KEEP_NEWEST:
-      // No blocking: make room by dropping oldest item.
       if (size_ >= capacity_) {
         head_ = (head_ + 1) % capacity_;
         --size_;
@@ -295,10 +308,11 @@ void Queue<T>::PutInternal(const T& item) {
   buffer_[tail_] = item;
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
+  cond_var_.SignalAll();
 }
 
 template <typename T>
-void Queue<T>::PutInternal(T&& item) {
+void Queue<T>::PutInternal(T&& item, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
   if (closed_) {
     LOG(INFO) << "Queue@" << static_cast<const void*>(this)
@@ -309,20 +323,23 @@ void Queue<T>::PutInternal(T&& item) {
   ++total_put_count_;
 
   switch (overflow_behavior_) {
-    case OverflowBehavior::BLOCK:
-      mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-      // Second check needed: queue might have closed while waiting.
+    case OverflowBehavior::BLOCK: {
+      std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+      while (!CanPutOne()) {
+        if (closed_) throw QueueClosedException();
+        if (stop_token.stop_requested()) throw QueueRequestCancelled();
+        cond_var_.Wait(&mutex_);
+      }
       if (closed_) throw QueueClosedException();
       break;
+    }
     case OverflowBehavior::DROP_NEW:
-      // No blocking: return immediately if full.
       if (size_ >= capacity_) {
         ++total_drop_count_;
         return;
       }
       break;
     case OverflowBehavior::KEEP_NEWEST:
-      // No blocking: make room by dropping oldest item.
       if (size_ >= capacity_) {
         head_ = (head_ + 1) % capacity_;
         --size_;
@@ -334,10 +351,12 @@ void Queue<T>::PutInternal(T&& item) {
   buffer_[tail_] = std::move(item);
   tail_ = (tail_ + 1) % capacity_;
   ++size_;
+  cond_var_.SignalAll();
 }
 
 template <typename T>
-void Queue<T>::PutInternal(absl::Span<const T> items) {
+void Queue<T>::PutInternal(absl::Span<const T> items,
+                           std::stop_token stop_token) {
   if (items.empty()) return;
 
   size_t remaining = items.size();
@@ -354,14 +373,18 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
 
     size_t batch_size;
     switch (overflow_behavior_) {
-      case OverflowBehavior::BLOCK:
-        mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-        // Second check needed: queue might have closed while waiting.
+      case OverflowBehavior::BLOCK: {
+        std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+        while (!CanPutOne()) {
+          if (closed_) throw QueueClosedException();
+          if (stop_token.stop_requested()) throw QueueRequestCancelled();
+          cond_var_.Wait(&mutex_);
+        }
         if (closed_) throw QueueClosedException();
         batch_size = std::min(remaining, capacity_ - size_);
         break;
+      }
       case OverflowBehavior::DROP_NEW:
-        // No blocking: process only what fits.
         batch_size = std::min(remaining, capacity_ - size_);
         if (batch_size == 0) {
           total_put_count_ += remaining;
@@ -370,7 +393,6 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
         }
         break;
       case OverflowBehavior::KEEP_NEWEST:
-        // No blocking: make room by dropping oldest items.
         batch_size = std::min(remaining, capacity_);
         while (size_ + batch_size > capacity_) {
           head_ = (head_ + 1) % capacity_;
@@ -386,6 +408,7 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
       ++size_;
     }
     total_put_count_ += batch_size;
+    cond_var_.SignalAll();
 
     offset += batch_size;
     remaining -= batch_size;
@@ -393,7 +416,7 @@ void Queue<T>::PutInternal(absl::Span<const T> items) {
 }
 
 template <typename T>
-void Queue<T>::PutInternal(absl::Span<T> items) {
+void Queue<T>::PutInternal(absl::Span<T> items, std::stop_token stop_token) {
   if (items.empty()) return;
 
   size_t remaining = items.size();
@@ -410,14 +433,18 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
 
     size_t batch_size;
     switch (overflow_behavior_) {
-      case OverflowBehavior::BLOCK:
-        mutex_.Await(absl::Condition(this, &Queue<T>::CanPutOne));
-        // Second check needed: queue might have closed while waiting.
+      case OverflowBehavior::BLOCK: {
+        std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+        while (!CanPutOne()) {
+          if (closed_) throw QueueClosedException();
+          if (stop_token.stop_requested()) throw QueueRequestCancelled();
+          cond_var_.Wait(&mutex_);
+        }
         if (closed_) throw QueueClosedException();
         batch_size = std::min(remaining, capacity_ - size_);
         break;
+      }
       case OverflowBehavior::DROP_NEW:
-        // No blocking: process only what fits.
         batch_size = std::min(remaining, capacity_ - size_);
         if (batch_size == 0) {
           total_put_count_ += remaining;
@@ -426,7 +453,6 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
         }
         break;
       case OverflowBehavior::KEEP_NEWEST:
-        // No blocking: make room by dropping oldest items.
         batch_size = std::min(remaining, capacity_);
         while (size_ + batch_size > capacity_) {
           head_ = (head_ + 1) % capacity_;
@@ -442,6 +468,7 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
       ++size_;
     }
     total_put_count_ += batch_size;
+    cond_var_.SignalAll();
 
     offset += batch_size;
     remaining -= batch_size;
@@ -449,9 +476,19 @@ void Queue<T>::PutInternal(absl::Span<T> items) {
 }
 
 template <typename T>
-T Queue<T>::Get() {
+T Queue<T>::Get(std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
+  std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+  while (!CanGet()) {
+    if (closed_ && size_ == 0) {
+      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
+                << " Get() throwing QueueClosedException; producers="
+                << producer_count_;
+      throw QueueClosedException();
+    }
+    if (stop_token.stop_requested()) throw QueueRequestCancelled();
+    cond_var_.Wait(&mutex_);
+  }
   if (closed_ && size_ == 0) {
     LOG(INFO) << "Queue@" << static_cast<const void*>(this)
               << " Get() throwing QueueClosedException; producers="
@@ -463,12 +500,13 @@ T Queue<T>::Get() {
   head_ = (head_ + 1) % capacity_;
   --size_;
   ++total_get_count_;
+  cond_var_.SignalAll();
 
   return item;
 }
 
 template <typename T>
-absl::FixedArray<T> Queue<T>::Get(size_t count) {
+absl::FixedArray<T> Queue<T>::Get(size_t count, std::stop_token stop_token) {
   if (count == 0) return absl::FixedArray<T>(0);
 
   absl::FixedArray<T> result(count);
@@ -477,7 +515,17 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
 
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
-    mutex_.Await(absl::Condition(this, &Queue<T>::CanGet));
+    std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+    while (!CanGet()) {
+      if (closed_ && size_ == 0) {
+        LOG(INFO) << "Queue@" << static_cast<const void*>(this) << " Get("
+                  << count << ") throwing QueueClosedException; producers="
+                  << producer_count_;
+        throw QueueClosedException();
+      }
+      if (stop_token.stop_requested()) throw QueueRequestCancelled();
+      cond_var_.Wait(&mutex_);
+    }
     if (closed_ && size_ == 0) {
       LOG(INFO) << "Queue@" << static_cast<const void*>(this) << " Get("
                 << count << ") throwing QueueClosedException; producers="
@@ -485,7 +533,6 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
       throw QueueClosedException();
     }
 
-    // Get as many items as possible in this batch
     size_t batch_size = std::min(remaining, size_);
 
     for (size_t i = 0; i < batch_size; ++i) {
@@ -494,6 +541,7 @@ absl::FixedArray<T> Queue<T>::Get(size_t count) {
       --size_;
       ++total_get_count_;
     }
+    cond_var_.SignalAll();
 
     offset += batch_size;
     remaining -= batch_size;
@@ -511,6 +559,7 @@ std::optional<T> Queue<T>::MaybeGet() {
   head_ = (head_ + 1) % capacity_;
   --size_;
   ++total_get_count_;
+  cond_var_.SignalAll();
 
   return item;
 }
@@ -533,6 +582,7 @@ void Queue<T>::Close() {
     closed_ = true;
     LOG(INFO) << "Queue@" << static_cast<const void*>(this)
               << " closed explicitly; producers=" << producer_count_;
+    cond_var_.SignalAll();
   }
 }
 
@@ -543,67 +593,47 @@ bool Queue<T>::IsClosed() const {
 }
 
 template <typename T>
-void Queue<T>::WaitForRoomAtLeast(size_t room) {
-  struct Args {
-    Queue<T>* queue;
-    size_t room;
-  };
-  Args args{this, room};
+void Queue<T>::WaitForRoomAtLeast(size_t room, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->HasRoomAtLeast(args->room);
-      },
-      &args));
+  std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+  while (!HasRoomAtLeast(room)) {
+    if (closed_) throw QueueClosedException();
+    if (stop_token.stop_requested()) throw QueueRequestCancelled();
+    cond_var_.Wait(&mutex_);
+  }
 }
 
 template <typename T>
-void Queue<T>::WaitForRoomAtMost(size_t room) {
-  struct Args {
-    Queue<T>* queue;
-    size_t room;
-  };
-  Args args{this, room};
+void Queue<T>::WaitForRoomAtMost(size_t room, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->HasRoomAtMost(args->room);
-      },
-      &args));
+  std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+  while (!HasRoomAtMost(room)) {
+    if (closed_) throw QueueClosedException();
+    if (stop_token.stop_requested()) throw QueueRequestCancelled();
+    cond_var_.Wait(&mutex_);
+  }
 }
 
 template <typename T>
-void Queue<T>::WaitForSizeAtLeast(size_t size) {
-  struct Args {
-    Queue<T>* queue;
-    size_t size;
-  };
-  Args args{this, size};
+void Queue<T>::WaitForSizeAtLeast(size_t size, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->HasSizeAtLeast(args->size);
-      },
-      &args));
+  std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+  while (!HasSizeAtLeast(size)) {
+    if (closed_) throw QueueClosedException();
+    if (stop_token.stop_requested()) throw QueueRequestCancelled();
+    cond_var_.Wait(&mutex_);
+  }
 }
 
 template <typename T>
-void Queue<T>::WaitForSizeAtMost(size_t size) {
-  struct Args {
-    Queue<T>* queue;
-    size_t size;
-  };
-  Args args{this, size};
+void Queue<T>::WaitForSizeAtMost(size_t size, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
-  mutex_.Await(absl::Condition(
-      +[](void* data) -> bool {
-        auto* args = static_cast<Args*>(data);
-        return args->queue->HasSizeAtMost(args->size);
-      },
-      &args));
+  std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
+  while (!HasSizeAtMost(size)) {
+    if (closed_) throw QueueClosedException();
+    if (stop_token.stop_requested()) throw QueueRequestCancelled();
+    cond_var_.Wait(&mutex_);
+  }
 }
 
 template <typename T>

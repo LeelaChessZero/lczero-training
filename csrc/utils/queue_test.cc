@@ -1511,4 +1511,92 @@ TEST_F(QueueTest, MaybeGetUpdatesGetCount) {
   EXPECT_EQ(queue.GetTotalGetCount(), 2);  // Count not incremented.
 }
 
+// Tests for stop_token cancellation
+
+TEST_F(QueueTest, StopTokenCancelsPut) {
+  Queue<int> queue(2);
+  auto producer = queue.CreateProducer();
+
+  // Fill the queue
+  producer.Put(1);
+  producer.Put(2);
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  EXPECT_THROW(producer.Put(3, stop_source.get_token()), QueueRequestCancelled);
+  EXPECT_EQ(queue.Size(), 2);
+}
+
+TEST_F(QueueTest, StopTokenCancelsGet) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  EXPECT_THROW(queue.Get(stop_source.get_token()), QueueRequestCancelled);
+  EXPECT_EQ(queue.Size(), 0);
+}
+
+TEST_F(QueueTest, StopTokenCancelsBatchPut) {
+  Queue<int> queue(2);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue completely
+  producer.Put(1);
+  producer.Put(2);
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  std::vector<int> items = {3, 4, 5};
+  EXPECT_THROW(
+      producer.Put(absl::Span<const int>(items), stop_source.get_token()),
+      QueueRequestCancelled);
+}
+
+TEST_F(QueueTest, StopTokenCancelsBatchGet) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  EXPECT_THROW(queue.Get(10, stop_source.get_token()), QueueRequestCancelled);
+}
+
+TEST_F(QueueTest, StopTokenCancelsWaitForRoomAtLeast) {
+  Queue<int> queue(3);
+  auto producer = queue.CreateProducer();
+
+  // Fill queue
+  producer.Put(1);
+  producer.Put(2);
+  producer.Put(3);
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  EXPECT_THROW(queue.WaitForRoomAtLeast(2, stop_source.get_token()),
+               QueueRequestCancelled);
+}
+
+TEST_F(QueueTest, StopTokenCancelsWaitForSizeAtLeast) {
+  Queue<int> queue(5);
+  auto producer = queue.CreateProducer();
+
+  std::stop_source stop_source;
+  stop_source.request_stop();
+
+  // Should immediately throw without blocking since token is already stopped
+  EXPECT_THROW(queue.WaitForSizeAtLeast(3, stop_source.get_token()),
+               QueueRequestCancelled);
+}
+
 }  // namespace lczero
