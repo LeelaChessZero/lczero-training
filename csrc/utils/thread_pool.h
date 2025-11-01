@@ -6,6 +6,8 @@
 #include <functional>
 #include <future>
 #include <iostream>
+#include <stop_token>
+#include <thread>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/synchronization/mutex.h"
@@ -22,13 +24,45 @@ class ThreadPool {
   ThreadPool(size_t initial_threads = 0,
              const ThreadPoolOptions& options = ThreadPoolOptions());
 
-  // Blocks until all tasks are completed.
+  // Blocks until all tasks are completed and threads are joined.
   ~ThreadPool();
 
   // Enqueues a task for execution and returns a std::future.
+  // If the provided function accepts a std::stop_token as its first argument,
+  // one will be passed to it from the thread pool's stop source.
   template <typename F, typename... Args>
-  auto Enqueue(F&& f, Args&&... args)
-      -> std::future<std::invoke_result_t<F, Args...>>;
+  auto Enqueue(F&& f, Args&&... args) {
+    // This lambda captures the common queuing logic.
+    auto enqueue_common = [&](auto&& task_to_enqueue, auto&& future_to_return) {
+      {
+        absl::MutexLock lock(&mutex_);
+        running_tasks_ += 1;
+        while (options_.grow_automatically &&
+               running_tasks_ >= threads_.size()) {
+          StartWorkerThread();
+        }
+        pending_tasks_.emplace_back(
+            [task = std::move(task_to_enqueue)]() mutable { task(); });
+        work_available_.Signal();
+      }
+      return future_to_return;
+    };
+
+    if constexpr (std::is_invocable_v<F, std::stop_token, Args...>) {
+      using ReturnType = std::invoke_result_t<F, std::stop_token, Args...>;
+      std::packaged_task<ReturnType()> task(
+          std::bind(std::forward<F>(f), stop_source_.get_token(),
+                    std::forward<Args>(args)...));
+      std::future<ReturnType> future = task.get_future();
+      return enqueue_common(std::move(task), std::move(future));
+    } else {
+      using ReturnType = std::invoke_result_t<F, Args...>;
+      std::packaged_task<ReturnType()> task(
+          std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+      std::future<ReturnType> future = task.get_future();
+      return enqueue_common(std::move(task), std::move(future));
+    }
+  }
 
   // Waits for all tasks to complete.
   void WaitAll();
@@ -74,60 +108,32 @@ class ThreadPool {
   absl::CondVar work_available_;
   absl::CondVar work_done_;
 
-  std::vector<std::thread> threads_ ABSL_GUARDED_BY(mutex_);
+  std::stop_source stop_source_{};
+  std::vector<std::jthread> threads_ ABSL_GUARDED_BY(mutex_);
   std::deque<absl::AnyInvocable<void()>> pending_tasks_ ABSL_GUARDED_BY(mutex_);
-  bool stop_ ABSL_GUARDED_BY(mutex_) = false;
   size_t running_tasks_ ABSL_GUARDED_BY(mutex_) = 0;
 };
 
 inline ThreadPool::ThreadPool(size_t initial_threads,
                               const ThreadPoolOptions& options)
     : options_(options) {
+  absl::MutexLock lock(&mutex_);
   for (size_t i = 0; i < initial_threads; ++i) {
-    threads_.emplace_back(&ThreadPool::WorkerEntryPoint, this);
+    StartWorkerThread();
   }
 }
 
-inline ThreadPool::~ThreadPool() {
-  {
-    absl::MutexLock lock(&mutex_);
-    stop_ = true;
-    work_available_.SignalAll();
-    work_done_.SignalAll();
-  }
-  for (std::thread& worker : threads_) worker.join();
-}
-
-template <typename F, typename... Args>
-auto ThreadPool::Enqueue(F&& f, Args&&... args)
-    -> std::future<std::invoke_result_t<F, Args...>> {
-  using ReturnType = std::invoke_result_t<F, Args...>;
-
-  std::packaged_task<ReturnType()> task(
-      std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-
-  std::future<ReturnType> future = task.get_future();
-
-  {
-    absl::MutexLock lock(&mutex_);
-    running_tasks_ += 1;
-    while (options_.grow_automatically && running_tasks_ >= threads_.size()) {
-      StartWorkerThread();
-    }
-    pending_tasks_.emplace_back([task = std::move(task)]() mutable { task(); });
-    work_available_.Signal();
-  }
-
-  return future;
-}
+inline ThreadPool::~ThreadPool() { Shutdown(); }
 
 inline void ThreadPool::WorkerLoop() {
   while (true) {
     absl::AnyInvocable<void()> task;
     {
       absl::MutexLock lock(&mutex_);
-      while (!stop_ && pending_tasks_.empty()) work_available_.Wait(&mutex_);
-      if (stop_ && pending_tasks_.empty()) return;
+      while (!stop_source_.stop_requested() && pending_tasks_.empty()) {
+        work_available_.Wait(&mutex_);
+      }
+      if (stop_source_.stop_requested() && pending_tasks_.empty()) return;
       task = std::move(pending_tasks_.front());
       pending_tasks_.pop_front();
     }
@@ -159,17 +165,23 @@ inline void ThreadPool::WorkerEntryPoint() {
 
 inline void ThreadPool::WaitAll() {
   absl::MutexLock lock(&mutex_);
-  while (!AllTasksCompletedCond()) work_done_.Wait(&mutex_);
+  while (!AllTasksCompletedCond()) {
+    work_done_.Wait(&mutex_);
+  }
 }
 
 inline void ThreadPool::WaitForAvailableThread() {
   absl::MutexLock lock(&mutex_);
-  while (!ThreadAvailableCond()) work_done_.Wait(&mutex_);
+  while (!ThreadAvailableCond()) {
+    work_done_.Wait(&mutex_);
+  }
 }
 
 inline void ThreadPool::WaitForPendingTasksBelow(size_t threshold) {
   absl::MutexLock lock(&mutex_);
-  while (pending_tasks_.size() >= threshold) work_done_.Wait(&mutex_);
+  while (pending_tasks_.size() >= threshold) {
+    work_done_.Wait(&mutex_);
+  }
 }
 
 inline void ThreadPool::StartWorkerThread()
@@ -195,12 +207,11 @@ inline size_t ThreadPool::num_threads() const {
 inline void ThreadPool::Shutdown() {
   {
     absl::MutexLock lock(&mutex_);
-    if (!stop_) stop_ = true;
+    if (!stop_source_.stop_requested()) {
+      stop_source_.request_stop();
+    }
     work_available_.SignalAll();
     work_done_.SignalAll();
-  }
-  for (std::thread& worker : threads_) {
-    if (worker.joinable()) worker.join();
   }
   threads_.clear();
 }
