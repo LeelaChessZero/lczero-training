@@ -32,26 +32,28 @@ void JoinStage<T>::SetInputs(absl::Span<QueueBase* const> inputs) {
 template <typename T>
 void JoinStage<T>::Start() {
   thread_contexts_.clear();
-  threads_.clear();
+  thread_pool_ = std::make_unique<ThreadPool>(input_queues_.size());
   for (size_t i = 0; i < input_queues_.size(); ++i) {
     thread_contexts_.push_back(std::make_unique<ThreadContext>());
   }
   for (size_t i = 0; i < input_queues_.size(); ++i) {
-    threads_.emplace_back(
-        [this, i]() { Worker(input_queues_[i], thread_contexts_[i].get()); });
+    thread_pool_->Enqueue([this, i](std::stop_token stop_token) {
+      Worker(stop_token, input_queues_[i], thread_contexts_[i].get());
+    });
   }
 }
 
 template <typename T>
-void JoinStage<T>::Worker(Queue<T>* input_queue, ThreadContext* context) {
+void JoinStage<T>::Worker(std::stop_token stop_token, Queue<T>* input_queue,
+                          ThreadContext* context) {
   auto producer = this->output_queue()->CreateProducer();
   try {
     while (true) {
       auto item = [&]() {
         LoadMetricPauser pauser(context->load_metric_updater);
-        return input_queue->Get();
+        return input_queue->Get(stop_token);
       }();
-      producer.Put(std::move(item));
+      producer.Put(std::move(item), stop_token);
     }
   } catch (const QueueClosedException&) {
   }
@@ -59,10 +61,9 @@ void JoinStage<T>::Worker(Queue<T>* input_queue, ThreadContext* context) {
 
 template <typename T>
 void JoinStage<T>::Stop() {
-  for (auto& input_queue : input_queues_) input_queue->Close();
-  for (auto& thread : threads_) {
-    if (thread.joinable()) thread.join();
-  }
+  if (!thread_pool_ || thread_pool_->stop_token().stop_requested()) return;
+  LOG(INFO) << "Stopping JoinStage.";
+  thread_pool_->Shutdown();
   this->output_queue()->Close();
 }
 

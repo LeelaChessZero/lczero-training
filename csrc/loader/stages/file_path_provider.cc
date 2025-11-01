@@ -10,10 +10,12 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "loader/data_loader_metrics.h"
@@ -63,30 +65,21 @@ void FilePathProvider::SetInputs(absl::Span<QueueBase* const> inputs) {
 
 void FilePathProvider::Start() {
   LOG(INFO) << "Starting FilePathProvider monitoring thread.";
-  monitor_thread_ = std::thread(&FilePathProvider::MonitorThread, this);
+  thread_pool_.Enqueue(
+      [this](std::stop_token stop_token) { Worker(stop_token); });
 }
 
 void FilePathProvider::Stop() {
-  if (stop_condition_.HasBeenNotified()) {
-    return;
-  }
-
+  if (stop_source_.stop_requested()) return;
+  LOG(INFO) << "Stopping FilePathProvider.";
   LOG(INFO) << "Stopping all watches...";
   for (const auto& [wd, path] : watch_descriptors_) {
     inotify_rm_watch(inotify_fd_, wd);
   }
   watch_descriptors_.clear();
-
-  LOG(INFO) << "Notifying threads to stop.";
-  stop_condition_.Notify();
-  if (monitor_thread_.joinable()) {
-    LOG(INFO) << "Joining monitor thread...";
-    monitor_thread_.join();
-  }
-
-  LOG(INFO) << "Closing producer to close the queue...";
+  stop_source_.request_stop();
+  thread_pool_.Shutdown();
   producer_.Close();
-  LOG(INFO) << "FilePathProvider closed.";
 }
 
 StageMetricProto FilePathProvider::FlushMetrics() {
@@ -99,19 +92,22 @@ StageMetricProto FilePathProvider::FlushMetrics() {
   return stage_metric;
 }
 
-void FilePathProvider::AddDirectory(const Path& directory) {
-  ScanDirectoryWithWatch(directory);
+void FilePathProvider::AddDirectory(const Path& directory,
+                                    std::stop_token stop_token) {
+  ScanDirectoryWithWatch(directory, stop_token);
 
   LOG(INFO) << "FilePathProvider registered " << directory
             << "; active watch descriptors: " << watch_descriptors_.size();
 
   // Signal that initial scan is complete
   LOG(INFO) << "FilePathProvider initial scan complete";
-  producer_.Put({{.filepath = Path{},
-                  .message_type = MessageType::kInitialScanComplete}});
+  producer_.Put(
+      {{.filepath = Path{}, .message_type = MessageType::kInitialScanComplete}},
+      stop_token);
 }
 
-void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
+void FilePathProvider::ScanDirectoryWithWatch(const Path& directory,
+                                              std::stop_token stop_token) {
   // Step 1: Set up watch first
   int wd = inotify_add_watch(inotify_fd_, directory.c_str(),
                              IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
@@ -152,7 +148,7 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
 
   auto flush_batch = [&]() {
     if (batch.empty()) return;
-    producer_.Put(batch);
+    producer_.Put(batch, stop_token);
     batch.clear();
   };
 
@@ -175,8 +171,8 @@ void FilePathProvider::ScanDirectoryWithWatch(const Path& directory) {
 
   // Step 5: Recursively call for subdirectories
   for (const auto& subdir : subdirectories) {
-    if (stop_condition_.HasBeenNotified()) return;
-    ScanDirectoryWithWatch(subdir);
+    if (stop_token.stop_requested()) return;
+    ScanDirectoryWithWatch(subdir, stop_token);
   }
 
   // Flush any remaining files
@@ -265,9 +261,9 @@ void FilePathProvider::RemoveWatchRecursive(const Path& base) {
   });
 }
 
-void FilePathProvider::MonitorThread() {
+void FilePathProvider::Worker(std::stop_token stop_token) {
   // Perform directory scanning in background thread
-  AddDirectory(directory_);
+  AddDirectory(directory_, stop_token);
 
   int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd: " << strerror(errno);
@@ -279,13 +275,13 @@ void FilePathProvider::MonitorThread() {
   CHECK_EQ(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event), 0)
       << "Failed to add inotify fd to epoll: " << strerror(errno);
 
-  while (true) {
+  while (!stop_token.stop_requested()) {
     {
       LoadMetricPauser pauser(load_metric_updater_);
-      if (stop_condition_.WaitForNotificationWithTimeout(
-              absl::Milliseconds(50))) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (stop_token.stop_requested()) {
         pauser.DoNotResume();
-        break;  // Exit if stop condition is notified
+        break;
       }
     }
 
@@ -296,13 +292,14 @@ void FilePathProvider::MonitorThread() {
 
     do {
       assert(nfds == 1 && event.data.fd == inotify_fd_);
-      ProcessInotifyEvents(producer_);
+      ProcessInotifyEvents(producer_, stop_token);
       nfds = epoll_wait(epoll_fd, &event, 1, 0);
     } while (nfds > 0);
   }
 }
 
-void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
+void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
+                                            std::stop_token stop_token) {
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;
@@ -313,7 +310,7 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   auto flush_batch = [&]() {
     if (files.empty()) return;
     total_enqueued += files.size();
-    producer.Put(files);
+    producer.Put(files, stop_token);
     files.clear();
   };
 
@@ -327,7 +324,7 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
       const struct inotify_event* event =
           reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
       ++total_events;
-      auto file = ProcessInotifyEvent(*event);
+      auto file = ProcessInotifyEvent(*event, stop_token);
       if (file) files.push_back(*file);
       if (files.size() >= kNotifyBatchSize) flush_batch();
       offset += sizeof(struct inotify_event) + event->len;
@@ -343,7 +340,8 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer) {
   }
 }
 
-auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)
+auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event,
+                                           std::stop_token stop_token)
     -> std::optional<File> {
   if (event.mask & IN_IGNORED) return std::nullopt;
 
@@ -363,7 +361,7 @@ auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event)
   constexpr uint32_t kDirDeleteMask = IN_DELETE | IN_ISDIR;
   if ((event.mask & kDirCreateMask) == kDirCreateMask) {
     if (!has_name || skip_entry) return std::nullopt;
-    ScanDirectoryWithWatch(filepath);
+    ScanDirectoryWithWatch(filepath, stop_token);
   } else if ((event.mask & kDirDeleteMask) == kDirDeleteMask) {
     if (!has_name || skip_entry) return std::nullopt;
     // Directory deleted - remove all watches for it and subdirectories

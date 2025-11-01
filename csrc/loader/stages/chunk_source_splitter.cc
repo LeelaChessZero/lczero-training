@@ -69,19 +69,15 @@ ChunkSourceSplitter::~ChunkSourceSplitter() { Stop(); }
 
 void ChunkSourceSplitter::Start() {
   LOG(INFO) << "Starting ChunkSourceSplitter worker.";
-  worker_ = std::jthread([this]() { Worker(); });
+  thread_pool_.Enqueue(
+      [this](std::stop_token stop_token) { Worker(stop_token); });
 }
 
 void ChunkSourceSplitter::Stop() {
-  bool expected = false;
-  if (!stop_requested_.compare_exchange_strong(expected, true)) {
-    return;
-  }
+  if (thread_pool_.stop_token().stop_requested()) return;
   LOG(INFO) << "Stopping ChunkSourceSplitter.";
-  input_queue()->Close();
+  thread_pool_.Shutdown();
   for (auto& out : outputs_) out->queue.Close();
-  if (worker_.joinable()) worker_.join();
-  LOG(INFO) << "ChunkSourceSplitter stopped.";
 }
 
 QueueBase* ChunkSourceSplitter::GetOutput(std::string_view name) {
@@ -102,7 +98,7 @@ StageMetricProto ChunkSourceSplitter::FlushMetrics() {
   return metric;
 }
 
-void ChunkSourceSplitter::Worker() {
+void ChunkSourceSplitter::Worker(std::stop_token stop_token) {
   // Create producers for each output in this thread.
   std::vector<Queue<OutputType>::Producer> producers;
   producers.reserve(outputs_.size());
@@ -112,13 +108,14 @@ void ChunkSourceSplitter::Worker() {
 
   try {
     while (true) {
-      InputType item = input_queue()->Get();
+      InputType item = input_queue()->Get(stop_token);
       if (item.message_type ==
           FilePathProvider::MessageType::kInitialScanComplete) {
         // Broadcast to all outputs.
         for (auto& prod : producers) {
           prod.Put(
-              OutputType{.source = nullptr, .message_type = item.message_type});
+              OutputType{.source = nullptr, .message_type = item.message_type},
+              stop_token);
         }
         continue;
       }
@@ -134,7 +131,8 @@ void ChunkSourceSplitter::Worker() {
             shared_source, std::move(per_output_indices[i]));
         producers[i].Put(
             OutputType{.source = std::move(view),
-                       .message_type = FilePathProvider::MessageType::kFile});
+                       .message_type = FilePathProvider::MessageType::kFile},
+            stop_token);
       }
     }
   } catch (const QueueClosedException&) {

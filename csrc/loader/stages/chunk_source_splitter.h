@@ -1,10 +1,9 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
+#include <stop_token>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -18,6 +17,7 @@
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
+#include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
@@ -49,7 +49,7 @@ class ChunkSourceSplitter
         : name(name), weight(weight), queue(capacity, overflow) {}
   };
 
-  void Worker();
+  void Worker(std::stop_token stop_token);
 
   // Builds per-output indices given a source; uses absl::Hash on
   // (sort_key, index) and weights to assign indices.
@@ -58,8 +58,7 @@ class ChunkSourceSplitter
 
   std::vector<std::unique_ptr<Output>> outputs_;
   std::vector<uint64_t> cumulative_;
-  std::jthread worker_;
-  std::atomic<bool> stop_requested_{false};
+  ThreadPool thread_pool_{1};
 };
 
 }  // namespace training

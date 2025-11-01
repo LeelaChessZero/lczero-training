@@ -20,27 +20,29 @@ SimpleChunkExtractor::SimpleChunkExtractor(
 SimpleChunkExtractor::~SimpleChunkExtractor() { Stop(); }
 
 void SimpleChunkExtractor::Start() {
-  worker_thread_ = std::jthread([this]() { Worker(); });
+  thread_pool_.Enqueue(
+      [this](std::stop_token stop_token) { Worker(stop_token); });
 }
 
 void SimpleChunkExtractor::Stop() {
-  if (stop_requested_.exchange(true)) return;
-  input_queue()->Close();
+  if (thread_pool_.stop_token().stop_requested()) return;
+  LOG(INFO) << "Stopping SimpleChunkExtractor.";
+  thread_pool_.Shutdown();
   output_queue()->Close();
 }
 
-void SimpleChunkExtractor::Worker() {
+void SimpleChunkExtractor::Worker(std::stop_token stop_token) {
   auto producer = output_queue()->CreateProducer();
 
   try {
     while (true) {
-      auto item = input_queue()->Get();
+      auto item = input_queue()->Get(stop_token);
       if (item.message_type != FilePathProvider::MessageType::kFile ||
           !item.source) {
         continue;
       }
 
-      ProcessSource(producer, std::move(item.source));
+      ProcessSource(producer, std::move(item.source), stop_token);
     }
   } catch (const QueueClosedException&) {
   }
@@ -48,7 +50,7 @@ void SimpleChunkExtractor::Worker() {
 
 void SimpleChunkExtractor::ProcessSource(
     Queue<TrainingChunk>::Producer& producer,
-    std::unique_ptr<ChunkSource> source) {
+    std::unique_ptr<ChunkSource> source, std::stop_token stop_token) {
   const size_t chunk_count = source->GetChunkCount();
   if (chunk_count == 0) return;
 
@@ -59,7 +61,7 @@ void SimpleChunkExtractor::ProcessSource(
   const std::string sort_key = source->GetChunkSortKey();
   for (size_t idx : indices) {
     if (auto chunk = LoadChunk(*source, sort_key, idx)) {
-      producer.Put(std::move(*chunk));
+      producer.Put(std::move(*chunk), stop_token);
       ++chunks_processed_;
     }
   }

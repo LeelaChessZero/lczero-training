@@ -4,14 +4,13 @@
 #include <absl/container/flat_hash_map.h>
 #include <absl/log/log.h>
 #include <absl/synchronization/mutex.h>
-#include <absl/synchronization/notification.h>
 #include <sys/inotify.h>
 
 #include <filesystem>
 #include <functional>
 #include <span>
+#include <stop_token>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "loader/stages/stage.h"
@@ -21,6 +20,7 @@
 #include "utils/metrics/printer.h"
 #include "utils/metrics/statistics_metric.h"
 #include "utils/queue.h"
+#include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
@@ -64,15 +64,18 @@ class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
 
  private:
   // Starts monitoring the directory.
-  void AddDirectory(const Path& directory);
+  void AddDirectory(const Path& directory, std::stop_token stop_token);
 
-  void MonitorThread();
+  void Worker(std::stop_token stop_token);
   void AddWatchRecursive(const Path& path);
   void RemoveWatchRecursive(const Path& path);
-  void ScanDirectoryWithWatch(const Path& directory);
+  void ScanDirectoryWithWatch(const Path& directory,
+                              std::stop_token stop_token);
   void ProcessWatchEventsForNewItems(const std::vector<Path>& known_files);
-  void ProcessInotifyEvents(Queue<File>::Producer& producer);
-  std::optional<File> ProcessInotifyEvent(const struct inotify_event& event);
+  void ProcessInotifyEvents(Queue<File>::Producer& producer,
+                            std::stop_token stop_token);
+  std::optional<File> ProcessInotifyEvent(const struct inotify_event& event,
+                                          std::stop_token stop_token);
 
   int inotify_fd_;
   // Watch descriptor to directory path.
@@ -81,10 +84,9 @@ class FilePathProvider : public SingleOutputStage<FilePathProviderFile> {
   Path directory_;  // Directory to monitor
   Queue<File>::Producer producer_;
 
-  std::thread monitor_thread_;
-  absl::Notification stop_condition_;
-
   LoadMetricUpdater load_metric_updater_;
+  std::stop_source stop_source_;
+  ThreadPool thread_pool_{1, ThreadPoolOptions{}, stop_source_};
 };
 
 }  // namespace training

@@ -4,7 +4,7 @@
 
 #include <atomic>
 #include <memory>
-#include <thread>
+#include <stop_token>
 #include <vector>
 
 #include "libs/lc0/src/trainingdata/trainingdata_v6.h"
@@ -13,6 +13,7 @@
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 #include "utils/queue.h"
+#include "utils/thread_pool.h"
 
 namespace lczero {
 namespace training {
@@ -37,13 +38,14 @@ class JoinStage : public SingleOutputStage<T> {
     LoadMetricUpdater load_metric_updater;
   };
 
-  void Worker(Queue<T>* input_queue, ThreadContext* context);
+  void Worker(std::stop_token stop_token, Queue<T>* input_queue,
+              ThreadContext* context);
 
   std::vector<Queue<T>*> input_queues_;
-  // thread_contexts_ must be declared before threads_ to ensure
-  // threads_ are destroyed first (stopping threads before contexts).
+  // thread_contexts_ must be declared before thread_pool_ to ensure
+  // thread_pool_ is destroyed first (stopping threads before contexts).
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
-  std::vector<std::thread> threads_;
+  std::unique_ptr<ThreadPool> thread_pool_;
 };
 
 using FrameType = V6TrainingData;
