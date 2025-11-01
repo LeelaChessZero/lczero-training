@@ -20,5 +20,7 @@ struct TrainingChunk {
   uint32_t use_count = 0;
 };
 
+struct CacheRequest {};
+
 }  // namespace training
 }  // namespace lczero

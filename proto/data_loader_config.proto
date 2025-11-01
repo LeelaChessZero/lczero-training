@@ -57,6 +57,8 @@ message ShufflingChunkPoolConfig {
   // where num_records is the number of frames in the chunk.
   optional uint64 hanse_sampling_threshold = 6;  // by default, disabled.
   optional double hanse_sampling_gamma = 7 [default = 1.0];
+  // Optional output queue for cache hit frames.
+  optional QueueConfig cachehit_output = 8;
 }
 
 // Configuration for chunk rescorer that adjusts chunk metadata using

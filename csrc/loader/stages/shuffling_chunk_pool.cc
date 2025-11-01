@@ -29,19 +29,74 @@ namespace training {
 thread_local absl::BitGen ShufflingChunkPool::bitgen_{absl::MakeSeedSeq()};
 
 ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config)
-    : SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>(config),
-      SingleOutputStage<TrainingChunk>(config.output()),
+    : primary_output_name_(config.output().name()),
+      primary_output_queue_(
+          config.output().queue_capacity(),
+          ToOverflowBehavior(config.output().overflow_behavior())),
       chunk_pool_size_(config.chunk_pool_size()),
       config_(config),
       source_ingestion_pool_(config.source_ingestion_threads(),
                              ThreadPoolOptions{}, stop_source_),
       chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{},
                           stop_source_) {
+  if (config.has_cachehit_output()) {
+    cachehit_output_name_ = config.cachehit_output().name();
+    cachehit_output_queue_.emplace(
+        config.cachehit_output().queue_capacity(),
+        ToOverflowBehavior(config.cachehit_output().overflow_behavior()));
+    if (primary_output_name_ == *cachehit_output_name_) {
+      throw std::runtime_error(absl::StrCat(
+          "ShufflingChunkPool output names must be different, got: '",
+          primary_output_name_, "'"));
+    }
+  }
   LOG(INFO) << "Initializing ShufflingChunkPool with pool size "
             << config.chunk_pool_size();
 }
 
 ShufflingChunkPool::~ShufflingChunkPool() { Stop(); }
+
+void ShufflingChunkPool::SetInputs(absl::Span<QueueBase* const> inputs) {
+  if (inputs.size() != 1 && inputs.size() != 2) {
+    throw std::runtime_error(absl::StrCat(
+        "ShufflingChunkPool expects 1 or 2 inputs, got ", inputs.size()));
+  }
+  if (inputs.size() == 2 && !cachehit_output_queue_.has_value()) {
+    throw std::runtime_error(
+        "ShufflingChunkPool received 2 inputs but cachehit_output is not "
+        "configured");
+  }
+  if (inputs.size() == 1 && cachehit_output_queue_.has_value()) {
+    throw std::runtime_error(
+        "ShufflingChunkPool has cachehit_output configured but received only "
+        "1 input");
+  }
+  primary_input_queue_ = dynamic_cast<Queue<ChunkSourceWithPhase>*>(inputs[0]);
+  if (!primary_input_queue_) {
+    throw std::runtime_error("ShufflingChunkPool primary input type mismatch");
+  }
+  if (inputs.size() == 2) {
+    cache_request_queue_ = dynamic_cast<Queue<CacheRequest>*>(inputs[1]);
+    if (!cache_request_queue_) {
+      throw std::runtime_error(
+          "ShufflingChunkPool cache request input type mismatch");
+    }
+  }
+}
+
+QueueBase* ShufflingChunkPool::GetOutput(std::string_view name) {
+  if (name == primary_output_name_) return &primary_output_queue_;
+  if (cachehit_output_name_.has_value() && name == *cachehit_output_name_) {
+    return &*cachehit_output_queue_;
+  }
+  std::string available = absl::StrCat("'", primary_output_name_, "'");
+  if (cachehit_output_name_.has_value()) {
+    absl::StrAppend(&available, ", '", *cachehit_output_name_, "'");
+  }
+  throw std::runtime_error(absl::StrCat("ShufflingChunkPool unknown output '",
+                                        name,
+                                        "'. Available outputs: ", available));
+}
 
 void ShufflingChunkPool::Start() {
   LOG(INFO) << "Starting ShufflingChunkPool initialization thread.";
@@ -101,6 +156,9 @@ void ShufflingChunkPool::Stop() {
   source_ingestion_pool_.Shutdown();
   chunk_loading_pool_.Shutdown();
   output_queue()->Close();
+  if (cachehit_output_queue_.has_value()) {
+    cachehit_output_queue_->Close();
+  }
   LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 
@@ -547,7 +605,11 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
   }
 
   *stage_metric.add_queue_metrics() =
-      MetricsFromQueue("output", *output_queue());
+      MetricsFromQueue(primary_output_name_, *output_queue());
+  if (cachehit_output_queue_.has_value()) {
+    *stage_metric.add_queue_metrics() =
+        MetricsFromQueue(*cachehit_output_name_, *cachehit_output_queue_);
+  }
   return stage_metric;
 }
 

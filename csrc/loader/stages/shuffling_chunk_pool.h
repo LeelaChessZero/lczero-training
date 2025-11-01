@@ -30,15 +30,15 @@
 namespace lczero {
 namespace training {
 
-class ShufflingChunkPool
-    : public SingleInputStage<ShufflingChunkPoolConfig, ChunkSourceWithPhase>,
-      public SingleOutputStage<TrainingChunk> {
+class ShufflingChunkPool : public Stage {
  public:
   explicit ShufflingChunkPool(const ShufflingChunkPoolConfig& config);
   ~ShufflingChunkPool();
 
   void Start() override;
   void Stop() override;
+  void SetInputs(absl::Span<QueueBase* const> inputs) override;
+  QueueBase* GetOutput(std::string_view name) override;
 
   StageMetricProto FlushMetrics() override;
 
@@ -50,6 +50,9 @@ class ShufflingChunkPool
   int ChunksSinceAnchor();
   std::string CurrentAnchor();
   void SetAnchor(std::string_view anchor);
+
+  Queue<ChunkSourceWithPhase>* input_queue() { return primary_input_queue_; }
+  Queue<TrainingChunk>* output_queue() { return &primary_output_queue_; }
 
  private:
   struct ChunkSourceItem {
@@ -90,6 +93,13 @@ class ShufflingChunkPool
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
   bool HanseAcceptAndMaybeLoad(ChunkData& chunk_data)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+
+  Queue<ChunkSourceWithPhase>* primary_input_queue_ = nullptr;
+  Queue<CacheRequest>* cache_request_queue_ = nullptr;
+  std::string primary_output_name_;
+  Queue<TrainingChunk> primary_output_queue_;
+  std::optional<std::string> cachehit_output_name_;
+  std::optional<Queue<FrameType>> cachehit_output_queue_;
 
   const size_t chunk_pool_size_;
   const ShufflingChunkPoolConfig config_;
