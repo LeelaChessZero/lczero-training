@@ -168,6 +168,7 @@ class AsyncCommunicator:
         self.handler = handler
         self.input_stream = input_stream
         self.output_stream = output_stream
+        self._buffer = ""
 
     async def send(self, payload_instance: Any) -> None:
         """
@@ -214,5 +215,11 @@ class AsyncCommunicator:
         This method runs until the input stream is closed.
         """
         async with anyio.create_task_group() as task_group:
-            async for line in self.input_stream:
-                self._dispatch(line, task_group)
+            async for chunk in self.input_stream:
+                self._buffer += chunk
+                while "\n" in self._buffer:
+                    line, self._buffer = self._buffer.split("\n", 1)
+                    self._dispatch(line, task_group)
+
+        if self._buffer:
+            self._dispatch(self._buffer, task_group)
