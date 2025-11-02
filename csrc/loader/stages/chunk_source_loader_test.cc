@@ -133,5 +133,67 @@ TEST(ChunkSourceLoaderTest, PassesThroughInitialScanComplete) {
   }
 }
 
+TEST(ChunkSourceLoaderTest, SentinelBarrierWithMultipleThreads) {
+  Queue<FilePathProvider::File> input_queue(100);
+  ChunkSourceLoaderConfig config;
+  config.set_threads(4);
+  config.mutable_output()->set_queue_capacity(100);
+  ChunkSourceLoader feed(config);
+  feed.SetInputs({&input_queue});
+  feed.Start();
+
+  {
+    auto producer = input_queue.CreateProducer();
+    // Add files that will be processed before sentinel.
+    for (int i = 0; i < 20; ++i) {
+      producer.Put(FilePathProvider::File{
+          .filepath =
+              std::filesystem::path("/test" + std::to_string(i) + ".txt"),
+          .message_type = FilePathProvider::MessageType::kFile});
+    }
+    // Add sentinel.
+    producer.Put(FilePathProvider::File{
+        .filepath = std::filesystem::path(""),
+        .message_type = FilePathProvider::MessageType::kInitialScanComplete});
+    // Add files that arrive after sentinel.
+    for (int i = 20; i < 30; ++i) {
+      producer.Put(FilePathProvider::File{
+          .filepath =
+              std::filesystem::path("/test" + std::to_string(i) + ".txt"),
+          .message_type = FilePathProvider::MessageType::kFile});
+    }
+  }  // Producer destroyed here, closing input queue
+
+  // Read all outputs and verify sentinel comes after all pre-sentinel files.
+  int files_before_sentinel = 0;
+  int files_after_sentinel = 0;
+  bool sentinel_seen = false;
+
+  try {
+    while (true) {
+      auto output = feed.output_queue()->Get();
+      if (output.message_type ==
+          FilePathProvider::MessageType::kInitialScanComplete) {
+        EXPECT_FALSE(sentinel_seen) << "Sentinel should appear exactly once";
+        sentinel_seen = true;
+      } else {
+        if (sentinel_seen) {
+          files_after_sentinel++;
+        } else {
+          files_before_sentinel++;
+        }
+      }
+    }
+  } catch (const QueueClosedException&) {
+  }
+
+  // Verify sentinel was seen.
+  EXPECT_TRUE(sentinel_seen);
+  // All 20 pre-sentinel files should be before sentinel (unsupported, so 0).
+  EXPECT_EQ(files_before_sentinel, 0);
+  // All 10 post-sentinel files should be after sentinel (unsupported, so 0).
+  EXPECT_EQ(files_after_sentinel, 0);
+}
+
 }  // namespace training
 }  // namespace lczero

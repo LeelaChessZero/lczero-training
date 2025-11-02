@@ -66,7 +66,6 @@ void ChunkSourceLoader::Stop() {
 
 void ChunkSourceLoader::Worker(std::stop_token stop_token,
                                ThreadContext* context) {
-  // Create a local producer for this worker thread
   auto producer = output_queue()->CreateProducer();
   LOG(INFO) << "ChunkSourceLoader worker@" << static_cast<const void*>(context)
             << " started.";
@@ -82,9 +81,29 @@ void ChunkSourceLoader::Worker(std::stop_token stop_token,
           FilePathProvider::MessageType::kInitialScanComplete) {
         LOG(INFO)
             << "ChunkSourceLoader received initial scan completion marker.";
-        producer.Put({.source = nullptr, .message_type = file.message_type},
-                     stop_token);
+
+        bool should_forward;
+        {
+          absl::MutexLock lock(&phase_mutex_);
+          sentinel_received_ = true;
+          should_forward = (pre_sentinel_work_count_ == 0);
+        }
+
+        if (should_forward) {
+          LOG(INFO) << "ChunkSourceLoader forwarding initial scan completion "
+                       "marker.";
+          producer.Put({.source = nullptr, .message_type = file.message_type},
+                       stop_token);
+        }
         continue;
+      }
+
+      // Track pre-sentinel work.
+      bool is_pre_sentinel;
+      {
+        absl::MutexLock lock(&phase_mutex_);
+        is_pre_sentinel = !sentinel_received_;
+        if (is_pre_sentinel) pre_sentinel_work_count_++;
       }
 
       // Create ChunkSource from the file.
@@ -92,12 +111,10 @@ void ChunkSourceLoader::Worker(std::stop_token stop_token,
           << "ChunkSourceLoader preparing chunk source for " << file.filepath;
       auto source = CreateChunkSourceFromFile(file.filepath);
       if (source) {
-        // Track the last chunk key.
         {
           absl::MutexLock lock(&last_chunk_key_mutex_);
           last_chunk_key_ = source->GetChunkSortKey();
         }
-        // Output the ChunkSource with its phase.
         ChunkSourceWithPhase output{.source = std::move(source),
                                     .message_type = file.message_type};
         LoadMetricPauser pauser(context->load_metric_updater);
@@ -106,6 +123,20 @@ void ChunkSourceLoader::Worker(std::stop_token stop_token,
         LOG_EVERY_N(INFO, 100)
             << "ChunkSourceLoader skipping unsupported file: " << file.filepath;
         skipped_files_count_++;
+      }
+
+      // Complete pre-sentinel work tracking.
+      if (is_pre_sentinel) {
+        absl::MutexLock lock(&phase_mutex_);
+        if (--pre_sentinel_work_count_ == 0 && sentinel_received_) {
+          LOG(INFO) << "ChunkSourceLoader forwarding initial scan completion "
+                       "marker after all pre-sentinel work completed.";
+          producer.Put(
+              {.source = nullptr,
+               .message_type =
+                   FilePathProvider::MessageType::kInitialScanComplete},
+              stop_token);
+        }
       }
     }
   } catch (const QueueClosedException&) {
