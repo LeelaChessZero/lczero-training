@@ -28,19 +28,19 @@ dependencies = [
 ]
 
 [project.scripts]
-leela2jax = "lczero_training.commands.leela2jax:main"
-describe-training = "lczero_training.commands.describe_training:main"
-test-dataloader = "lczero_training.commands.test_dataloader:main"
-dataloader-viz = "lczero_training.commands.dataloader_viz:main"
-overfit = "lczero_training.commands.overfit:main"
-training-init = "lczero_training.commands.training_init:main"
-training-eval = "lczero_training.commands.training_eval:main"
-tune-lr = "lczero_training.commands.tune_lr:main"
-migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
-backfill-metrics = "lczero_training.commands.backfill_metrics:main"
-train = "lczero_training.commands.train:main"
-daemon = "lczero_training.commands.daemon:main"
-tui = "lczero_training.commands.tui:main"
+lc0-leela2jax = "lczero_training.commands.leela2jax:main"
+lc0-describe = "lczero_training.commands.describe_training:main"
+lc0-test-dataloader = "lczero_training.commands.test_dataloader:main"
+lc0-dataloader-viz = "lczero_training.commands.dataloader_viz:main"
+lc0-overfit = "lczero_training.commands.overfit:main"
+lc0-init = "lczero_training.commands.training_init:main"
+lc0-eval = "lczero_training.commands.training_eval:main"
+lc0-tune-lr = "lczero_training.commands.tune_lr:main"
+lc0-migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
+lc0-backfill-metrics = "lczero_training.commands.backfill_metrics:main"
+lc0-train = "lczero_training.commands.train:main"
+lc0-daemon = "lczero_training.commands.daemon:main"
+lc0-tui = "lczero_training.commands.tui:main"
 
 [project.optional-dependencies]
 dev = [

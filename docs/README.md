@@ -114,20 +114,20 @@ below).
 
 ### Python tools
 
-| Tool               | Description                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------ |
-| daemon             | The main training daemon. It acts as a JSONL server, so it's not usable directly from command line yet.      |
-| tui                | A terminal user interface that runs the training daemon. Here is what you have to run.                       |
-| training-init      | Initializes a new training run/checkpoint.                                                                   |
-| migrate-checkpoint | Migrates JAX/Orbax checkpoint after model/training configuration changes.                                    |
-| overfit            | Runs an overfitting test: takes one batch from the data loader and repeatedly trains on it                   |
-| training-eval      | Evals batches from the data loader on a given checkpoint, can dump inputs/outputs in various formats.        |
-| leela2jax          |                                                                                                              |
-| describe-training  |                                                                                                              |
-| test-dataloader    |                                                                                                              |
-| tune-lr            | Trains on exponentially increasing learning rate, and outputs losses into csv file. Useful for picking a LR. |
-| backfill-metrics   | Loads older checkpoints computes metrics for them, and exports them to tensorboard.                          |
-| train              | Trains a single epoch (doesn't save or export the model though). Used for benchmarking.                      |
+| Tool                   | Description                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| lc0-daemon             | The main training daemon. It acts as a JSONL server, so it's not usable directly from command line yet.      |
+| lc0-tui                | A terminal user interface that runs the training daemon. Here is what you have to run.                       |
+| lc0-init               | Initializes a new training run/checkpoint.                                                                   |
+| lc0-migrate-checkpoint | Migrates JAX/Orbax checkpoint after model/training configuration changes.                                    |
+| lc0-overfit            | Runs an overfitting test: takes one batch from the data loader and repeatedly trains on it                   |
+| lc0-eval               | Evals batches from the data loader on a given checkpoint, can dump inputs/outputs in various formats.        |
+| lc0-leela2jax          |                                                                                                              |
+| lc0-describe           |                                                                                                              |
+| lc0-test-dataloader    |                                                                                                              |
+| lc0-tune-lr            | Trains on exponentially increasing learning rate, and outputs losses into csv file. Useful for picking a LR. |
+| lc0-backfill-metrics   | Loads older checkpoints computes metrics for them, and exports them to tensorboard.                          |
+| lc0-train              | Trains a single epoch (doesn't save or export the model though). Used for benchmarking.                      |
 
 ### C++ tools
 
