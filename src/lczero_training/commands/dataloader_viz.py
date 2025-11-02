@@ -62,8 +62,12 @@ def main(argv: list[str] | None = None) -> int:
         dot.node(stage.name, label=label, shape="box")
 
         for input_spec in stage.input:
-            source_stage = input_spec.split(".")[0]
-            dot.edge(source_stage, stage.name)
+            parts = input_spec.split(".", 1)
+            source_stage = parts[0]
+            if len(parts) == 2:
+                dot.edge(source_stage, stage.name, label=parts[1])
+            else:
+                dot.edge(source_stage, stage.name)
 
     for output_spec in config.data_loader.output:
         parts = output_spec.split(":", 1)
@@ -73,7 +77,8 @@ def main(argv: list[str] | None = None) -> int:
             alias = output_spec
             source = output_spec
 
-        source_stage = source.split(".")[0]
+        source_parts = source.split(".", 1)
+        source_stage = source_parts[0]
         dot.node(
             f"output_{alias}",
             label=f"Output: {alias}",
@@ -81,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
             style="filled",
             fillcolor="lightblue",
         )
-        dot.edge(source_stage, f"output_{alias}")
+        if len(source_parts) == 2:
+            dot.edge(source_stage, f"output_{alias}", label=source_parts[1])
+        else:
+            dot.edge(source_stage, f"output_{alias}")
 
     output_format = args.output.rsplit(".", 1)[-1].lower()
     if output_format not in ("svg", "png"):
