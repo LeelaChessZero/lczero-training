@@ -185,15 +185,15 @@ Queue<T>::Queue(size_t capacity, OverflowBehavior overflow_behavior)
 template <typename T>
 Queue<T>::Producer::Producer(Queue<T>& queue) : queue_(&queue) {
   // Producer count is incremented in CreateProducer()
-  LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
-            << static_cast<const void*>(this) << " constructed.";
+  VLOG(1) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+          << static_cast<const void*>(this) << " constructed.";
 }
 
 template <typename T>
 Queue<T>::Producer::~Producer() {
   if (queue_) {
-    LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
-              << static_cast<const void*>(this) << " destructing.";
+    VLOG(1) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+            << static_cast<const void*>(this) << " destructing.";
     queue_->RemoveProducer();
   }
 }
@@ -240,8 +240,8 @@ void Queue<T>::Producer::Put(absl::Span<T> items, std::stop_token stop_token) {
 template <typename T>
 void Queue<T>::Producer::Close() {
   if (queue_) {
-    LOG(INFO) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
-              << static_cast<const void*>(this) << " close invoked.";
+    VLOG(1) << "Queue@" << static_cast<const void*>(queue_) << " producer@"
+            << static_cast<const void*>(this) << " close invoked.";
     queue_->RemoveProducer();
     queue_ = nullptr;
   }
@@ -262,8 +262,8 @@ void Queue<T>::RemoveProducer() {
   --producer_count_;
   if (producer_count_ == 0 && !closed_) {
     closed_ = true;
-    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-              << " closed after last producer removed.";
+    VLOG(1) << "Queue@" << static_cast<const void*>(this)
+            << " closed after last producer removed.";
     cond_var_.SignalAll();
   }
 }
@@ -272,9 +272,9 @@ template <typename T>
 void Queue<T>::PutInternal(const T& item, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
   if (closed_) {
-    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-              << " PutInternal(const&) throwing QueueClosedException;"
-              << " producers=" << producer_count_;
+    VLOG(1) << "Queue@" << static_cast<const void*>(this)
+            << " PutInternal(const&) throwing QueueClosedException;"
+            << " producers=" << producer_count_;
     throw QueueClosedException();
   }
   ++total_put_count_;
@@ -315,9 +315,9 @@ template <typename T>
 void Queue<T>::PutInternal(T&& item, std::stop_token stop_token) {
   absl::MutexLock lock(&mutex_);
   if (closed_) {
-    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-              << " PutInternal(T&&) throwing QueueClosedException;"
-              << " producers=" << producer_count_;
+    VLOG(1) << "Queue@" << static_cast<const void*>(this)
+            << " PutInternal(T&&) throwing QueueClosedException;"
+            << " producers=" << producer_count_;
     throw QueueClosedException();
   }
   ++total_put_count_;
@@ -365,9 +365,9 @@ void Queue<T>::PutInternal(absl::Span<const T> items,
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
     if (closed_) {
-      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-                << " PutInternal(span const) throwing QueueClosedException;"
-                << " producers=" << producer_count_;
+      VLOG(1) << "Queue@" << static_cast<const void*>(this)
+              << " PutInternal(span const) throwing QueueClosedException;"
+              << " producers=" << producer_count_;
       throw QueueClosedException();
     }
 
@@ -425,9 +425,9 @@ void Queue<T>::PutInternal(absl::Span<T> items, std::stop_token stop_token) {
   while (remaining > 0) {
     absl::MutexLock lock(&mutex_);
     if (closed_) {
-      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-                << " PutInternal(span) throwing QueueClosedException;"
-                << " producers=" << producer_count_;
+      VLOG(1) << "Queue@" << static_cast<const void*>(this)
+              << " PutInternal(span) throwing QueueClosedException;"
+              << " producers=" << producer_count_;
       throw QueueClosedException();
     }
 
@@ -481,18 +481,18 @@ T Queue<T>::Get(std::stop_token stop_token) {
   std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
   while (!CanGet()) {
     if (closed_ && size_ == 0) {
-      LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-                << " Get() throwing QueueClosedException; producers="
-                << producer_count_;
+      VLOG(1) << "Queue@" << static_cast<const void*>(this)
+              << " Get() throwing QueueClosedException; producers="
+              << producer_count_;
       throw QueueClosedException();
     }
     if (stop_token.stop_requested()) throw QueueRequestCancelled();
     cond_var_.Wait(&mutex_);
   }
   if (closed_ && size_ == 0) {
-    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-              << " Get() throwing QueueClosedException; producers="
-              << producer_count_;
+    VLOG(1) << "Queue@" << static_cast<const void*>(this)
+            << " Get() throwing QueueClosedException; producers="
+            << producer_count_;
     throw QueueClosedException();
   }
 
@@ -518,18 +518,18 @@ absl::FixedArray<T> Queue<T>::Get(size_t count, std::stop_token stop_token) {
     std::stop_callback cb(stop_token, [this]() { cond_var_.SignalAll(); });
     while (!CanGet()) {
       if (closed_ && size_ == 0) {
-        LOG(INFO) << "Queue@" << static_cast<const void*>(this) << " Get("
-                  << count << ") throwing QueueClosedException; producers="
-                  << producer_count_;
+        VLOG(1) << "Queue@" << static_cast<const void*>(this) << " Get("
+                << count << ") throwing QueueClosedException; producers="
+                << producer_count_;
         throw QueueClosedException();
       }
       if (stop_token.stop_requested()) throw QueueRequestCancelled();
       cond_var_.Wait(&mutex_);
     }
     if (closed_ && size_ == 0) {
-      LOG(INFO) << "Queue@" << static_cast<const void*>(this) << " Get("
-                << count << ") throwing QueueClosedException; producers="
-                << producer_count_;
+      VLOG(1) << "Queue@" << static_cast<const void*>(this) << " Get(" << count
+              << ") throwing QueueClosedException; producers="
+              << producer_count_;
       throw QueueClosedException();
     }
 
@@ -580,8 +580,8 @@ void Queue<T>::Close() {
   absl::MutexLock lock(&mutex_);
   if (!closed_) {
     closed_ = true;
-    LOG(INFO) << "Queue@" << static_cast<const void*>(this)
-              << " closed explicitly; producers=" << producer_count_;
+    VLOG(1) << "Queue@" << static_cast<const void*>(this)
+            << " closed explicitly; producers=" << producer_count_;
     cond_var_.SignalAll();
   }
 }
