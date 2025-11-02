@@ -86,9 +86,11 @@ def init(
         )
         model_state = leela_to_jax(lc0_weights, import_options)
 
+        training_state = training_state.with_updated_step(
+            lc0_weights.training_params.training_steps
+        )
         training_state = training_state.replace(
             jit_state=training_state.jit_state.replace(
-                step=lc0_weights.training_params.training_steps,
                 model_state=model_state,
             )
         )

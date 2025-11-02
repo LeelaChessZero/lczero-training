@@ -1,5 +1,7 @@
 from functools import partial
 
+import jax
+import jax.numpy as jnp
 import optax
 from flax import nnx
 
@@ -33,6 +35,22 @@ def _make_nadamw_weight_decay_mask(
         return True
 
     return nnx.map_state(mask_fn, params)
+
+
+def update_optimizer_step(
+    opt_state: optax.OptState, step: int
+) -> optax.OptState:
+    """Updates all step counters in the optimizer state tree."""
+    step_array = jnp.array(step, dtype=jnp.int32)
+
+    def update_count(x: optax.OptState) -> optax.OptState:
+        if isinstance(x, optax.ScaleByAdamState):
+            return x._replace(count=step_array)
+        return x
+
+    return jax.tree_util.tree_map(
+        update_count, opt_state, is_leaf=lambda x: hasattr(x, "_replace")
+    )
 
 
 def make_gradient_transformation(
