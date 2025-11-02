@@ -294,6 +294,33 @@ void ShufflingChunkPool::ProcessInputFiles(
             << initial_window_sources << " source(s) totaling "
             << initial_total_chunks << " chunk(s).";
 
+  // Log anchor and sources after initial scan completion.
+  {
+    absl::MutexLock anchor_lock(&anchor_mutex_);
+    LOG(INFO) << "Current anchor: '" << anchor_ << "'";
+
+    absl::MutexLock sources_lock(&chunk_sources_mutex_);
+    std::vector<const ChunkSourceItem*> sources_after_anchor;
+    for (const auto& item : chunk_sources_) {
+      if (item.source->GetChunkSortKey() > anchor_) {
+        sources_after_anchor.push_back(&item);
+      }
+    }
+
+    LOG(INFO) << sources_after_anchor.size()
+              << " chunk source(s) after anchor, " << chunks_since_anchor_
+              << " total chunks since anchor";
+
+    const size_t to_log = std::min(sources_after_anchor.size(), size_t(20));
+    for (size_t i = 0; i < to_log; ++i) {
+      LOG(INFO) << "  Source [" << (i + 1) << "/" << sources_after_anchor.size()
+                << "]: key='"
+                << sources_after_anchor[i]->source->GetChunkSortKey()
+                << "', chunks="
+                << sources_after_anchor[i]->source->GetChunkCount();
+    }
+  }
+
   if (initial_total_chunks == 0) {
     throw std::runtime_error(
         "ShufflingChunkPool requires at least one chunk during startup.");
