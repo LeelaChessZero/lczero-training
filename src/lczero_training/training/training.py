@@ -81,7 +81,7 @@ class Training:
                 "policy_targets": dp_sharding,
                 "movesleft_targets": dp_sharding,
             }
-            in_shardings = (replicated, batch_sharding)
+            in_shardings = (None, replicated, batch_sharding)
             out_shardings = replicated
 
             jit_kwargs["in_shardings"] = in_shardings
