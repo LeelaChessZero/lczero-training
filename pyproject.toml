@@ -24,12 +24,14 @@ dependencies = [
     "onnxruntime>=1.23.1",
     "onnxruntime-gpu>=1.23.0",
     "tensorboardx>=2.6.4",
+    "graphviz>=0.21",
 ]
 
 [project.scripts]
 leela2jax = "lczero_training.commands.leela2jax:main"
 describe-training = "lczero_training.commands.describe_training:main"
 test-dataloader = "lczero_training.commands.test_dataloader:main"
+dataloader-viz = "lczero_training.commands.dataloader_viz:main"
 overfit = "lczero_training.commands.overfit:main"
 training-init = "lczero_training.commands.training_init:main"
 training-eval = "lczero_training.commands.training_eval:main"
