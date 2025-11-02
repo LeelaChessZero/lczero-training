@@ -2,6 +2,7 @@
 # ABOUTME: Uses Textual framework to create a full-screen interface with four panes.
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -104,11 +105,16 @@ class TrainingTuiApp(App):
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""
         # Create the daemon process via Python module execution to avoid PATH reliance.
+        env = None
+        if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
+            env = {**os.environ, "TF_CPP_MIN_LOG_LEVEL": "0"}
+
         self._daemon_process = await anyio.open_process(
             [sys.executable, "-m", "lczero_training.commands.daemon"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=env,
         )
 
         assert self._daemon_process.stderr is not None
