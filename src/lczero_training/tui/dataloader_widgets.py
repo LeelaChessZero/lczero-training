@@ -201,7 +201,7 @@ def _canonical_stage_name(
 class BaseRowWidget(Widget):
     """Base class for pipeline rows that renders a name and content widgets."""
 
-    MAX_GRID_ROWS = 8  # Supports up to 35 chips (5 per row, 7 content rows)
+    MAX_GRID_ROWS = 8  # Supports up to 28 chips (4 per row, 7 content rows)
 
     def __init__(
         self,
@@ -231,8 +231,8 @@ class BaseRowWidget(Widget):
             async def _mount_initial() -> None:
                 # Mount chips with spacers interleaved at the start of each row
                 for i, widget in enumerate(self._content_widgets):
-                    # After every 5 chips, add a spacer for the next row's column 0
-                    if i > 0 and i % 5 == 0:
+                    # After every 4 chips, add a spacer for the next row's column 0
+                    if i > 0 and i % 4 == 0:
                         spacer = Static("", classes="grid-spacer")
                         self._spacers.append(spacer)
                         await self.mount(spacer)

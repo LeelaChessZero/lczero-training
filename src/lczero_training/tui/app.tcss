@@ -71,6 +71,8 @@ RichLog {
 .stage-row {
     background: $surface;
     color: $text;
+    grid-size: 5 8;
+    grid-columns: 1fr 1fr 1fr 1fr 1fr;
 }
 
 .queue-row {
