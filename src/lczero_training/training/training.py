@@ -51,6 +51,7 @@ class Training:
         Tuple[JitTrainingState, MetricsDict],
     ]
     _swa_config: Optional[training_config_pb2.SWAConfig]
+    _dp_sharding: Optional[jshard.NamedSharding]
 
     def __init__(
         self,
@@ -61,12 +62,18 @@ class Training:
     ):
         self.optimizer_tx = optimizer_tx
         self._swa_config = swa_config
+        self._dp_sharding = None
 
         jit_kwargs: Dict[str, object] = {"static_argnames": ("optimizer_tx",)}
         if jax.device_count() > 1:
+            num_devices = jax.device_count()
+            logger.info(
+                f"Multi-GPU training enabled: {num_devices} devices detected"
+            )
             mesh = jshard.Mesh(jax.devices(), axis_names=("batch",))
             replicated = jshard.NamedSharding(mesh, P())
             dp_sharding = jshard.NamedSharding(mesh, P("batch"))
+            self._dp_sharding = dp_sharding
 
             batch_sharding = {
                 "inputs": dp_sharding,
@@ -199,6 +206,77 @@ class Training:
             return self.update_swa(jit_state, remainder / period_steps)
         return jit_state
 
+    def _validate_and_prepare_batch(
+        self, batch: Tuple[np.ndarray, ...]
+    ) -> dict:
+        b_inputs, b_policy, b_values, _, b_movesleft = batch
+        logger.info("Fetched batch from dataloader")
+
+        batch_size = b_inputs.shape[0]
+        if self._dp_sharding is not None:
+            num_devices = jax.device_count()
+            if batch_size % num_devices != 0:
+                raise ValueError(
+                    f"Batch size {batch_size} must be divisible by device "
+                    f"count {num_devices} for multi-GPU training. "
+                    f"Per-device batch size would be "
+                    f"{batch_size / num_devices:.2f}"
+                )
+            per_device_batch_size = batch_size // num_devices
+            logger.info(
+                f"Multi-GPU batch: {batch_size} total "
+                f"({per_device_batch_size} per device)"
+            )
+
+        batch_dict = {
+            "inputs": b_inputs,
+            "value_targets": b_values,
+            "policy_targets": b_policy,
+            "movesleft_targets": b_movesleft,
+        }
+
+        if self._dp_sharding is not None:
+            batch_dict = jax.device_put(batch_dict, self._dp_sharding)
+
+        return batch_dict
+
+    def _log_step_metrics(
+        self,
+        step_value: int,
+        local_step: int,
+        num_steps: int,
+        metrics: MetricsDict,
+    ) -> None:
+        loss = float(metrics["loss"])
+        unweighted_losses = {
+            k: float(v) for k, v in metrics["unweighted_losses"].items()
+        }
+        grad_norm = float(metrics["grad_norm"])
+        logger.info(
+            f"Step {step_value} ({local_step}/{num_steps}), Loss: {loss}, "
+            f"Unweighted losses: {unweighted_losses}, Grad norm: {grad_norm}"
+        )
+
+    def _execute_step_hook(
+        self,
+        step_hook: Optional[StepHook],
+        step_value: int,
+        local_step: int,
+        num_steps: int,
+        metrics: MetricsDict,
+        jit_state: JitTrainingState,
+    ) -> None:
+        if step_hook is None:
+            return
+        hook_data = StepHookData(
+            global_step=step_value,
+            local_step=local_step,
+            steps_per_epoch=num_steps,
+            metrics=metrics,
+            jit_state=jit_state,
+        )
+        step_hook(hook_data)
+
     def run(
         self,
         jit_state: JitTrainingState,
@@ -209,18 +287,9 @@ class Training:
         assert jit_state.opt_state is not None
         for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
-            batch = next(datagen)
-            b_inputs, b_policy, b_values, _, b_movesleft = batch
-            logger.info("Fetched batch from dataloader")
+            batch_dict = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
-                self.optimizer_tx,
-                jit_state,
-                {
-                    "inputs": b_inputs,
-                    "value_targets": b_values,
-                    "policy_targets": b_policy,
-                    "movesleft_targets": b_movesleft,
-                },
+                self.optimizer_tx, jit_state, batch_dict
             )
             step_value = int(
                 np.asarray(jax.device_get(jit_state.step)).reshape(())
@@ -228,22 +297,8 @@ class Training:
             jit_state = self.maybe_update_swa(
                 jit_state, local_step + 1, num_steps
             )
-            if step_hook is not None:
-                hook_data = StepHookData(
-                    global_step=step_value,
-                    local_step=local_step,
-                    steps_per_epoch=num_steps,
-                    metrics=metrics,
-                    jit_state=jit_state,
-                )
-                step_hook(hook_data)
-            loss = float(metrics["loss"])
-            unweighted_losses = {
-                k: float(v) for k, v in metrics["unweighted_losses"].items()
-            }
-            grad_norm = float(metrics["grad_norm"])
-            logger.info(
-                f"Step {step_value} ({local_step}/{num_steps}), Loss: {loss}, "
-                f"Unweighted losses: {unweighted_losses}, Grad norm: {grad_norm}"
+            self._execute_step_hook(
+                step_hook, step_value, local_step, num_steps, metrics, jit_state
             )
+            self._log_step_metrics(step_value, local_step, num_steps, metrics)
         return jit_state

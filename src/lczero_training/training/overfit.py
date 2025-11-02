@@ -8,12 +8,10 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-import jax.sharding as jshard
 import numpy as np
 from flax import nnx
 from google.protobuf import text_format
 from jax import tree_util
-from jax.sharding import PartitionSpec as P
 
 from lczero_training.dataloader import DataLoader, make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
@@ -79,6 +77,13 @@ def overfit(
     if num_steps <= 0:
         raise ValueError("num_steps must be a positive integer")
 
+    if jax.device_count() > 1:
+        raise ValueError(
+            f"Overfit utility does not support multi-GPU training. "
+            f"Detected {jax.device_count()} devices. "
+            f"Please set CUDA_VISIBLE_DEVICES to use only one GPU."
+        )
+
     config = RootConfig()
     logger.info("Reading configuration from proto file")
     with open(config_filename, "r") as config_file:
@@ -106,11 +111,6 @@ def overfit(
     )
 
     jit_state = training_state.jit_state
-    if jax.device_count() > 1:
-        mesh = jshard.Mesh(jax.devices(), axis_names=("batch",))
-        replicated_sharding = jshard.NamedSharding(mesh, P())
-        jit_state = jax.device_put(jit_state, replicated_sharding)
-
     lr_sched = make_lr_schedule(config.training.lr_schedule)
     optimizer_tx = make_gradient_transformation(
         config.training.optimizer,

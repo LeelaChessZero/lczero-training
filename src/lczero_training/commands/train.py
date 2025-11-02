@@ -5,12 +5,9 @@ import logging
 import os
 import sys
 
-import jax
-import jax.sharding as jshard
 import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
-from jax.sharding import PartitionSpec as P
 
 from lczero_training.commands import configure_root_logging
 from lczero_training.convert.jax_to_leela import (
@@ -73,11 +70,6 @@ def train(config_filename: str) -> None:
     assert isinstance(training_state, TrainingState)
 
     jit_state = training_state.jit_state
-    if jax.device_count() > 1:
-        mesh = jshard.Mesh(jax.devices(), axis_names=("batch",))
-        replicated_sharding = jshard.NamedSharding(mesh, P())
-        jit_state = jax.device_put(jit_state, replicated_sharding)
-
     lr_sched = make_lr_schedule(config.training.lr_schedule)
     optimizer_tx = make_gradient_transformation(
         config.training.optimizer,

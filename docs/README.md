@@ -101,7 +101,8 @@ Notes:
 are slightly different, TUI log usually is more useful.
 * In the tool, you can press `q` to quit, and `Ctrl+p` to get a command palette.
 There, you have one useful command: "Start training immediately".
-* Currently multi-GPU support is broken, so if you have multiple GPUs, set `CUDA_VISIBLE_DEVICES` to only use one GPU.
+* For multi-GPU training, ensure your batch size is divisible by the number of GPUs.
+* The overfit utility (`uv run overfit`) does not support multi-GPU. Set `CUDA_VISIBLE_DEVICES` to use only one GPU when running overfit.
 * Also note that TUI is 100% vibe coded, so you'll see lots of mocks in the UI.
 :-P
 
