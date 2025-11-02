@@ -437,7 +437,13 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
                        reminder;
       reminder = n - std::floor(n);
       const size_t positions_to_cache = static_cast<size_t>(std::floor(n));
-
+      LOG_EVERY_N_SEC(INFO, 1)
+          << "Caching calculation: num_records=" << num_records
+          << ", probability=" << probability
+          << ", exponential_avg_probability=" << exponential_avg_probability
+          << ", n=" << n << ", reminder=" << reminder
+          << ", positions_to_cache=" << positions_to_cache
+          << ", available_items=" << cache_request.items.size();
       // Traverse and extend the cache chain.
       std::unique_ptr<CacheNode>* current = &it->cache[local_index];
       for (size_t i = 0; i < positions_to_cache; ++i) {
