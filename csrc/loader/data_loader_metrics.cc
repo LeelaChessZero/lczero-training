@@ -14,13 +14,8 @@ namespace {
 
 template <typename ProtoT>
 ProtoT* FindByName(std::vector<ProtoT>* entries, absl::string_view name) {
-  if (entries == nullptr || name.empty()) {
-    return nullptr;
-  }
   for (auto& entry : *entries) {
-    if (entry.has_name() && entry.name() == name) {
-      return &entry;
-    }
+    if (entry.name() == name) return &entry;
   }
   return nullptr;
 }
