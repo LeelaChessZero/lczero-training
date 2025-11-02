@@ -38,7 +38,9 @@ ShufflingChunkPool::ShufflingChunkPool(const ShufflingChunkPoolConfig& config)
       source_ingestion_pool_(config.source_ingestion_threads(),
                              ThreadPoolOptions{}, stop_source_),
       chunk_loading_pool_(config.chunk_loading_threads(), ThreadPoolOptions{},
-                          stop_source_) {
+                          stop_source_),
+      caching_pool_(config.has_cachehit_output() ? config.caching_threads() : 0,
+                    ThreadPoolOptions{}, stop_source_) {
   if (config.has_cachehit_output()) {
     cachehit_output_name_ = config.cachehit_output().name();
     cachehit_output_queue_.emplace(
@@ -132,6 +134,19 @@ void ShufflingChunkPool::Start() {
               OutputWorker(stop_token, context);
             });
       }
+
+      // Start caching workers if configured.
+      if (cachehit_output_queue_.has_value()) {
+        for (size_t i = 0; i < caching_pool_.num_threads(); ++i) {
+          auto* context =
+              caching_thread_contexts_
+                  .emplace_back(std::make_unique<CachingThreadContext>())
+                  .get();
+          caching_pool_.Enqueue([this, context](std::stop_token stop_token) {
+            CachingWorker(stop_token, context);
+          });
+        }
+      }
     } catch (const QueueClosedException&) {
       LOG(INFO) << "ShufflingChunkPool initialization interrupted, input "
                    "queue closed.";
@@ -155,10 +170,9 @@ void ShufflingChunkPool::Stop() {
 
   source_ingestion_pool_.Shutdown();
   chunk_loading_pool_.Shutdown();
+  if (cachehit_output_queue_) caching_pool_.Shutdown();
   output_queue()->Close();
-  if (cachehit_output_queue_.has_value()) {
-    cachehit_output_queue_->Close();
-  }
+  if (cachehit_output_queue_) cachehit_output_queue_->Close();
   LOG(INFO) << "ShufflingChunkPool stopped.";
 }
 
@@ -255,7 +269,9 @@ void ShufflingChunkPool::ProcessInputFiles(
                          .source = std::move(source),
                          .dropped_chunks = {},
                          .use_counts = std::vector<uint16_t>(count, 0),
-                         .num_records = std::vector<uint16_t>(count, 0)});
+                         .num_records = std::vector<uint16_t>(count, 0),
+                         .cache = std::vector<std::unique_ptr<CacheNode>>(
+                             cachehit_output_queue_.has_value() ? count : 0)});
                     start_chunk_index +=
                         chunk_sources_.back().source->GetChunkCount();
                   });
@@ -313,17 +329,28 @@ void ShufflingChunkPool::SourceIngestionWorker(
 void ShufflingChunkPool::OutputWorker(std::stop_token stop_token,
                                       ChunkLoadingThreadContext* context) {
   // Create a local producer for this worker
-  auto producer = output_queue()->CreateProducer();
+  auto primary_producer = output_queue()->CreateProducer();
+  std::optional<decltype(cachehit_output_queue_->CreateProducer())>
+      cachehit_producer;
+  if (cachehit_output_queue_.has_value()) {
+    cachehit_producer.emplace(cachehit_output_queue_->CreateProducer());
+  }
 
   try {
     while (true) {
-      auto chunk = GetNextChunkData();
-      if (!chunk) {
+      auto result = GetNextChunkData();
+      if (!result) {
         if (output_queue()->IsClosed()) break;
         continue;
       }
       LoadMetricPauser pauser(context->load_metric_updater);
-      producer.Put(std::move(*chunk), stop_token);
+      if (std::holds_alternative<TrainingChunk>(*result)) {
+        primary_producer.Put(std::move(std::get<TrainingChunk>(*result)),
+                             stop_token);
+      } else {
+        cachehit_producer->Put(std::move(std::get<FrameType>(*result)),
+                               stop_token);
+      }
     }
   } catch (const QueueClosedException&) {
     LOG(INFO) << "OutputWorker stopping, queue closed.";
@@ -331,6 +358,85 @@ void ShufflingChunkPool::OutputWorker(std::stop_token stop_token,
     LOG(INFO) << "OutputWorker stopping, request cancelled.";
   } catch (const std::exception& e) {
     LOG(FATAL) << "OutputWorker encountered an error: " << e.what();
+  }
+}
+
+void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
+                                       CachingThreadContext* context) {
+  constexpr double kTheta = 0.99;
+  double reminder = 0.0;
+  double exponential_avg_probability = 1.0;
+  try {
+    while (true) {
+      auto cache_request = [&]() {
+        LoadMetricPauser pauser(context->load_metric_updater);
+        return cache_request_queue_->Get(stop_token);
+      }();
+
+      absl::MutexLock lock(&chunk_sources_mutex_);
+
+      // Find the chunk source containing this global index.
+      auto it = absl::c_lower_bound(
+          chunk_sources_, cache_request.global_index,
+          [](const auto& source_item, size_t chunk_idx) {
+            return source_item.start_chunk_index +
+                       source_item.source->GetChunkCount() <=
+                   chunk_idx;
+          });
+
+      if (it == chunk_sources_.end() ||
+          cache_request.global_index < it->start_chunk_index) {
+        chunk_source_not_found_.fetch_add(1, std::memory_order_acq_rel);
+        continue;
+      }
+
+      const size_t local_index =
+          cache_request.global_index - it->start_chunk_index;
+      assert(local_index < it->use_counts.size());
+
+      // Check use_count match.
+      if (it->use_counts[local_index] != cache_request.next_use) {
+        mismatched_use_counts_.fetch_add(1, std::memory_order_acq_rel);
+        continue;
+      }
+
+      // Compute how many positions to cache.
+      const uint16_t num_records = it->num_records[local_index];
+      const double probability = ComputeHanseProbability(num_records);
+      exponential_avg_probability =
+          exponential_avg_probability * (1.0 - kTheta) + probability * kTheta;
+      const double n = (probability * config_.position_cache_size() /
+                        chunk_pool_size_ / exponential_avg_probability) +
+                       reminder;
+      reminder = n - std::floor(n);
+      const size_t positions_to_cache = static_cast<size_t>(std::floor(n));
+
+      // Traverse and extend the cache chain.
+      std::unique_ptr<CacheNode>* current = &it->cache[local_index];
+      for (size_t i = 0; i < positions_to_cache; ++i) {
+        if (*current) {
+          current = &(*current)->next;
+          continue;
+        }
+        if (i >= cache_request.items.size()) break;
+        auto node = std::make_unique<CacheNode>();
+        node->frame = cache_request.items[i];
+        *current = std::move(node);
+        current = &(*current)->next;
+        newly_cached_.fetch_add(1, std::memory_order_acq_rel);
+        cached_positions_.fetch_add(1, std::memory_order_acq_rel);
+      }
+
+      const size_t dropped =
+          cache_request.items.size() > positions_to_cache
+              ? cache_request.items.size() - positions_to_cache
+              : 0;
+      dropped_cache_positions_.fetch_add(dropped, std::memory_order_acq_rel);
+    }
+  } catch (const QueueClosedException&) {
+    LOG(INFO) << "CachingWorker stopping, queue closed.";
+  } catch (const QueueRequestCancelled&) {
+    LOG(INFO) << "CachingWorker stopping, request cancelled.";
   }
 }
 
@@ -343,7 +449,8 @@ struct ShufflingChunkPool::ChunkData {
   ChunkSourceItem* source_item = nullptr;
 };
 
-std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
+std::optional<std::variant<TrainingChunk, FrameType>>
+ShufflingChunkPool::GetNextChunkData() {
   while (true) {
     ChunkData chunk_data;
     ChunkStatus status;
@@ -354,19 +461,31 @@ std::optional<TrainingChunk> ShufflingChunkPool::GetNextChunkData() {
       if (status == ChunkStatus::kRetry) continue;
 
       const bool hanse_enabled = config_.hanse_sampling_threshold() > 0;
-      if (hanse_enabled) {
-        if (!HanseAcceptAndMaybeLoad(chunk_data)) continue;
-      } else {
-        // Legacy path: load chunk data now.
-        if (!LoadChunkData(chunk_data)) continue;
-      }
+      if (hanse_enabled && !HanseAccept(chunk_data)) continue;
 
-      // We are going to return this chunk: increment use_count for this chunk.
+      // Increment use_count for this chunk.
       assert(chunk_data.source_item->use_counts.size() >
              chunk_data.local_index);
-      // Save old value for the TrainingChunk and then increment.
       chunk_data.use_count =
           chunk_data.source_item->use_counts[chunk_data.local_index]++;
+
+      // Check cache if configured.
+      if (cachehit_output_queue_.has_value()) {
+        auto& cache_chain =
+            chunk_data.source_item->cache[chunk_data.local_index];
+        if (cache_chain) {
+          cache_hits_.fetch_add(1, std::memory_order_acq_rel);
+          cached_positions_.fetch_sub(1, std::memory_order_acq_rel);
+          FrameType cached_frame = cache_chain->frame;
+          cache_chain = std::move(cache_chain->next);
+          return cached_frame;
+        }
+        cache_misses_.fetch_add(1, std::memory_order_acq_rel);
+      }
+
+      if (chunk_data.data.empty()) {
+        if (!LoadChunkData(chunk_data)) continue;
+      }
     }
 
     TrainingChunk chunk;
@@ -450,7 +569,15 @@ ShufflingChunkPool::ChunkStatus ShufflingChunkPool::GetChunkInfo(
   return ChunkStatus::kOk;
 }
 
-bool ShufflingChunkPool::HanseAcceptAndMaybeLoad(ChunkData& chunk_data) {
+double ShufflingChunkPool::ComputeHanseProbability(uint16_t num_records) {
+  const double threshold =
+      static_cast<double>(config_.hanse_sampling_threshold());
+  const double gamma = config_.hanse_sampling_gamma();
+  const double frames = static_cast<double>(num_records);
+  return std::pow(std::min(1.0, frames / threshold), gamma);
+}
+
+bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
   assert(chunk_data.source_item);
   assert(chunk_data.source_item->num_records.size() > chunk_data.local_index);
 
@@ -466,22 +593,12 @@ bool ShufflingChunkPool::HanseAcceptAndMaybeLoad(ChunkData& chunk_data) {
     hanse_cache_hits_.fetch_add(1, std::memory_order_acq_rel);
   }
 
-  const double threshold =
-      static_cast<double>(config_.hanse_sampling_threshold());
-  const double gamma = config_.hanse_sampling_gamma();
-  const double frames = static_cast<double>(
+  const double p = ComputeHanseProbability(
       chunk_data.source_item->num_records[chunk_data.local_index]);
-  double p = 1.0;
-  p = std::pow(std::min(1.0, frames / threshold), gamma);
   const double u = absl::Uniform<double>(bitgen_, 0.0, 1.0);
   if (u >= p) {
     hanse_rejected_.fetch_add(1, std::memory_order_acq_rel);
-    return false;  // Reject and resample
-  }
-
-  // If data is not yet loaded, load it now.
-  if (chunk_data.data.empty()) {
-    if (!LoadChunkData(chunk_data)) return false;
+    return false;
   }
   return true;
 }
@@ -497,11 +614,14 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
   }
 
   size_t count = source->GetChunkCount();
-  chunk_sources_.push_back({.start_chunk_index = old_upper_bound,
-                            .source = std::move(source),
-                            .dropped_chunks = {},
-                            .use_counts = std::vector<uint16_t>(count, 0),
-                            .num_records = std::vector<uint16_t>(count, 0)});
+  chunk_sources_.push_back(
+      {.start_chunk_index = old_upper_bound,
+       .source = std::move(source),
+       .dropped_chunks = {},
+       .use_counts = std::vector<uint16_t>(count, 0),
+       .num_records = std::vector<uint16_t>(count, 0),
+       .cache = std::vector<std::unique_ptr<CacheNode>>(
+           cachehit_output_queue_.has_value() ? count : 0)});
 
   // Calculate current window bounds.
   size_t new_upper_bound = chunk_sources_.back().start_chunk_index +
@@ -514,6 +634,19 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
     size_t window_size = new_upper_bound - window_start;
 
     if (window_size < chunk_pool_size_) break;
+
+    // Count cached positions in the evicted source.
+    if (cachehit_output_queue_.has_value()) {
+      size_t evicted_cached = 0;
+      for (const auto& cache_chain : chunk_sources_.front().cache) {
+        const CacheNode* node = cache_chain.get();
+        while (node) {
+          ++evicted_cached;
+          node = node->next.get();
+        }
+      }
+      cached_positions_.fetch_sub(evicted_cached, std::memory_order_acq_rel);
+    }
 
     // Remove the oldest chunk source (front of deque).
     chunk_sources_.pop_front();
@@ -602,6 +735,50 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     auto* resh = stage_metric.add_count_metrics();
     resh->set_name("reshuffles");
     resh->set_count(reshuffles_.exchange(0, std::memory_order_acq_rel));
+  }
+
+  // Position cache metrics.
+  if (cachehit_output_queue_.has_value()) {
+    LoadMetricProto caching_load;
+    caching_load.set_name("caching");
+    for (const auto& context : caching_thread_contexts_) {
+      UpdateFrom(caching_load, context->load_metric_updater.FlushMetrics());
+    }
+    *stage_metric.add_load_metrics() = std::move(caching_load);
+
+    auto* cache_hits = stage_metric.add_count_metrics();
+    cache_hits->set_name("cache_hits");
+    cache_hits->set_count(cache_hits_.exchange(0, std::memory_order_acq_rel));
+
+    auto* cache_misses = stage_metric.add_count_metrics();
+    cache_misses->set_name("cache_misses");
+    cache_misses->set_count(
+        cache_misses_.exchange(0, std::memory_order_acq_rel));
+
+    auto* mismatched = stage_metric.add_count_metrics();
+    mismatched->set_name("mismatched_use_counts");
+    mismatched->set_count(
+        mismatched_use_counts_.exchange(0, std::memory_order_acq_rel));
+
+    auto* newly_cached = stage_metric.add_count_metrics();
+    newly_cached->set_name("newly_cached");
+    newly_cached->set_count(
+        newly_cached_.exchange(0, std::memory_order_acq_rel));
+
+    auto* dropped = stage_metric.add_count_metrics();
+    dropped->set_name("dropped_cache_positions");
+    dropped->set_count(
+        dropped_cache_positions_.exchange(0, std::memory_order_acq_rel));
+
+    auto* not_found = stage_metric.add_count_metrics();
+    not_found->set_name("chunk_source_not_found");
+    not_found->set_count(
+        chunk_source_not_found_.exchange(0, std::memory_order_acq_rel));
+
+    auto* cached = stage_metric.add_count_metrics();
+    cached->set_name("cached_positions");
+    cached->set_count(cached_positions_.load(std::memory_order_acquire));
+    cached->set_capacity(config_.position_cache_size());
   }
 
   *stage_metric.add_queue_metrics() =

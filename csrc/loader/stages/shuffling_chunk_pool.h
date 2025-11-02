@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
@@ -55,6 +56,11 @@ class ShufflingChunkPool : public Stage {
   Queue<TrainingChunk>* output_queue() { return &primary_output_queue_; }
 
  private:
+  struct CacheNode {
+    FrameType frame;
+    std::unique_ptr<CacheNode> next;
+  };
+
   struct ChunkSourceItem {
     size_t start_chunk_index;
     std::unique_ptr<ChunkSource> source;
@@ -62,6 +68,7 @@ class ShufflingChunkPool : public Stage {
     // Per-chunk counters and cached record counts.
     std::vector<uint16_t> use_counts;
     std::vector<uint16_t> num_records;
+    std::vector<std::unique_ptr<CacheNode>> cache;
   };
 
   struct SourceIngestionThreadContext {
@@ -72,6 +79,10 @@ class ShufflingChunkPool : public Stage {
     LoadMetricUpdater load_metric_updater;
   };
 
+  struct CachingThreadContext {
+    LoadMetricUpdater load_metric_updater;
+  };
+
   std::vector<std::unique_ptr<ChunkSource>> InitializeChunkSources();
   void ProcessInputFiles(
       std::vector<std::unique_ptr<ChunkSource>> uninitialized_sources);
@@ -79,9 +90,10 @@ class ShufflingChunkPool : public Stage {
                              SourceIngestionThreadContext* context);
   void OutputWorker(std::stop_token stop_token,
                     ChunkLoadingThreadContext* context);
+  void CachingWorker(std::stop_token stop_token, CachingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  std::optional<TrainingChunk> GetNextChunkData()
+  std::optional<std::variant<TrainingChunk, FrameType>> GetNextChunkData()
       ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
 
   enum class ChunkStatus { kOk, kRetry, kEnd };
@@ -91,8 +103,9 @@ class ShufflingChunkPool : public Stage {
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
   bool LoadChunkData(ChunkData& chunk_data)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  bool HanseAcceptAndMaybeLoad(ChunkData& chunk_data)
+  bool HanseAccept(ChunkData& chunk_data)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
+  double ComputeHanseProbability(uint16_t num_records);
 
   Queue<ChunkSourceWithPhase>* primary_input_queue_ = nullptr;
   Queue<CacheRequest>* cache_request_queue_ = nullptr;
@@ -107,6 +120,7 @@ class ShufflingChunkPool : public Stage {
   std::stop_source stop_source_;
   ThreadPool source_ingestion_pool_;
   ThreadPool chunk_loading_pool_;
+  ThreadPool caching_pool_;
 
   std::atomic<int64_t> dropped_chunks_metric_{0};
 
@@ -119,6 +133,7 @@ class ShufflingChunkPool : public Stage {
       source_ingestion_thread_contexts_;
   std::vector<std::unique_ptr<ChunkLoadingThreadContext>>
       chunk_loading_thread_contexts_;
+  std::vector<std::unique_ptr<CachingThreadContext>> caching_thread_contexts_;
 
   // Anchor-related members for tracking chunks since a specific point.
   absl::Mutex anchor_mutex_;
@@ -133,6 +148,13 @@ class ShufflingChunkPool : public Stage {
   std::atomic<uint64_t> hanse_cache_misses_{0};
   std::atomic<uint64_t> hanse_rejected_{0};
   std::atomic<uint64_t> reshuffles_{0};
+  std::atomic<uint64_t> cache_hits_{0};
+  std::atomic<uint64_t> cache_misses_{0};
+  std::atomic<uint64_t> mismatched_use_counts_{0};
+  std::atomic<uint64_t> newly_cached_{0};
+  std::atomic<uint64_t> dropped_cache_positions_{0};
+  std::atomic<uint64_t> chunk_source_not_found_{0};
+  std::atomic<uint64_t> cached_positions_{0};
 };
 
 }  // namespace training

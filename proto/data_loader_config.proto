@@ -59,6 +59,10 @@ message ShufflingChunkPoolConfig {
   optional double hanse_sampling_gamma = 7 [default = 1.0];
   // Optional output queue for cache hit frames.
   optional QueueConfig cachehit_output = 8;
+  // Size of the position cache per chunk.
+  optional uint64 position_cache_size = 9;
+  // Threads for caching positions.
+  optional uint64 caching_threads = 10 [default = 1];
 }
 
 // Configuration for chunk rescorer that adjusts chunk metadata using

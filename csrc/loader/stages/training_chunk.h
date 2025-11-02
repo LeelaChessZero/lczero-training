@@ -20,7 +20,11 @@ struct TrainingChunk {
   uint32_t use_count = 0;
 };
 
-struct CacheRequest {};
+struct CacheRequest {
+  size_t global_index = 0;
+  uint16_t next_use = 0;
+  std::vector<FrameType> items;
+};
 
 }  // namespace training
 }  // namespace lczero
