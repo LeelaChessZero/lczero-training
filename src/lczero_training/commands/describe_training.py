@@ -18,6 +18,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Dump model shapes.",
     )
+    parser.add_argument(
+        "--values",
+        action="store_true",
+        help="Dump model values.",
+    )
     return parser
 
 
@@ -33,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     describe(
         config_filename=args.config,
         shapes=args.shapes,
+        values=args.values,
     )
     return 0
 

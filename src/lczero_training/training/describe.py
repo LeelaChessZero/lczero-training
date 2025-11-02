@@ -4,10 +4,8 @@ import sys
 import jax
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
-from flax import nnx
 from google.protobuf import text_format
 
-from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import TrainingState
 from proto.root_config_pb2 import RootConfig
 
@@ -17,6 +15,7 @@ logger = logging.getLogger(__name__)
 def describe(
     config_filename: str,
     shapes: bool = False,
+    values: bool = False,
 ) -> None:
     config = RootConfig()
     logger.info("Reading configuration from proto file")
@@ -46,14 +45,14 @@ def describe(
     logger.info("Restored checkpoint")
 
     assert isinstance(training_state, TrainingState)
-    model_graphdef, _ = nnx.split(
-        LczeroModel(config=config.model, rngs=nnx.Rngs(params=42))
-    )
-    model = nnx.merge(model_graphdef, training_state.jit_state.model_state)
+
+    if values:
+        logger.info("Dumping training state values")
+        print("Training state:")
+        print(training_state)
 
     if shapes:
-        logger.info("Extracting model state shapes")
-        state = nnx.state(model)
-        shapes = jax.tree.map(jnp.shape, state)
-        print("Model state shapes:")
+        logger.info("Extracting training state shapes")
+        shapes = jax.tree.map(jnp.shape, training_state)
+        print("Training state shapes:")
         print(shapes)
