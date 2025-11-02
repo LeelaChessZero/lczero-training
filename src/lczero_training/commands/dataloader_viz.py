@@ -51,7 +51,15 @@ def main(argv: list[str] | None = None) -> int:
     for stage in config.data_loader.stage:
         stage_names.add(stage.name)
         stage_text = text_format.MessageToString(stage, as_one_line=False)
-        dot.node(stage.name, label=stage_text)
+        br_tag = '<br align="left"/>'
+        escaped_text = (
+            stage_text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", br_tag)
+        )
+        label = f"<{escaped_text}>"
+        dot.node(stage.name, label=label, shape="box")
 
         for input_spec in stage.input:
             source_stage = input_spec.split(".")[0]
