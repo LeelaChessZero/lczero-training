@@ -39,7 +39,13 @@ def main(argv: list[str] | None = None) -> int:
 
     dot = Digraph(comment="DataLoader Pipeline")
     dot.attr(rankdir="TB")
-    dot.attr("node", shape="box", fontname="monospace", fontsize="10")
+    dot.attr(
+        "node",
+        shape="box",
+        fontname="monospace",
+        fontsize="10",
+        labeljust="l",
+    )
 
     stage_names = set()
     for stage in config.data_loader.stage:
