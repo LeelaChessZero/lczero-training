@@ -237,9 +237,11 @@ class Training:
                     jit_state=jit_state,
                 )
                 step_hook(hook_data)
-            loss = metrics["loss"]
-            unweighted_losses = metrics["unweighted_losses"]
-            grad_norm = metrics["grad_norm"]
+            loss = float(metrics["loss"])
+            unweighted_losses = {
+                k: float(v) for k, v in metrics["unweighted_losses"].items()
+            }
+            grad_norm = float(metrics["grad_norm"])
             logger.info(
                 f"Step {step_value} ({local_step}/{num_steps}), Loss: {loss}, "
                 f"Unweighted losses: {unweighted_losses}, Grad norm: {grad_norm}"

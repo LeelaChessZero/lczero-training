@@ -303,13 +303,9 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;
-  size_t total_events = 0;
-  size_t total_enqueued = 0;
-  bool saw_events = false;
 
   auto flush_batch = [&]() {
     if (files.empty()) return;
-    total_enqueued += files.size();
     producer.Put(files, stop_token);
     files.clear();
   };
@@ -317,13 +313,11 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
   while (true) {
     ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
     if (length <= 0) break;  // No more events to process
-    saw_events = true;
 
     ssize_t offset = 0;
     while (offset < length) {
       const struct inotify_event* event =
           reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
-      ++total_events;
       auto file = ProcessInotifyEvent(*event, stop_token);
       if (file) files.push_back(*file);
       if (files.size() >= kNotifyBatchSize) flush_batch();
@@ -332,12 +326,6 @@ void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
   }
 
   flush_batch();  // Flush any remaining files in the batch
-
-  if (saw_events) {
-    LOG(INFO) << "FilePathProvider processed " << total_events
-              << " inotify event(s) and enqueued " << total_enqueued
-              << " file notification(s).";
-  }
 }
 
 auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event,
