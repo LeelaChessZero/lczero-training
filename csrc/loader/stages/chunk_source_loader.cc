@@ -167,8 +167,9 @@ StageMetricProto ChunkSourceLoader::FlushMetrics() {
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
 
-  // Atomically get and reset skipped files count.
-  stage_metric.set_skipped_files_count(skipped_files_count_.exchange(0));
+  auto* skipped_metric = stage_metric.add_count_metrics();
+  skipped_metric->set_name("skipped_files");
+  skipped_metric->set_count(skipped_files_count_.exchange(0));
 
   // Get the last chunk key.
   {

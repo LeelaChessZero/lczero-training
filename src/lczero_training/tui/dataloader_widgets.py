@@ -69,6 +69,18 @@ def _find_count_metric(
     return None
 
 
+def _find_gauge_metric(
+    stage_metric: training_metrics_pb2.StageMetricProto | None,
+    metric_name: str,
+) -> training_metrics_pb2.GaugeMetricProto | None:
+    if not stage_metric:
+        return None
+    for gauge_metric in stage_metric.gauge_metrics:
+        if (gauge_metric.name or "") == metric_name:
+            return gauge_metric
+    return None
+
+
 def _get_queue_metric(
     stage_metric: training_metrics_pb2.StageMetricProto | None,
     queue_name: str | None,
@@ -133,17 +145,6 @@ def _format_count(
     count_metric_total: training_metrics_pb2.CountMetricProto | None,
     label: str,
 ) -> str:
-    # Check for capacity in either metric - if present, use current behavior.
-    if count_metric_1s and count_metric_1s.HasField("capacity"):
-        count_text = format_full_number(count_metric_1s.count)
-        capacity_text = format_full_number(count_metric_1s.capacity)
-        return f"{label} {count_text}/{capacity_text}"
-    if count_metric_total and count_metric_total.HasField("capacity"):
-        count_text = format_full_number(count_metric_total.count)
-        capacity_text = format_full_number(count_metric_total.capacity)
-        return f"{label} {count_text}/{capacity_text}"
-
-    # New behavior for simple count metrics: show rate/s (total).
     if count_metric_1s and count_metric_total:
         rate = format_si(count_metric_1s.count)
         total = format_full_number(count_metric_total.count)
@@ -153,6 +154,19 @@ def _format_count(
     if count_metric_1s:
         return f"{label} {format_si(count_metric_1s.count)}/s"
     return f"{label} --"
+
+
+def _format_gauge(
+    gauge_metric: training_metrics_pb2.GaugeMetricProto | None,
+    label: str,
+) -> str:
+    if not gauge_metric:
+        return f"{label} --"
+    if gauge_metric.HasField("capacity"):
+        value_text = format_full_number(gauge_metric.value)
+        capacity_text = format_full_number(gauge_metric.capacity)
+        return f"{label} {value_text}/{capacity_text}"
+    return f"{label} {format_full_number(gauge_metric.value)}"
 
 
 def _average_queue_fullness(
@@ -267,72 +281,6 @@ class StageWidget(BaseRowWidget):
             self.add_content_widget(chip)
         return chip
 
-    def _update_dropped_chip(
-        self,
-        stage_1s: training_metrics_pb2.StageMetricProto | None,
-        stage_total: training_metrics_pb2.StageMetricProto | None,
-    ) -> None:
-        has_field = any(
-            metric and metric.HasField("dropped")
-            for metric in (stage_1s, stage_total)
-        )
-        if not has_field:
-            return
-
-        chip = self._ensure_chip("info:dropped", "dropped --", "info-chip")
-        has_drops = False
-        if stage_1s and stage_1s.HasField("dropped") and stage_1s.dropped:
-            chip.update(f"dropped {format_si(stage_1s.dropped)}/s")
-            has_drops = True
-        elif (
-            stage_total
-            and stage_total.HasField("dropped")
-            and stage_total.dropped
-        ):
-            chip.update(f"dropped {format_full_number(stage_total.dropped)}")
-            has_drops = True
-        else:
-            chip.update("dropped 0")
-            has_drops = False
-
-        if has_drops:
-            chip.add_class("warning-chip")
-        else:
-            chip.remove_class("warning-chip")
-
-    def _update_skipped_chip(
-        self,
-        stage_1s: training_metrics_pb2.StageMetricProto | None,
-        stage_total: training_metrics_pb2.StageMetricProto | None,
-    ) -> None:
-        has_field = any(
-            metric and metric.HasField("skipped_files_count")
-            for metric in (stage_1s, stage_total)
-        )
-        if not has_field:
-            return
-
-        chip = self._ensure_chip("info:skipped", "skipped --", "warning-chip")
-        total_value = (
-            stage_total.skipped_files_count
-            if stage_total and stage_total.HasField("skipped_files_count")
-            else None
-        )
-        rate_value = (
-            stage_1s.skipped_files_count
-            if stage_1s and stage_1s.HasField("skipped_files_count")
-            else None
-        )
-        if rate_value:
-            chip.update(
-                f"skipped {format_full_number(total_value or 0)}"
-                f" ({format_si(rate_value)}/s)"
-            )
-        elif total_value is not None:
-            chip.update(f"skipped {format_full_number(total_value)}")
-        else:
-            chip.update("skipped 0")
-
     def _update_last_chunk_chip(
         self,
         stage_1s: training_metrics_pb2.StageMetricProto | None,
@@ -357,21 +305,6 @@ class StageWidget(BaseRowWidget):
             return
         chip = self._ensure_chip("info:anchor", "anchor --", "info-chip")
         chip.update(f"anchor {stage_total.anchor}")
-
-    def _update_since_anchor_chip(
-        self,
-        stage_total: training_metrics_pb2.StageMetricProto | None,
-    ) -> None:
-        if not stage_total or not stage_total.HasField("chunks_since_anchor"):
-            return
-        chip = self._ensure_chip(
-            "info:since_anchor",
-            "since anchor --",
-            "info-chip",
-        )
-        chip.update(
-            f"since anchor {format_full_number(stage_total.chunks_since_anchor)}"
-        )
 
     def update_metrics(
         self,
@@ -418,11 +351,21 @@ class StageWidget(BaseRowWidget):
                 _format_count(count_metric_1s, count_metric_total, label=label)
             )
 
-        self._update_dropped_chip(stage_metric_1s, stage_metric_total)
-        self._update_skipped_chip(stage_metric_1s, stage_metric_total)
+        gauge_names = _collect_metric_names(
+            stage_metric_1s, stage_metric_total, "gauge_metrics"
+        )
+        for gauge_name in gauge_names:
+            label = gauge_name or "gauge"
+            gauge_metric = _find_gauge_metric(stage_metric_total, gauge_name)
+            if gauge_metric is None:
+                gauge_metric = _find_gauge_metric(stage_metric_1s, gauge_name)
+            chip = self._ensure_chip(
+                f"gauge:{gauge_name}", f"{label} --", "info-chip"
+            )
+            chip.update(_format_gauge(gauge_metric, label=label))
+
         self._update_last_chunk_chip(stage_metric_1s, stage_metric_total)
         self._update_anchor_chip(stage_metric_total)
-        self._update_since_anchor_chip(stage_metric_total)
 
 
 class QueueWidget(BaseRowWidget):

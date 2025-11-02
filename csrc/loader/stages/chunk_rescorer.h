@@ -60,6 +60,7 @@ class ChunkRescorer
   ThreadPool thread_pool_;
   std::vector<std::unique_ptr<ThreadContext>> thread_contexts_;
   RescoreFn rescore_fn_;
+  std::atomic<uint64_t> failed_rescores_{0};
 };
 
 }  // namespace training

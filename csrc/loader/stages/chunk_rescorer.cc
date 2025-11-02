@@ -96,6 +96,7 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(chunk), stop_token);
       } catch (const std::exception& exception) {
+        failed_rescores_.fetch_add(1, std::memory_order_acq_rel);
         LOG(ERROR) << "ChunkRescorer failed to rescore chunk: "
                    << exception.what() << "; sort_key=" << chunk.sort_key
                    << "; index_within_sort_key=" << chunk.index_within_sort_key
@@ -120,6 +121,11 @@ StageMetricProto ChunkRescorer::FlushMetrics() {
     UpdateFrom(aggregated_load, context->load_metric_updater.FlushMetrics());
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
+
+  auto* failed = stage_metric.add_count_metrics();
+  failed->set_name("failed_rescores");
+  failed->set_count(failed_rescores_.exchange(0, std::memory_order_acq_rel));
+
   *stage_metric.add_queue_metrics() =
       MetricsFromQueue("output", *output_queue());
   return stage_metric;

@@ -34,6 +34,11 @@ void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src) {
 void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src) {
   if (src.has_name()) dest.set_name(src.name());
   if (src.has_count()) dest.set_count(dest.count() + src.count());
+}
+
+void UpdateFrom(GaugeMetricProto& dest, const GaugeMetricProto& src) {
+  if (src.has_name()) dest.set_name(src.name());
+  if (src.has_value()) dest.set_value(src.value());
   if (src.has_capacity()) dest.set_capacity(src.capacity());
 }
 
@@ -73,18 +78,19 @@ void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
     UpdateFrom(*dest_count, count_metrics);
   }
 
-  if (src.has_dropped()) {
-    dest.set_dropped(dest.dropped() + src.dropped());
+  for (const auto& gauge_metrics : src.gauge_metrics()) {
+    GaugeMetricProto* dest_gauge =
+        gauge_metrics.has_name()
+            ? FindByName(dest.mutable_gauge_metrics(), gauge_metrics.name())
+            : nullptr;
+    if (dest_gauge == nullptr) {
+      dest_gauge = dest.add_gauge_metrics();
+    }
+    UpdateFrom(*dest_gauge, gauge_metrics);
   }
-  if (src.has_skipped_files_count()) {
-    dest.set_skipped_files_count(dest.skipped_files_count() +
-                                 src.skipped_files_count());
-  }
+
   if (src.has_last_chunk_key()) dest.set_last_chunk_key(src.last_chunk_key());
   if (src.has_anchor()) dest.set_anchor(src.anchor());
-  if (src.has_chunks_since_anchor()) {
-    dest.set_chunks_since_anchor(src.chunks_since_anchor());
-  }
 }
 
 void UpdateFrom(DataLoaderMetricsProto& dest,

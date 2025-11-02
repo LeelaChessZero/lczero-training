@@ -220,14 +220,14 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsHandlesEmptyChunkSources) {
   auto metrics = shuffling_chunk_pool.FlushMetrics();
   bool found_current = false;
   bool found_total = false;
-  for (const auto& metric : metrics.count_metrics()) {
+  for (const auto& metric : metrics.gauge_metrics()) {
     if (metric.name() == "chunks_current") {
       found_current = true;
-      EXPECT_EQ(metric.count(), 0u);
+      EXPECT_EQ(metric.value(), 0u);
       EXPECT_EQ(metric.capacity(), static_cast<uint64_t>(chunk_pool_size));
     } else if (metric.name() == "chunks_total") {
       found_total = true;
-      EXPECT_EQ(metric.count(), 0u);
+      EXPECT_EQ(metric.value(), 0u);
     }
   }
 
@@ -257,14 +257,14 @@ TEST_F(ShufflingChunkPoolTest, FlushMetricsReportsWindowAndTotalCounts) {
     auto metrics = shuffling_chunk_pool.FlushMetrics();
     bool has_current = false;
     bool has_total = false;
-    for (const auto& metric : metrics.count_metrics()) {
+    for (const auto& metric : metrics.gauge_metrics()) {
       if (metric.name() == "chunks_current") {
         has_current = true;
-        current_count = metric.count();
+        current_count = metric.value();
         current_capacity = metric.capacity();
       } else if (metric.name() == "chunks_total") {
         has_total = true;
-        total_count = metric.count();
+        total_count = metric.value();
       }
     }
     if (has_current && has_total) {
@@ -376,12 +376,16 @@ TEST_F(ShufflingChunkPoolTest, DropsInvalidChunks) {
   bool found_dropped = false;
   for (int attempt = 0; attempt < 50 && !found_dropped; ++attempt) {
     auto metrics = shuffling_chunk_pool.FlushMetrics();
-    if (!metrics.has_dropped() || metrics.dropped() == 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      continue;
+    for (const auto& metric : metrics.count_metrics()) {
+      if (metric.name() == "dropped" && metric.count() > 0) {
+        dropped_latest = metric.count();
+        found_dropped = true;
+        break;
+      }
     }
-    dropped_latest = metrics.dropped();
-    found_dropped = true;
+    if (!found_dropped) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
   ASSERT_TRUE(found_dropped) << "dropped chunk metrics should be reported";
   EXPECT_GE(dropped_latest, 1u);

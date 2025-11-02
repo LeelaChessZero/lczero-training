@@ -41,6 +41,12 @@ message QueueMetricProto {
 message CountMetricProto {
   optional string name = 1;
   optional uint64 count = 2 [default = 0];
+}
+
+// Gauge metric for values that represent current state.
+message GaugeMetricProto {
+  optional string name = 1;
+  optional uint64 value = 2 [default = 0];
   optional uint64 capacity = 3;
 }
 
@@ -50,11 +56,9 @@ message StageMetricProto {
   repeated LoadMetricProto load_metrics = 3;
   repeated QueueMetricProto queue_metrics = 4;
   repeated CountMetricProto count_metrics = 5;
-  optional uint64 dropped = 6 [default = 0];
-  optional uint64 skipped_files_count = 7 [default = 0];
+  repeated GaugeMetricProto gauge_metrics = 11;
   optional string last_chunk_key = 8;
   optional string anchor = 9;
-  optional uint64 chunks_since_anchor = 10 [default = 0];
 }
 
 message DataLoaderMetricsProto {

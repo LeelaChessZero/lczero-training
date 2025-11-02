@@ -715,9 +715,9 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
   // Get chunk sources statistics and pool state.
   {
     absl::MutexLock lock(&chunk_sources_mutex_);
-    auto* chunk_sources_metric = stage_metric.add_count_metrics();
+    auto* chunk_sources_metric = stage_metric.add_gauge_metrics();
     chunk_sources_metric->set_name("chunk_sources");
-    chunk_sources_metric->set_count(
+    chunk_sources_metric->set_value(
         static_cast<uint64_t>(chunk_sources_.size()));
 
     size_t upper = 0;
@@ -729,25 +729,29 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
       current = upper - first.start_chunk_index;
     }
 
-    auto* current_chunks_metric = stage_metric.add_count_metrics();
+    auto* current_chunks_metric = stage_metric.add_gauge_metrics();
     current_chunks_metric->set_name("chunks_current");
-    current_chunks_metric->set_count(static_cast<uint64_t>(current));
+    current_chunks_metric->set_value(static_cast<uint64_t>(current));
     current_chunks_metric->set_capacity(
         static_cast<uint64_t>(chunk_pool_size_));
 
-    auto* total_chunks_metric = stage_metric.add_count_metrics();
+    auto* total_chunks_metric = stage_metric.add_gauge_metrics();
     total_chunks_metric->set_name("chunks_total");
-    total_chunks_metric->set_count(static_cast<uint64_t>(upper));
+    total_chunks_metric->set_value(static_cast<uint64_t>(upper));
   }
 
   // Get anchor-related metrics.
   {
     absl::MutexLock lock(&anchor_mutex_);
-    stage_metric.set_chunks_since_anchor(chunks_since_anchor_);
+    auto* chunks_since_anchor_metric = stage_metric.add_gauge_metrics();
+    chunks_since_anchor_metric->set_name("chunks_since_anchor");
+    chunks_since_anchor_metric->set_value(chunks_since_anchor_);
     stage_metric.set_anchor(anchor_);
   }
 
-  stage_metric.set_dropped(
+  auto* dropped_metric = stage_metric.add_count_metrics();
+  dropped_metric->set_name("dropped");
+  dropped_metric->set_count(
       dropped_chunks_metric_.exchange(0, std::memory_order_acq_rel));
 
   // Hanse sampling and shuffler metrics.
@@ -808,9 +812,9 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     not_found->set_count(
         chunk_source_not_found_.exchange(0, std::memory_order_acq_rel));
 
-    auto* cached = stage_metric.add_count_metrics();
+    auto* cached = stage_metric.add_gauge_metrics();
     cached->set_name("cached_positions");
-    cached->set_count(cached_positions_.load(std::memory_order_acquire));
+    cached->set_value(cached_positions_.load(std::memory_order_acquire));
     cached->set_capacity(config_.position_cache_size());
   }
 

@@ -15,6 +15,7 @@ namespace training {
 
 void UpdateFrom(QueueMetricProto& dest, const QueueMetricProto& src);
 void UpdateFrom(CountMetricProto& dest, const CountMetricProto& src);
+void UpdateFrom(GaugeMetricProto& dest, const GaugeMetricProto& src);
 void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src);
 void UpdateFrom(DataLoaderMetricsProto& dest,
                 const DataLoaderMetricsProto& src);
