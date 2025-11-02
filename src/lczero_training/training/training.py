@@ -64,7 +64,7 @@ class Training:
         self._swa_config = swa_config
         self._dp_sharding = None
 
-        jit_kwargs: Dict[str, object] = {"static_argnames": ("optimizer_tx",)}
+        jit_kwargs: Dict[str, Any] = {"static_argnames": ("optimizer_tx",)}
         if jax.device_count() > 1:
             num_devices = jax.device_count()
             logger.info(
@@ -87,7 +87,7 @@ class Training:
             jit_kwargs["in_shardings"] = in_shardings
             jit_kwargs["out_shardings"] = out_shardings
 
-        @partial(nnx.jit, **jit_kwargs)
+        @partial(jax.jit, **jit_kwargs)
         def _step(
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
