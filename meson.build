@@ -124,6 +124,7 @@ files = [
   'csrc/loader/stages/chunk_unpacker.cc',
   'csrc/loader/stages/file_path_provider.cc',
   'csrc/loader/stages/join_stage.cc',
+  'csrc/loader/stages/position_sampling.cc',
   'csrc/loader/stages/shuffling_chunk_pool.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
   'csrc/loader/stages/simple_chunk_extractor.cc',
@@ -369,6 +370,14 @@ startpos_policy_distribution = executable(
 rescore_chunk = executable(
   'rescore_chunk',
   'csrc/tools/rescore_chunk_main.cc',
+  include_directories : includes,
+  dependencies : cli_deps + [proto_dep],
+  link_with : loader_lib,
+)
+
+position_weight_stats = executable(
+  'position_weight_stats',
+  'csrc/tools/position_weight_stats_main.cc',
   include_directories : includes,
   dependencies : cli_deps + [proto_dep],
   link_with : loader_lib,

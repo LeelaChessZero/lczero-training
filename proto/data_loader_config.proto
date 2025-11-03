@@ -39,6 +39,15 @@ message ChunkSourceLoaderConfig {
   optional QueueConfig output = 2;
 }
 
+message PositionSamplingConfig {
+  optional float diff_focus_q_weight = 1 [default = 0.0];
+  optional float diff_focus_pol_scale = 2 [default = 1.0];
+  optional float diff_focus_alpha = 3 [default = 1.0];
+  optional float diff_focus_beta = 4 [default = 0.0];
+  optional float diff_focus_gamma = 5 [default = 1.0];
+  optional float diff_focus_cap = 6 [default = 1000000.0];
+}
+
 // Configuration for shuffling chunk pool that manages chunk shuffling and
 // loading. Maps to ShufflingChunkPoolOptions in
 // csrc/loader/chunk_feed/shuffling_chunk_pool.h
@@ -57,6 +66,7 @@ message ShufflingChunkPoolConfig {
   // where num_records is the number of frames in the chunk.
   optional uint64 hanse_sampling_threshold = 6;  // by default, disabled.
   optional double hanse_sampling_gamma = 7 [default = 1.0];
+  optional PositionSamplingConfig position_sampling = 11;
   // Optional output queue for cache hit frames.
   optional QueueConfig cachehit_output = 8;
   // Size of the position cache per chunk.
