@@ -65,9 +65,9 @@ class ShufflingChunkPool : public Stage {
     size_t start_chunk_index;
     std::unique_ptr<ChunkSource> source;
     absl::flat_hash_set<size_t> dropped_chunks;
-    // Per-chunk counters and cached record counts.
+    // Per-chunk counters and cached weights.
     std::vector<uint16_t> use_counts;
-    std::vector<uint16_t> num_records;
+    std::vector<float> weight;
     std::vector<std::unique_ptr<CacheNode>> cache;
   };
 
@@ -105,7 +105,8 @@ class ShufflingChunkPool : public Stage {
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
   bool HanseAccept(ChunkData& chunk_data)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  double ComputeHanseProbability(uint16_t num_records);
+  float ComputeChunkWeight(absl::Span<const FrameType> frames);
+  double ComputeHanseProbability(float weight);
 
   Queue<ChunkSourceWithPhase>* primary_input_queue_ = nullptr;
   Queue<CacheRequest>* cache_request_queue_ = nullptr;
@@ -128,6 +129,7 @@ class ShufflingChunkPool : public Stage {
   std::deque<ChunkSourceItem> chunk_sources_
       ABSL_GUARDED_BY(chunk_sources_mutex_);
   StreamShuffler stream_shuffler_ ABSL_GUARDED_BY(chunk_sources_mutex_);
+  float max_weight_ ABSL_GUARDED_BY(chunk_sources_mutex_) = 0.0f;
   std::jthread initialization_thread_;
   std::vector<std::unique_ptr<SourceIngestionThreadContext>>
       source_ingestion_thread_contexts_;

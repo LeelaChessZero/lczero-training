@@ -20,6 +20,7 @@
 #include "loader/chunk_source/chunk_source.h"
 #include "loader/data_loader_metrics.h"
 #include "loader/stages/chunk_source_loader.h"
+#include "loader/stages/position_sampling.h"
 #include "proto/data_loader_config.pb.h"
 #include "utils/thread_pool.h"
 
@@ -269,7 +270,7 @@ void ShufflingChunkPool::ProcessInputFiles(
                          .source = std::move(source),
                          .dropped_chunks = {},
                          .use_counts = std::vector<uint16_t>(count, 0),
-                         .num_records = std::vector<uint16_t>(count, 0),
+                         .weight = std::vector<float>(count, -1.0f),
                          .cache = std::vector<std::unique_ptr<CacheNode>>(
                              cachehit_output_queue_.has_value() ? count : 0)});
                     start_chunk_index +=
@@ -428,8 +429,9 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
       }
 
       // Compute how many positions to cache.
-      const uint16_t num_records = it->num_records[local_index];
-      const double probability = ComputeHanseProbability(num_records);
+      const float weight = it->weight[local_index];
+      assert(weight >= 0.0f);
+      const double probability = ComputeHanseProbability(weight);
       exponential_avg_probability =
           exponential_avg_probability * (1.0 - kTheta) + probability * kTheta;
       const double n = (probability * config_.position_cache_size() /
@@ -595,32 +597,39 @@ ShufflingChunkPool::ChunkStatus ShufflingChunkPool::GetChunkInfo(
   return ChunkStatus::kOk;
 }
 
-double ShufflingChunkPool::ComputeHanseProbability(uint16_t num_records) {
-  const double threshold =
-      static_cast<double>(config_.hanse_sampling_threshold());
-  const double gamma = config_.hanse_sampling_gamma();
-  const double frames = static_cast<double>(num_records);
-  return std::pow(std::min(1.0, frames / threshold), gamma);
+double ShufflingChunkPool::ComputeHanseProbability(float weight) {
+  if (max_weight_ <= 0.0f) return 1.0;
+  return std::pow(weight / max_weight_, config_.hanse_sampling_gamma());
+}
+
+float ShufflingChunkPool::ComputeChunkWeight(
+    absl::Span<const FrameType> frames) {
+  return absl::c_accumulate(frames, 0.0f, [this](float sum, const auto& frame) {
+    return sum +
+           ComputePositionSamplingWeight(frame, config_.position_sampling());
+  });
 }
 
 bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
   assert(chunk_data.source_item);
-  assert(chunk_data.source_item->num_records.size() > chunk_data.local_index);
+  assert(chunk_data.source_item->weight.size() > chunk_data.local_index);
 
-  // Ensure we know the number of records for this chunk.
-  if (chunk_data.source_item->num_records[chunk_data.local_index] == 0) {
+  if (chunk_data.source_item->weight[chunk_data.local_index] < 0.0f) {
     hanse_cache_misses_.fetch_add(1, std::memory_order_acq_rel);
     if (!LoadChunkData(chunk_data)) return false;
-    const size_t frames_count = chunk_data.data.size() / sizeof(FrameType);
-    const uint16_t cached = static_cast<uint16_t>(
-        std::min<size_t>(frames_count, std::numeric_limits<uint16_t>::max()));
-    chunk_data.source_item->num_records[chunk_data.local_index] = cached;
+    const auto* frames =
+        reinterpret_cast<const FrameType*>(chunk_data.data.data());
+    const size_t frame_count = chunk_data.data.size() / sizeof(FrameType);
+    const float weight =
+        ComputeChunkWeight(absl::MakeConstSpan(frames, frame_count));
+    chunk_data.source_item->weight[chunk_data.local_index] = weight;
+    max_weight_ = std::max(max_weight_, weight);
   } else {
     hanse_cache_hits_.fetch_add(1, std::memory_order_acq_rel);
   }
 
   const double p = ComputeHanseProbability(
-      chunk_data.source_item->num_records[chunk_data.local_index]);
+      chunk_data.source_item->weight[chunk_data.local_index]);
   const double u = absl::Uniform<double>(bitgen_, 0.0, 1.0);
   if (u >= p) {
     hanse_rejected_.fetch_add(1, std::memory_order_acq_rel);
@@ -645,7 +654,7 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
        .source = std::move(source),
        .dropped_chunks = {},
        .use_counts = std::vector<uint16_t>(count, 0),
-       .num_records = std::vector<uint16_t>(count, 0),
+       .weight = std::vector<float>(count, -1.0f),
        .cache = std::vector<std::unique_ptr<CacheNode>>(
            cachehit_output_queue_.has_value() ? count : 0)});
 
