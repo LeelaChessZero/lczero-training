@@ -44,7 +44,13 @@ def update_optimizer_step(
     step_array = jnp.array(step, dtype=jnp.int32)
 
     def update_count(x: optax.OptState) -> optax.OptState:
-        if isinstance(x, optax.ScaleByAdamState):
+        if isinstance(
+            x,
+            (
+                optax.ScaleByAdamState,
+                optax.ScaleByScheduleState,
+            ),
+        ):
             return x._replace(count=step_array)
         return x
 
