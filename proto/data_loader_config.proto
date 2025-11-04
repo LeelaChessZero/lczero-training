@@ -114,6 +114,8 @@ message ChunkUnpackerConfig {
   optional uint32 prefetch_count = 5;
   // Optional output queue for prefetch cache requests.
   optional QueueConfig prefetch_output = 6;
+
+  optional PositionSamplingConfig position_sampling = 7;
 }
 
 // Configuration for shuffling frame sampler using reservoir sampling.

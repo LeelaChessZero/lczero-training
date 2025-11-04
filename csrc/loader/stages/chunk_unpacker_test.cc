@@ -265,40 +265,5 @@ TEST(PickSampledPositionsTest, PartialBucketCompletedSize) {
   EXPECT_NEAR(result.size(), n * p, n * p * 0.25);
 }
 
-TEST(PickFixedPositionCountTest, Deterministic) {
-  absl::BitGen gen1(absl::SeedSeq{123});
-  std::vector<uint32_t> result1 = PickFixedPositionCount(100, 10, gen1, 4);
-
-  absl::BitGen gen2(absl::SeedSeq{123});
-  std::vector<uint32_t> result2 = PickFixedPositionCount(100, 10, gen2, 4);
-
-  EXPECT_EQ(result1, result2);
-}
-
-TEST(PickFixedPositionCountTest, ProvidesDisjointBlocks) {
-  absl::BitGen gen1(absl::SeedSeq{321});
-  std::vector<uint32_t> block1 = PickFixedPositionCount(90, 9, gen1, 0);
-  absl::c_sort(block1);
-
-  absl::BitGen gen2(absl::SeedSeq{321});
-  std::vector<uint32_t> block2 = PickFixedPositionCount(90, 9, gen2, 1);
-  absl::c_sort(block2);
-
-  std::vector<uint32_t> intersection;
-  absl::c_set_intersection(block1, block2, std::back_inserter(intersection));
-
-  EXPECT_TRUE(intersection.empty());
-  EXPECT_EQ(block1.size(), 9);
-  EXPECT_EQ(block2.size(), 9);
-}
-
-TEST(PickFixedPositionCountTest, HandlesLargeK) {
-  absl::BitGen gen(absl::SeedSeq{42});
-  std::vector<uint32_t> result = PickFixedPositionCount(5, 10, gen, 0);
-
-  absl::c_sort(result);
-  EXPECT_EQ(result, (std::vector<uint32_t>{0, 1, 2, 3, 4}));
-}
-
 }  // namespace training
 }  // namespace lczero

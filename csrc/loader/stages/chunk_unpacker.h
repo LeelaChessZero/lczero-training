@@ -63,9 +63,5 @@ std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
                                            int32_t iteration,
                                            absl::BitGen& gen);
 
-std::vector<uint32_t> PickFixedPositionCount(uint32_t n, uint32_t k,
-                                             absl::BitGen& gen,
-                                             uint32_t iteration);
-
 }  // namespace training
 }  // namespace lczero

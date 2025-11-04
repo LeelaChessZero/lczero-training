@@ -125,6 +125,7 @@ files = [
   'csrc/loader/stages/file_path_provider.cc',
   'csrc/loader/stages/join_stage.cc',
   'csrc/loader/stages/position_sampling.cc',
+  'csrc/loader/stages/position_sampling.cc',
   'csrc/loader/stages/shuffling_chunk_pool.cc',
   'csrc/loader/stages/shuffling_frame_sampler.cc',
   'csrc/loader/stages/simple_chunk_extractor.cc',

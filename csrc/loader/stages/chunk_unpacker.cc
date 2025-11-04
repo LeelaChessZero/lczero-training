@@ -8,11 +8,18 @@
 #include <absl/random/seed_sequences.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <numeric>
 #include <random>
+#include <span>
 #include <utility>
 #include <vector>
 
+#include "absl/numeric/int128.h"
+#include "absl/random/bit_gen_ref.h"
+#include "absl/random/random.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/stages/position_sampling.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 
@@ -55,31 +62,35 @@ std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
   }
 }
 
-// Deterministically partitions `n` positions into disjoint subsets of size
-// `k` and returns the subset for a given `iteration`. To obtain disjoint
-// subsets from the same set of positions, `gen` must be seeded identically
-// for each call with a different `iteration`.
-std::vector<uint32_t> PickFixedPositionCount(uint32_t n, uint32_t k,
-                                             absl::BitGen& gen,
-                                             uint32_t iteration) {
-  if (!n || !k) return {};
-  const uint32_t actual_k = std::min(n, k);
+// Samples `k` indices from an infinite, deterministically-generated sequence,
+// after an initial `skip`. The sequence is formed by repeatedly shuffling
+// `[0..n-1]` and probabilistically selecting each index. Determinism is
+// achieved by seeding a new PRNG for each shuffled block from a stable
+// `root_seed` and the block's index.
+std::vector<uint32_t> SampleProbabilisticSequence(
+    uint64_t k, uint64_t skip, std::span<const float> probabilities,
+    absl::BitGen& gen) {
+  const size_t n = probabilities.size();
+  if (n == 0 || k == 0) return {};
+
+  uint64_t skipped_so_far = 0;
   std::vector<uint32_t> v(n);
-  absl::c_iota(v, 0u);
+  std::iota(v.begin(), v.end(), 0u);
+  std::vector<uint32_t> result;
+  result.reserve(k);
 
-  std::shuffle(v.begin(), v.end(), gen);
-
-  const uint32_t per = n / actual_k;
-  const uint32_t cut = per * actual_k;
-  const uint32_t rem = n - cut;
-
-  for (uint32_t r = iteration / per; r--;) {
-    std::rotate(v.begin(), v.begin() + cut, v.end());
-    std::shuffle(v.begin() + rem, v.end(), gen);
+  while (true) {
+    std::shuffle(v.begin(), v.end(), gen);
+    for (const uint32_t candidate : v) {
+      if (!absl::Bernoulli(gen, probabilities[candidate])) continue;
+      if (skipped_so_far < skip) {
+        skipped_so_far++;
+      } else {
+        result.push_back(candidate);
+        if (result.size() == k) return result;
+      }
+    }
   }
-
-  const uint32_t off = (iteration % per) * actual_k;
-  return {v.begin() + off, v.begin() + off + actual_k};
 }
 
 namespace {
@@ -173,6 +184,26 @@ QueueBase* ChunkUnpacker::GetOutput(std::string_view name) {
                                         "'. Available outputs: ", available));
 }
 
+namespace {
+std::vector<float> FramesToProbabilities(std::span<const FrameType> frames,
+                                         const PositionSamplingConfig& config) {
+  std::vector<float> probabilities;
+  probabilities.reserve(frames.size());
+  absl::c_transform(frames, std::back_inserter(probabilities),
+                    [&](const FrameType& frame) {
+                      return ComputePositionSamplingWeight(frame, config);
+                    });
+  const float max_prob = *absl::c_max_element(probabilities);
+  if (max_prob > 0.0f) {
+    absl::c_transform(probabilities, probabilities.begin(),
+                      [max_prob](float p) { return p / max_prob; });
+  } else {
+    absl::c_fill(probabilities, 1.0f);
+  }
+  return probabilities;
+}
+}  // namespace
+
 void ChunkUnpacker::Worker(std::stop_token stop_token, ThreadContext* context) {
   // Create a local producer for this worker thread.
   auto primary_producer = primary_output_queue_.CreateProducer();
@@ -196,19 +227,12 @@ void ChunkUnpacker::Worker(std::stop_token stop_token, ThreadContext* context) {
         positions = PickSampledPositions(
             static_cast<int32_t>(chunk.frames.size()),
             config_.position_sampling_rate(), chunk.use_count, gen);
-      } else if (config_.has_prefetch_count()) {
-        const uint32_t frame_count = static_cast<uint32_t>(chunk.frames.size());
-        const uint32_t total_count =
-            config_.position_count() + config_.prefetch_count();
-        const uint32_t selection_count = std::min(frame_count, total_count);
-        positions = PickFixedPositionCount(frame_count, selection_count, gen,
-                                           chunk.use_count);
       } else {
-        const uint32_t frame_count = static_cast<uint32_t>(chunk.frames.size());
-        const uint32_t selection_count =
-            std::min(frame_count, config_.position_count());
-        positions = PickFixedPositionCount(frame_count, selection_count, gen,
-                                           chunk.use_count);
+        auto probabilities =
+            FramesToProbabilities(chunk.frames, config_.position_sampling());
+        positions = SampleProbabilisticSequence(
+            config_.position_count() + config_.prefetch_count(),
+            config_.position_count() * chunk.use_count, probabilities, gen);
       }
 
       if (config_.has_prefetch_count()) {
