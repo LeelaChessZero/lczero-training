@@ -624,6 +624,7 @@ bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
         ComputeChunkWeight(absl::MakeConstSpan(frames, frame_count));
     chunk_data.source_item->weight[chunk_data.local_index] = weight;
     max_weight_ = std::max(max_weight_, weight);
+    AddSample(chunk_weight_stats_, static_cast<double>(weight));
   } else {
     hanse_cache_hits_.fetch_add(1, std::memory_order_acq_rel);
   }
@@ -818,6 +819,13 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     cached->set_name("cached_positions");
     cached->set_value(cached_positions_.load(std::memory_order_acquire));
     cached->set_capacity(config_.position_cache_size());
+  }
+
+  {
+    absl::MutexLock lock(&chunk_sources_mutex_);
+    chunk_weight_stats_.set_name("chunk_weight");
+    UpdateFrom(*stage_metric.add_statistics_metrics(), chunk_weight_stats_);
+    chunk_weight_stats_.Clear();
   }
 
   *stage_metric.add_queue_metrics() =

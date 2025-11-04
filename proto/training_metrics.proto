@@ -21,11 +21,12 @@ message StatisticsProtoInt64 {
 
 // Statistics metric for double values.
 message StatisticsProtoDouble {
-  optional double min = 1 [default = 1.7976931348623157e+308];
-  optional double max = 2 [default = -1.7976931348623157e+308];
-  optional double sum = 3 [default = 0.0];
-  optional int64 count = 4 [default = 0];
-  optional double latest = 5 [default = 0.0];
+  optional string name = 1;
+  optional double min = 2 [default = 1.7976931348623157e+308];
+  optional double max = 3 [default = -1.7976931348623157e+308];
+  optional double sum = 4 [default = 0.0];
+  optional int64 count = 5 [default = 0];
+  optional double latest = 6 [default = 0.0];
 }
 
 // Metrics for queue performance monitoring.
@@ -57,6 +58,7 @@ message StageMetricProto {
   repeated QueueMetricProto queue_metrics = 4;
   repeated CountMetricProto count_metrics = 5;
   repeated GaugeMetricProto gauge_metrics = 11;
+  repeated StatisticsProtoDouble statistics_metrics = 12;
   optional string last_chunk_key = 8;
   optional string anchor = 9;
 }

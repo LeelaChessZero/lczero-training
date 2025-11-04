@@ -41,6 +41,7 @@ inline void UpdateFrom(StatisticsProtoDouble& dest,
                        const StatisticsProtoDouble& src) {
   if (src.count() == 0) return;  // Nothing to merge from empty source
 
+  if (src.has_name()) dest.set_name(src.name());
   dest.set_min(std::min(dest.min(), src.min()));
   dest.set_max(std::max(dest.max(), src.max()));
   dest.set_sum(dest.sum() + src.sum());

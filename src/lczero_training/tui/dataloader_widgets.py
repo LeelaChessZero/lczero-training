@@ -81,6 +81,18 @@ def _find_gauge_metric(
     return None
 
 
+def _find_statistics_metric(
+    stage_metric: training_metrics_pb2.StageMetricProto | None,
+    metric_name: str,
+) -> training_metrics_pb2.StatisticsProtoDouble | None:
+    if not stage_metric:
+        return None
+    for stats_metric in stage_metric.statistics_metrics:
+        if (stats_metric.name or "") == metric_name:
+            return stats_metric
+    return None
+
+
 def _get_queue_metric(
     stage_metric: training_metrics_pb2.StageMetricProto | None,
     queue_name: str | None,
@@ -167,6 +179,27 @@ def _format_gauge(
         capacity_text = format_full_number(gauge_metric.capacity)
         return f"{label} {value_text}/{capacity_text}"
     return f"{label} {format_full_number(gauge_metric.value)}"
+
+
+def _format_statistics(
+    stats_1s: training_metrics_pb2.StatisticsProtoDouble | None,
+    stats_total: training_metrics_pb2.StatisticsProtoDouble | None,
+    label: str,
+) -> str:
+    parts = [label]
+    if stats_1s and stats_1s.count > 0:
+        avg_1s = stats_1s.sum / stats_1s.count
+        parts.append(
+            f"per 1s: avg {avg_1s:.1f} (min {stats_1s.min:.1f}, max {stats_1s.max:.1f}, count {format_si(stats_1s.count)})"
+        )
+    if stats_total and stats_total.count > 0:
+        avg_total = stats_total.sum / stats_total.count
+        parts.append(
+            f"total: avg {avg_total:.1f} (min {stats_total.min:.1f}, max {stats_total.max:.1f}, count {format_full_number(stats_total.count)})"
+        )
+    if len(parts) == 1:
+        return f"{label} --"
+    return "; ".join(parts)
 
 
 def _average_queue_fullness(
@@ -366,6 +399,56 @@ class StageWidget(BaseRowWidget):
 
         self._update_last_chunk_chip(stage_metric_1s, stage_metric_total)
         self._update_anchor_chip(stage_metric_total)
+
+
+class StatisticsRowWidget(BaseRowWidget):
+    """Full-width row for statistics metrics."""
+
+    def __init__(
+        self,
+        stage_key: str,
+        metric_name: str,
+        label: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            stage_key=stage_key,
+            fallback_name=None,
+            row_type="statistics-row",
+            **kwargs,
+        )
+        self._metric_name = metric_name
+        self._label = label
+        self._stats_label = Static(f"{label} --", classes="statistics-full")
+        self.add_content_widget(self._stats_label)
+
+    def compose(self) -> ComposeResult:
+        return
+        yield
+
+    def on_mount(self) -> None:
+        if self._content_widgets:
+
+            async def _mount_initial() -> None:
+                await self.mount(*self._content_widgets)
+
+            self.call_later(_mount_initial)
+
+    def update_metrics(
+        self,
+        dataloader_1_second: training_metrics_pb2.DataLoaderMetricsProto | None,
+        dataloader_total: training_metrics_pb2.DataLoaderMetricsProto | None,
+    ) -> None:
+        if not self.stage_key:
+            self._stats_label.update(f"{self._label} --")
+            return
+        stage_1s = _find_stage_metric(dataloader_1_second, self.stage_key)
+        stage_total = _find_stage_metric(dataloader_total, self.stage_key)
+        stats_1s = _find_statistics_metric(stage_1s, self._metric_name)
+        stats_total = _find_statistics_metric(stage_total, self._metric_name)
+        self._stats_label.update(
+            _format_statistics(stats_1s, stats_total, self._label)
+        )
 
 
 class QueueWidget(BaseRowWidget):

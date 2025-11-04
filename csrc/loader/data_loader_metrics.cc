@@ -89,6 +89,18 @@ void UpdateFrom(StageMetricProto& dest, const StageMetricProto& src) {
     UpdateFrom(*dest_gauge, gauge_metrics);
   }
 
+  for (const auto& statistics_metrics : src.statistics_metrics()) {
+    StatisticsProtoDouble* dest_stats =
+        statistics_metrics.has_name()
+            ? FindByName(dest.mutable_statistics_metrics(),
+                         statistics_metrics.name())
+            : nullptr;
+    if (dest_stats == nullptr) {
+      dest_stats = dest.add_statistics_metrics();
+    }
+    UpdateFrom(*dest_stats, statistics_metrics);
+  }
+
   if (src.has_last_chunk_key()) dest.set_last_chunk_key(src.last_chunk_key());
   if (src.has_anchor()) dest.set_anchor(src.anchor());
 }

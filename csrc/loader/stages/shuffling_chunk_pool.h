@@ -157,6 +157,9 @@ class ShufflingChunkPool : public Stage {
   std::atomic<uint64_t> dropped_cache_positions_{0};
   std::atomic<uint64_t> chunk_source_not_found_{0};
   std::atomic<uint64_t> cached_positions_{0};
+
+  StatisticsProtoDouble chunk_weight_stats_
+      ABSL_GUARDED_BY(chunk_sources_mutex_);
 };
 
 }  // namespace training
