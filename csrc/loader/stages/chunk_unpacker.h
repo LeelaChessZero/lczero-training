@@ -49,13 +49,9 @@ class ChunkUnpacker
 
   void Worker(std::stop_token stop_token, ThreadContext* context);
 
-  const absl::optional<float> position_sampling_rate_;
-  const absl::optional<uint32_t> position_count_;
-  const absl::optional<uint32_t> prefetch_count_;
+  const ChunkUnpackerConfig config_;
   const uint32_t run_seed_;
-  std::string primary_output_name_;
   Queue<FrameType> primary_output_queue_;
-  std::optional<std::string> prefetch_output_name_;
   std::optional<Queue<CacheRequest>> prefetch_output_queue_;
   // thread_contexts_ must be declared before thread_pool_ to ensure
   // thread_pool_ is destroyed first (stopping threads before contexts).

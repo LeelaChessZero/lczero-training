@@ -93,18 +93,8 @@ uint32_t GenerateRunSeed() {
 
 ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config)
     : SingleInputStage<ChunkUnpackerConfig, InputType>(config),
-      position_sampling_rate_(
-          config.has_position_sampling_rate()
-              ? absl::make_optional(config.position_sampling_rate())
-              : absl::nullopt),
-      position_count_(config.has_position_count()
-                          ? absl::make_optional(config.position_count())
-                          : absl::nullopt),
-      prefetch_count_(config.has_prefetch_count()
-                          ? absl::make_optional(config.prefetch_count())
-                          : absl::nullopt),
+      config_(config),
       run_seed_(GenerateRunSeed()),
-      primary_output_name_(config.output().name()),
       primary_output_queue_(
           config.output().queue_capacity(),
           ToOverflowBehavior(config.output().overflow_behavior())),
@@ -121,17 +111,16 @@ ChunkUnpacker::ChunkUnpacker(const ChunkUnpackerConfig& config)
     CHECK(has_count) << "position_count must be set when using prefetch mode.";
     CHECK(!has_rate)
         << "position_sampling_rate cannot be used in prefetch mode.";
-    CHECK(*position_count_ == 1)
+    CHECK(config.position_count() == 1)
         << "position_count must equal 1 in prefetch mode, got "
-        << *position_count_;
-    prefetch_output_name_ = config.prefetch_output().name();
+        << config.position_count();
     prefetch_output_queue_.emplace(
         config.prefetch_output().queue_capacity(),
         ToOverflowBehavior(config.prefetch_output().overflow_behavior()));
-    if (primary_output_name_ == *prefetch_output_name_) {
+    if (config.output().name() == config.prefetch_output().name()) {
       throw std::runtime_error(
           absl::StrCat("ChunkUnpacker output names must be different, got: '",
-                       primary_output_name_, "'"));
+                       config.output().name(), "'"));
     }
   } else {
     CHECK(has_rate != has_count)
@@ -171,13 +160,14 @@ void ChunkUnpacker::Stop() {
 }
 
 QueueBase* ChunkUnpacker::GetOutput(std::string_view name) {
-  if (name == primary_output_name_) return &primary_output_queue_;
-  if (prefetch_output_name_.has_value() && name == *prefetch_output_name_) {
+  if (name == config_.output().name()) return &primary_output_queue_;
+  if (config_.has_prefetch_output() &&
+      name == config_.prefetch_output().name()) {
     return &*prefetch_output_queue_;
   }
-  std::string available = absl::StrCat("'", primary_output_name_, "'");
-  if (prefetch_output_name_.has_value()) {
-    absl::StrAppend(&available, ", '", *prefetch_output_name_, "'");
+  std::string available = absl::StrCat("'", config_.output().name(), "'");
+  if (config_.has_prefetch_output()) {
+    absl::StrAppend(&available, ", '", config_.prefetch_output().name(), "'");
   }
   throw std::runtime_error(absl::StrCat("ChunkUnpacker unknown output '", name,
                                         "'. Available outputs: ", available));
@@ -202,25 +192,26 @@ void ChunkUnpacker::Worker(std::stop_token stop_token, ThreadContext* context) {
       absl::BitGen gen(
           std::seed_seq{run_seed_, static_cast<uint32_t>(chunk.global_index)});
       std::vector<uint32_t> positions;
-      if (position_sampling_rate_) {
+      if (config_.has_position_sampling_rate()) {
         positions = PickSampledPositions(
-            static_cast<int32_t>(chunk.frames.size()), *position_sampling_rate_,
-            chunk.use_count, gen);
-      } else if (prefetch_count_) {
+            static_cast<int32_t>(chunk.frames.size()),
+            config_.position_sampling_rate(), chunk.use_count, gen);
+      } else if (config_.has_prefetch_count()) {
         const uint32_t frame_count = static_cast<uint32_t>(chunk.frames.size());
-        const uint32_t total_count = *position_count_ + *prefetch_count_;
+        const uint32_t total_count =
+            config_.position_count() + config_.prefetch_count();
         const uint32_t selection_count = std::min(frame_count, total_count);
         positions = PickFixedPositionCount(frame_count, selection_count, gen,
                                            chunk.use_count);
       } else {
         const uint32_t frame_count = static_cast<uint32_t>(chunk.frames.size());
         const uint32_t selection_count =
-            std::min(frame_count, *position_count_);
+            std::min(frame_count, config_.position_count());
         positions = PickFixedPositionCount(frame_count, selection_count, gen,
                                            chunk.use_count);
       }
 
-      if (prefetch_count_) {
+      if (config_.has_prefetch_count()) {
         // Prefetch mode: output first position to primary, rest to prefetch.
         if (!positions.empty()) {
           LoadMetricPauser pauser(context->load_metric_updater);
@@ -262,10 +253,10 @@ StageMetricProto ChunkUnpacker::FlushMetrics() {
   }
   *stage_metric.add_load_metrics() = std::move(aggregated_load);
   *stage_metric.add_queue_metrics() =
-      MetricsFromQueue(primary_output_name_, primary_output_queue_);
+      MetricsFromQueue(config_.output().name(), primary_output_queue_);
   if (prefetch_output_queue_.has_value()) {
-    *stage_metric.add_queue_metrics() =
-        MetricsFromQueue(*prefetch_output_name_, *prefetch_output_queue_);
+    *stage_metric.add_queue_metrics() = MetricsFromQueue(
+        config_.prefetch_output().name(), *prefetch_output_queue_);
   }
   return stage_metric;
 }
