@@ -18,7 +18,7 @@ float ComputePositionSamplingWeight(const FrameType& frame,
   return std::min(
       std::pow(total * config.diff_focus_alpha() + config.diff_focus_beta(),
                config.diff_focus_gamma()),
-      config.diff_focus_cap());
+      config.diff_focus_tau());
 }
 
 }  // namespace training
