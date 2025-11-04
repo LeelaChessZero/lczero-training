@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -20,6 +22,7 @@
 #include "loader/stages/position_sampling.h"
 #include "proto/data_loader_config.pb.h"
 #include "trainingdata/trainingdata_v6.h"
+#include "utils/training_data_printer.h"
 
 ABSL_FLAG(std::string, input_dir, "", "Directory to scan for .tar files.");
 ABSL_FLAG(float, q_weight, 6.0, "Value for diff_focus_q_weight.");
@@ -33,7 +36,13 @@ using ::lczero::V6TrainingData;
 using ::lczero::training::ChunkSource;
 using ::lczero::training::ComputePositionSamplingWeight;
 using ::lczero::training::PositionSamplingConfig;
+using ::lczero::training::PrintTrainingDataEntry;
 using ::lczero::training::TarChunkSource;
+
+struct WeightedPosition {
+  V6TrainingData data;
+  float weight;
+};
 
 std::vector<fs::path> CollectTarFiles(const fs::path& directory) {
   std::vector<fs::path> files;
@@ -50,7 +59,8 @@ std::vector<fs::path> CollectTarFiles(const fs::path& directory) {
 }
 
 std::vector<float> CollectWeights(const fs::path& tar_path,
-                                  const PositionSamplingConfig& config) {
+                                  const PositionSamplingConfig& config,
+                                  WeightedPosition* max_weighted) {
   std::vector<float> weights;
   std::unique_ptr<ChunkSource> source =
       std::make_unique<TarChunkSource>(tar_path);
@@ -75,7 +85,12 @@ std::vector<float> CollectWeights(const fs::path& tar_path,
     for (size_t frame = 0; frame < frame_count; ++frame) {
       const auto* entry = reinterpret_cast<const V6TrainingData*>(
           chunk->data() + frame * sizeof(V6TrainingData));
-      weights.push_back(ComputePositionSamplingWeight(*entry, config));
+      const float weight = ComputePositionSamplingWeight(*entry, config);
+      weights.push_back(weight);
+      if (max_weighted && weight > max_weighted->weight) {
+        max_weighted->data = *entry;
+        max_weighted->weight = weight;
+      }
     }
   }
 
@@ -173,10 +188,12 @@ int main(int argc, char** argv) {
   const std::vector<fs::path> tar_files = CollectTarFiles(input_dir);
   LOG(INFO) << "Found " << tar_files.size() << " tar file(s).";
 
+  WeightedPosition max_weighted = {{}, 0.0f};
   std::vector<float> all_weights;
   for (const auto& tar_path : tar_files) {
     LOG(INFO) << "Processing: " << tar_path.string();
-    std::vector<float> weights = CollectWeights(tar_path, config);
+    std::vector<float> weights =
+        CollectWeights(tar_path, config, &max_weighted);
     all_weights.insert(all_weights.end(), weights.begin(), weights.end());
     LOG(INFO) << "  Collected " << weights.size() << " position(s).";
   }
@@ -186,6 +203,12 @@ int main(int argc, char** argv) {
   PrintStatistics(all_weights);
   PrintPercentiles(all_weights);
   PrintHistogram(all_weights);
+
+  if (max_weighted.weight > 0.0f) {
+    const std::string header = absl::StrFormat(
+        "\nPosition with highest weight (%.6f):", max_weighted.weight);
+    PrintTrainingDataEntry(max_weighted.data, header, 8, 4);
+  }
 
   return 0;
 }

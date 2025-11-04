@@ -133,6 +133,7 @@ files = [
   'csrc/loader/stages/tensor_generator.cc',
   'csrc/utils/gz.cc',
   'csrc/utils/stream_shuffler.cc',
+  'csrc/utils/training_data_printer.cc',
   'libs/lc0/src/syzygy/syzygy.cc',
   'libs/lc0/src/trainingdata/rescorer.cc',
   'libs/lc0/src/utils/files.cc',
@@ -341,6 +342,7 @@ dump_chunk = executable(
   'csrc/tools/dump_chunk_main.cc',
   include_directories : includes,
   dependencies : cli_deps + [zlib_dep],
+  link_with : loader_lib,
 )
 
 filter_chunks = executable(
