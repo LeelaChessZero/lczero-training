@@ -9,7 +9,7 @@ from textual.containers import Container
 
 import proto.training_metrics_pb2 as training_metrics_pb2
 
-from .dataloader_widgets import QueueWidget, StageWidget
+from .dataloader_widgets import QueueWidget, StageWidget, StatisticsRowWidget
 
 FRIENDLY_STAGE_NAMES = {
     "file_path_provider": "File discovery",
@@ -31,6 +31,8 @@ class DataPipelinePane(Container):
         self._stage_widgets: dict[str, StageWidget] = {}
         self._queue_widgets: dict[str, dict[str, QueueWidget]] = {}
         self._queue_order: dict[str, list[str]] = {}
+        self._statistics_widgets: dict[str, dict[str, StatisticsRowWidget]] = {}
+        self._statistics_order: dict[str, list[str]] = {}
         self._stage_order: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -92,8 +94,35 @@ class DataPipelinePane(Container):
 
         return new_widgets
 
+    def _ensure_statistics_widgets(
+        self,
+        stage_key: str,
+        stage_metric: training_metrics_pb2.StageMetricProto,
+    ) -> list[StatisticsRowWidget]:
+        stage_statistics_widgets = self._statistics_widgets.setdefault(
+            stage_key, {}
+        )
+        statistics_order = self._statistics_order.setdefault(stage_key, [])
+        new_widgets: list[StatisticsRowWidget] = []
+
+        for statistics_metric in stage_metric.statistics_metrics:
+            metric_name = statistics_metric.name or ""
+            if metric_name in stage_statistics_widgets:
+                continue
+            label = metric_name.replace("_", " ").title()
+            statistics_widget = StatisticsRowWidget(
+                stage_key=stage_key,
+                metric_name=metric_name,
+                label=label,
+            )
+            stage_statistics_widgets[metric_name] = statistics_widget
+            statistics_order.append(metric_name)
+            new_widgets.append(statistics_widget)
+
+        return new_widgets
+
     def _mount_widgets(
-        self, widgets: Iterable[StageWidget | QueueWidget]
+        self, widgets: Iterable[StageWidget | QueueWidget | StatisticsRowWidget]
     ) -> None:
         async def _do_mount() -> None:
             await self.mount(*widgets)
@@ -104,7 +133,7 @@ class DataPipelinePane(Container):
         self,
         metrics: training_metrics_pb2.DataLoaderMetricsProto,
     ) -> None:
-        new_widgets: list[StageWidget | QueueWidget] = []
+        new_widgets: list[StageWidget | QueueWidget | StatisticsRowWidget] = []
         for stage_metric in metrics.stage_metrics:
             stage_key = stage_metric.name
             if not stage_key:
@@ -113,6 +142,11 @@ class DataPipelinePane(Container):
             stage_widget, created = self._ensure_stage_widget(stage_key)
             if created:
                 new_widgets.append(stage_widget)
+
+            statistics_widgets = self._ensure_statistics_widgets(
+                stage_key, stage_metric
+            )
+            new_widgets.extend(statistics_widgets)
 
             queue_widgets = self._ensure_queue_widgets(stage_key, stage_metric)
             new_widgets.extend(queue_widgets)
@@ -137,6 +171,15 @@ class DataPipelinePane(Container):
                 stage_widget.update_metrics(
                     dataloader_1_second, dataloader_total
                 )
+
+            for statistics_key in self._statistics_order.get(stage_key, []):
+                statistics_widget = self._statistics_widgets[stage_key].get(
+                    statistics_key
+                )
+                if statistics_widget:
+                    statistics_widget.update_metrics(
+                        dataloader_1_second, dataloader_total
+                    )
 
             for queue_key in self._queue_order.get(stage_key, []):
                 queue_widget = self._queue_widgets[stage_key].get(queue_key)
