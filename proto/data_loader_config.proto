@@ -98,6 +98,8 @@ message ChunkRescorerConfig {
   optional float deblunder_threshold = 8;
   // Optional deblunder width controlling smoothing around the threshold.
   optional float deblunder_width = 9;
+  // Comma-separated list of Gaviota tablebase directories.
+  optional string gaviota_paths = 11;
 }
 
 // Configuration for chunk unpacker that extracts frames from packed chunks.

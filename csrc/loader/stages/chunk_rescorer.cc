@@ -33,6 +33,10 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
                            config.deblunder_width());
   }
 
+  if (config.has_gaviota_paths()) {
+    RescorerGaviotaSetup(std::string(config.gaviota_paths()));
+  }
+
   LOG(INFO) << "Initializing ChunkRescorer with " << config.threads()
             << " worker thread(s)";
 
