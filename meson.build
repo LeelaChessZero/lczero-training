@@ -50,6 +50,9 @@ endforeach
 gtest_dep = dependency('gtest').as_system()
 gtest_main_dep = dependency('gtest_main').as_system()
 
+# Gaviota tablebase subproject
+gaviota_dep = subproject('gaviotatb').get_variable('gaviotatb_dep')
+
 # Common dependency sets
 external_deps = [zlib_dep]
 core_absl_deps = [
@@ -60,7 +63,7 @@ core_absl_deps = [
   absl_deps['synchronization'],
   absl_deps['random_random'],
 ]
-loader_deps = external_deps + core_absl_deps
+loader_deps = external_deps + core_absl_deps + [gaviota_dep]
 main_deps = loader_deps + [absl_deps['log_initialize']]
 # test_deps will be defined after proto_dep
 cli_deps = [
