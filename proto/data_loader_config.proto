@@ -46,6 +46,7 @@ message PositionSamplingConfig {
   optional float diff_focus_beta = 4 [default = 0.0];
   optional float diff_focus_gamma = 5 [default = 1.0];
   optional float diff_focus_tau = 6 [default = 1.0];
+  optional float default_weight = 7 [default = 1.0];
 }
 
 // Configuration for shuffling chunk pool that manages chunk shuffling and

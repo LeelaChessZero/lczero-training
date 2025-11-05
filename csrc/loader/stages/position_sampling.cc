@@ -8,8 +8,9 @@ namespace training {
 float ComputePositionSamplingWeight(const FrameType& frame,
                                     const PositionSamplingConfig& config) {
   if (!config.has_diff_focus_q_weight() && !config.has_diff_focus_pol_scale()) {
-    return 1.0;
+    return config.default_weight();
   }
+  if (std::isnan(frame.orig_q)) return config.default_weight();
   const float diff_q = std::abs(frame.best_q - frame.orig_q);
   const float q_weight = config.diff_focus_q_weight();
   const float pol_scale = config.diff_focus_pol_scale();
