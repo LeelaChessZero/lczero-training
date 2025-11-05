@@ -81,6 +81,22 @@ RichLog {
     grid-size: 6 1;
 }
 
+.statistics-row {
+    background: $surface-darken-1;
+    color: $text;
+    grid-size: 1 1;
+}
+
+.statistics-full {
+    background: $surface-darken-1;
+    color: $text;
+    padding: 0 1;
+    margin: 0;
+    height: auto;
+    min-height: 1;
+    width: 100%;
+}
+
 .row-label {
     padding: 0 1 0 0;
     margin: 0;
