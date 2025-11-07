@@ -342,8 +342,8 @@ void ShufflingChunkPool::SourceIngestionWorker(
         // Ingest the new chunk source.
         auto source = std::move(chunk_source_with_phase.source);
         size_t chunk_count = source->GetChunkCount();
-        chunks_since_anchor_ += chunk_count;
         absl::MutexLock lock(&chunk_sources_mutex_);
+        chunks_since_anchor_ += chunk_count;
         AddNewChunkSource(std::move(source));
       }
     }
@@ -838,15 +838,15 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
 }
 
 std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
-  absl::MutexLock lock(&anchor_mutex_);
-  // For ShufflingChunkPool, we'll use the latest chunk source's sort key
-  std::string latest_chunk_key;
-  {
-    absl::MutexLock sources_lock(&chunk_sources_mutex_);
-    if (chunk_sources_.empty()) return {"", 0};
-    latest_chunk_key = chunk_sources_.back().source->GetChunkSortKey();
+  absl::MutexLock anchor_lock(&anchor_mutex_);
+  absl::MutexLock sources_lock(&chunk_sources_mutex_);
+
+  if (chunk_sources_.empty()) {
+    int previous_count = chunks_since_anchor_.exchange(0);
+    return {anchor_, previous_count};
   }
-  anchor_ = latest_chunk_key;
+
+  anchor_ = chunk_sources_.back().source->GetChunkSortKey();
   int previous_count = chunks_since_anchor_.exchange(0);
   return {anchor_, previous_count};
 }
