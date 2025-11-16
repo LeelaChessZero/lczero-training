@@ -87,6 +87,7 @@ data_loader {
       }
     }
   }
+  output: "tensor_generator"
 }
 model {
   defaults {

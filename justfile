@@ -20,15 +20,16 @@ format-proto:
 
 # Build Python protobuf files
 build-proto:
-    mkdir -p src/lczero_training/proto
-    touch src/lczero_training/proto/__init__.py
-    protoc \
+    mkdir -p src/proto
+    touch src/proto/__init__.py
+    uv run python -m grpc_tools.protoc \
         --proto_path=. \
         --proto_path=libs/lc0 \
         --python_out=src/ \
         --pyi_out=src/ \
         proto/*.proto
-    protoc \
+    uv run python -m grpc_tools.protoc \
+        --proto_path=. \
         --proto_path=libs/lc0 \
         --python_out=src/ \
         --pyi_out=src/ \

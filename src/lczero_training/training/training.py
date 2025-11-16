@@ -196,7 +196,8 @@ class Training:
 
         Returns the original jit_state when no update is scheduled.
         """
-        assert self._swa_config is not None
+        if self._swa_config is None:
+            return jit_state
         period_steps = self._swa_config.period_steps
         assert period_steps > 0
         if steps_completed % period_steps == 0:

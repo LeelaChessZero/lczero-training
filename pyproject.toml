@@ -64,6 +64,7 @@ where = ["src"]
 
 [dependency-groups]
 dev = [
+    "grpcio-tools>=1.76.0",
     "mypy-protobuf>=3.6.0",
     "textual-dev>=1.7.0",
     "types-protobuf>=6.30.2.20250809",
@@ -72,10 +73,10 @@ dev = [
 
 [tool.mypy]
 mypy_path = "src"
-
-[[tool.mypy.overrides]]
-module = "lczero_training.proto.*"
-ignore_errors = true
+# TEMPORARY: Disable misc errors due to protobuf bug in PR #23156
+# (https://github.com/protocolbuffers/protobuf/pull/23156)
+# Revert when protobuf fixes __slots__ = () in generated .pyi files
+disable_error_code = ["misc"]
 
 [[tool.mypy.overrides]]
 module = "orbax.*"
