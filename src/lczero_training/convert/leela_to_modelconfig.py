@@ -92,14 +92,22 @@ def leela_to_modelconfig(
             encoder.mha.smolgen.dense1_b
         )
 
-    policy_head = model_config.policy_head.add()
-    policy_head.name = "vanilla"
-    policy_head.embedding_size = size(weights.policy_heads.ip_pol_b)
-    policy_head.d_model = size(weights.policy_heads.vanilla.ip2_pol_b)
+    for head_name in ["vanilla", "optimistic_st", "soft", "opponent"]:
+        if weights.policy_heads.HasField(head_name):
+            head = getattr(weights.policy_heads, head_name)
+            assert size(head.ip2_pol_b) > 0
+            policy_head = model_config.policy_head.add()
+            policy_head.name = head_name
+            policy_head.embedding_size = size(weights.policy_heads.ip_pol_b)
+            policy_head.d_model = size(head.ip2_pol_b)
 
-    value_head = model_config.value_head.add()
-    value_head.name = "winner"
-    value_head.num_channels = size(weights.value_heads.winner.ip_val_b)
+    for head_name in ["winner", "q", "st"]:
+        if weights.value_heads.HasField(head_name):
+            head = getattr(weights.value_heads, head_name)
+            assert size(head.ip_val_b) > 0
+            value_head = model_config.value_head.add()
+            value_head.name = head_name
+            value_head.num_channels = size(head.ip_val_b)
 
     movesleft_head = model_config.movesleft_head.add()
     movesleft_head.name = "main"
