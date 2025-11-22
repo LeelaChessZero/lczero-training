@@ -9,9 +9,10 @@ message ModelConfig {
   optional DefaultsConfig defaults = 4;
   optional EmbeddingConfig embedding = 5;
   optional EncoderConfig encoder = 6;
-  repeated PolicyHeadConfig policy_head = 7;
-  repeated ValueHeadConfig value_head = 8;
-  repeated MovesLeftHeadConfig movesleft_head = 9;
+  optional uint32 shared_policy_heads_embedding_size = 7;
+  repeated PolicyHeadConfig policy_head = 8;
+  repeated ValueHeadConfig value_head = 9;
+  repeated MovesLeftHeadConfig movesleft_head = 10;
 }
 
 message DefaultsConfig {

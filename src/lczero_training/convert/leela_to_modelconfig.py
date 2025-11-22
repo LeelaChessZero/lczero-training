@@ -92,13 +92,20 @@ def leela_to_modelconfig(
             encoder.mha.smolgen.dense1_b
         )
 
+    if weights.policy_heads.HasField("ip_pol_w"):
+        model_config.shared_policy_heads_embedding_size = size(
+            weights.policy_heads.ip_pol_b
+        )
+
     for head_name in ["vanilla", "optimistic_st", "soft", "opponent"]:
         if weights.policy_heads.HasField(head_name):
             head = getattr(weights.policy_heads, head_name)
             assert size(head.ip2_pol_b) > 0
+            assert not head.HasField("ip_pol_w")
             policy_head = model_config.policy_head.add()
             policy_head.name = head_name
-            policy_head.embedding_size = size(weights.policy_heads.ip_pol_b)
+            if not model_config.HasField("shared_policy_heads_embedding_size"):
+                policy_head.embedding_size = size(head.ip_pol_b)
             policy_head.d_model = size(head.ip2_pol_b)
 
     for head_name in ["winner", "q", "st"]:

@@ -1,4 +1,5 @@
 import math
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -15,24 +16,33 @@ class PolicyHead(nnx.Module):
         in_features: int,
         config: model_config_pb2.PolicyHeadConfig,
         defaults: model_config_pb2.DefaultsConfig,
+        shared_embedding: Optional[nnx.Linear] = None,
         *,
         rngs: nnx.Rngs,
     ):
-        self.activation = defaults.activation
-        self.tokens = nnx.Linear(
-            in_features=in_features,
-            out_features=config.embedding_size,
-            rngs=rngs,
+        assert (shared_embedding is not None) != config.HasField(
+            "embedding_size"
         )
+        self.activation = defaults.activation
+        if shared_embedding is not None:
+            self.tokens = shared_embedding
+            embedding_size = shared_embedding.out_features
+        else:
+            self.tokens = nnx.Linear(
+                in_features=in_features,
+                out_features=config.embedding_size,
+                rngs=rngs,
+            )
+            embedding_size = config.embedding_size
 
         self.q = nnx.Linear(
-            in_features=config.embedding_size,
+            in_features=embedding_size,
             out_features=config.d_model,
             rngs=rngs,
         )
 
         self.k = nnx.Linear(
-            in_features=config.embedding_size,
+            in_features=embedding_size,
             out_features=config.d_model,
             rngs=rngs,
         )
