@@ -26,6 +26,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=42,
         help="Seed for initializing model parameters.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Skip checkpoint creation.",
+    )
     return parser
 
 
@@ -42,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         config_filename=args.config,
         lczero_model=args.lczero_model,
         seed=args.seed,
+        dry_run=args.dry_run,
     )
     return 0
 

@@ -16,9 +16,21 @@ class LeelaPytreeWeightsVisitor:
         weights = self.leela_net.weights
         self.embedding_block(state["embedding"], weights)
         self.encoder_tower(state["encoders"], weights)
-        self.policy_head(state["policy_heads"]["vanilla"], weights.policy_heads)
-        self.value_head(state["value_heads"]["winner"], weights.value_heads)
-        self.movesleft_head(state["movesleft_heads"]["main"], weights)
+        self.policy_heads(state["policy_heads"], weights.policy_heads)
+        for head_name in ["winner", "q", "st"]:
+            assert (
+                head_name in state["value_heads"]
+            ) == weights.value_heads.HasField(head_name)
+            if head_name in state["value_heads"]:
+                self.value_head(
+                    state["value_heads"][head_name],
+                    getattr(weights.value_heads, head_name),
+                )
+        for head_name in ["main"]:
+            assert head_name in state["movesleft_heads"], (
+                f"movesleft head {head_name} missing in state"
+            )
+            self.movesleft_head(state["movesleft_heads"][head_name], weights)
 
     def embedding_block(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights
@@ -102,34 +114,37 @@ class LeelaPytreeWeightsVisitor:
         self.tensor(nnx_dict["scale"], scales)
         self.tensor(nnx_dict["bias"], biases)
 
-    def policy_head(
+    def policy_heads(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights.PolicyHeads
     ) -> None:
-        self.matmul(nnx_dict["tokens"], weights.ip_pol_w, weights.ip_pol_b)
-        vanilla = weights.vanilla
-        self.matmul(nnx_dict["q"], vanilla.ip2_pol_w, vanilla.ip2_pol_b)
-        self.matmul(nnx_dict["k"], vanilla.ip3_pol_w, vanilla.ip3_pol_b)
-        self.matmul(nnx_dict["promotion_dense"], vanilla.ip4_pol_w, None)
+        if weights.HasField("ip_pol_w"):
+            self.matmul(
+                nnx_dict["policy_shared_embedding"],
+                weights.ip_pol_w,
+                weights.ip_pol_b,
+            )
+        for head_name in ["vanilla", "optimistic_st", "soft", "opponent"]:
+            assert (head_name in nnx_dict) == weights.HasField(head_name)
+            if head_name in nnx_dict:
+                self.policy_head(
+                    nnx_dict[head_name], getattr(weights, head_name)
+                )
+
+    def policy_head(
+        self, nnx_dict: nnx.State, weights: net_pb2.Weights.PolicyHead
+    ) -> None:
+        if weights.HasField("ip_pol_w"):
+            self.matmul(nnx_dict["tokens"], weights.ip_pol_w, weights.ip_pol_b)
+        self.matmul(nnx_dict["q"], weights.ip2_pol_w, weights.ip2_pol_b)
+        self.matmul(nnx_dict["k"], weights.ip3_pol_w, weights.ip3_pol_b)
+        self.matmul(nnx_dict["promotion_dense"], weights.ip4_pol_w, None)
 
     def value_head(
-        self, nnx_dict: nnx.State, weights: net_pb2.Weights.ValueHeads
+        self, nnx_dict: nnx.State, weights: net_pb2.Weights.ValueHead
     ) -> None:
-        winner = weights.winner
-        self.matmul(
-            nnx_dict["embed"],
-            winner.ip_val_w,
-            winner.ip_val_b,
-        )
-        self.matmul(
-            nnx_dict["dense1"],
-            winner.ip1_val_w,
-            winner.ip1_val_b,
-        )
-        self.matmul(
-            nnx_dict["wdl"],
-            winner.ip2_val_w,
-            winner.ip2_val_b,
-        )
+        self.matmul(nnx_dict["embed"], weights.ip_val_w, weights.ip_val_b)
+        self.matmul(nnx_dict["dense1"], weights.ip1_val_w, weights.ip1_val_b)
+        self.matmul(nnx_dict["wdl"], weights.ip2_val_w, weights.ip2_val_b)
 
     def movesleft_head(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights

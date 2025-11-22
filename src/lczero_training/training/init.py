@@ -26,6 +26,7 @@ def init(
     config_filename: str,
     lczero_model: Optional[str],
     seed: int = 42,
+    dry_run: bool = False,
 ) -> None:
     """
     Initializes a new training run.
@@ -36,15 +37,16 @@ def init(
     with open(config_filename, "r") as f:
         text_format.Parse(f.read(), config)
 
-    if config.training.checkpoint.path is None:
-        logger.error("Checkpoint path must be set in the configuration.")
-        sys.exit(1)
+    if not dry_run:
+        if config.training.checkpoint.path is None:
+            logger.error("Checkpoint path must be set in the configuration.")
+            sys.exit(1)
 
-    if os.path.exists(config.training.checkpoint.path):
-        logger.error(
-            f"Checkpoint path {config.training.checkpoint.path} already exists."
-        )
-        sys.exit(1)
+        if os.path.exists(config.training.checkpoint.path):
+            logger.error(
+                f"Checkpoint path {config.training.checkpoint.path} already exists."
+            )
+            sys.exit(1)
 
     logger.info("Creating initial training state from configuration")
     training_state = TrainingState.new_from_config(
@@ -95,19 +97,25 @@ def init(
             )
         )
 
-    checkpoint_mgr = ocp.CheckpointManager(
-        config.training.checkpoint.path,
-        options=ocp.CheckpointManagerOptions(
-            create=True,
-        ),
-    )
+    if dry_run:
+        logger.info(
+            f"Would save checkpoint to {config.training.checkpoint.path} "
+            f"at step {training_state.jit_state.step}"
+        )
+    else:
+        checkpoint_mgr = ocp.CheckpointManager(
+            config.training.checkpoint.path,
+            options=ocp.CheckpointManagerOptions(
+                create=True,
+            ),
+        )
 
-    logger.info(
-        f"Saving initial checkpoint to {config.training.checkpoint.path}"
-    )
-    checkpoint_mgr.save(
-        step=training_state.jit_state.step,
-        args=ocp.args.PyTreeSave(training_state),
-    )
-    checkpoint_mgr.wait_until_finished()
+        logger.info(
+            f"Saving initial checkpoint to {config.training.checkpoint.path}"
+        )
+        checkpoint_mgr.save(
+            step=training_state.jit_state.step,
+            args=ocp.args.PyTreeSave(training_state),
+        )
+        checkpoint_mgr.wait_until_finished()
     logger.info("Initialization complete.")

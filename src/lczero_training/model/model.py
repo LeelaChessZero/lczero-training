@@ -50,11 +50,11 @@ class LczeroModel(nnx.Module):
             for head_config in config.value_head
         }
 
-        policy_shared_embedding = None
-        if config.HasField("shared_policy_heads_embedding_size"):
-            policy_shared_embedding = nnx.Linear(
+        self.policy_shared_embedding = None
+        if config.HasField("shared_policy_embedding_size"):
+            self.policy_shared_embedding = nnx.Linear(
                 in_features=config.embedding.embedding_size,
-                out_features=config.shared_policy_heads_embedding_size,
+                out_features=config.shared_policy_embedding_size,
                 rngs=rngs,
             )
 
@@ -63,7 +63,7 @@ class LczeroModel(nnx.Module):
                 in_features=config.embedding.embedding_size,
                 config=head_config,
                 defaults=config.defaults,
-                shared_embedding=policy_shared_embedding,
+                shared_embedding=self.policy_shared_embedding,
                 rngs=rngs,
             )
             for head_config in config.policy_head

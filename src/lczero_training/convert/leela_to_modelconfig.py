@@ -93,7 +93,7 @@ def leela_to_modelconfig(
         )
 
     if weights.policy_heads.HasField("ip_pol_w"):
-        model_config.shared_policy_heads_embedding_size = size(
+        model_config.shared_policy_embedding_size = size(
             weights.policy_heads.ip_pol_b
         )
 
@@ -104,7 +104,7 @@ def leela_to_modelconfig(
             assert not head.HasField("ip_pol_w")
             policy_head = model_config.policy_head.add()
             policy_head.name = head_name
-            if not model_config.HasField("shared_policy_heads_embedding_size"):
+            if not model_config.HasField("shared_policy_embedding_size"):
                 policy_head.embedding_size = size(head.ip_pol_b)
             policy_head.d_model = size(head.ip2_pol_b)
 
