@@ -109,9 +109,9 @@ model {
       activation: ACTIVATION_SWISH
     }
   }
-  policy_head { embedding_size: 1024 d_model: 1024 }
-  value_head { num_channels: 128 }
-  movesleft_head { num_channels: 32 }
+  policy_head { name: "vanilla" embedding_size: 1024 d_model: 1024 }
+  value_head { name: "winner" num_channels: 128 }
+  movesleft_head { name: "main" num_channels: 32 }
 }
 training {
   schedule {

@@ -432,7 +432,10 @@ class Evaluation:
             Tuple[jax.Array, Dict[str, jax.Array]],
         ],
         model_output_vfn: Callable[
-            [LczeroModel, jax.Array], Tuple[jax.Array, jax.Array, jax.Array]
+            [LczeroModel, jax.Array],
+            Tuple[
+                Dict[str, jax.Array], Dict[str, jax.Array], Dict[str, jax.Array]
+            ],
         ],
         softmax_jax_wdl: bool,
     ) -> None:
@@ -441,29 +444,33 @@ class Evaluation:
 
         batch = {
             "inputs": jax.device_put(inputs),
-            "value_targets": jax.device_put(values),
-            "policy_targets": jax.device_put(policy),
-            "movesleft_targets": jax.device_put(movesleft),
+            "value_targets": {"winner": jax.device_put(values)},
+            "policy_targets": {"vanilla": jax.device_put(policy)},
+            "movesleft_targets": {"main": jax.device_put(movesleft)},
         }
         dumper.dump_tensors(batch, "INPUT")
 
-        value_pred, policy_pred, movesleft_pred = model_output_vfn(
+        value_preds, policy_preds, movesleft_preds = model_output_vfn(
             model, batch["inputs"]
         )
-        if softmax_jax_wdl:
-            value_pred = jax.nn.softmax(value_pred, axis=-1)
 
-        outputs = {
-            "value_pred": value_pred,
-            "policy_pred": policy_pred,
-            "movesleft_pred": movesleft_pred,
-        }
+        # Flatten all head outputs for dumping
+        outputs = {}
+        for name, pred in value_preds.items():
+            if softmax_jax_wdl:
+                pred = jax.nn.softmax(pred, axis=-1)
+            outputs[f"value_pred/{name}"] = pred
+        for name, pred in policy_preds.items():
+            outputs[f"policy_pred/{name}"] = pred
+        for name, pred in movesleft_preds.items():
+            outputs[f"movesleft_pred/{name}"] = pred
 
         if onnx_comparator:
+            # Compare only legacy heads
             jax_outputs_for_onnx = {
-                "wdl": value_pred,
-                "policy": policy_pred,
-                "movesleft": movesleft_pred,
+                "wdl": value_preds["winner"],
+                "policy": policy_preds["vanilla"],
+                "movesleft": movesleft_preds["main"],
             }
             onnx_inputs_np = np.asarray(inputs).copy()
             onnx_inputs_np[:, 109, ...] *= 99
@@ -496,7 +503,9 @@ class Evaluation:
     @staticmethod
     def _model_for_output(
         model_arg: LczeroModel, inputs_arg: jax.Array
-    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    ) -> Tuple[
+        Dict[str, jax.Array], Dict[str, jax.Array], Dict[str, jax.Array]
+    ]:
         return model_arg(inputs_arg)
 
 

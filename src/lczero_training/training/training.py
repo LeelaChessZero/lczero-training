@@ -77,9 +77,9 @@ class Training:
 
             batch_sharding = {
                 "inputs": dp_sharding,
-                "value_targets": dp_sharding,
-                "policy_targets": dp_sharding,
-                "movesleft_targets": dp_sharding,
+                "value_targets": {"winner": dp_sharding},
+                "policy_targets": {"vanilla": dp_sharding},
+                "movesleft_targets": {"main": dp_sharding},
             }
             in_shardings = (replicated, batch_sharding)
             out_shardings = replicated
@@ -231,9 +231,9 @@ class Training:
 
         batch_dict = {
             "inputs": b_inputs,
-            "value_targets": b_values,
-            "policy_targets": b_policy,
-            "movesleft_targets": b_movesleft,
+            "value_targets": {"winner": b_values},
+            "policy_targets": {"vanilla": b_policy},
+            "movesleft_targets": {"main": b_movesleft},
         }
 
         if self._dp_sharding is not None:

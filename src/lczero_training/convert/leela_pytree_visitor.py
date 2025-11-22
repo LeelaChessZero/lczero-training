@@ -16,9 +16,9 @@ class LeelaPytreeWeightsVisitor:
         weights = self.leela_net.weights
         self.embedding_block(state["embedding"], weights)
         self.encoder_tower(state["encoders"], weights)
-        self.policy_head(state["policy_head"], weights.policy_heads)
-        self.value_head(state["value_head"], weights.value_heads)
-        self.movesleft_head(state["movesleft_head"], weights)
+        self.policy_head(state["policy_heads"]["vanilla"], weights.policy_heads)
+        self.value_head(state["value_heads"]["winner"], weights.value_heads)
+        self.movesleft_head(state["movesleft_heads"]["main"], weights)
 
     def embedding_block(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights

@@ -9,9 +9,9 @@ message ModelConfig {
   optional DefaultsConfig defaults = 4;
   optional EmbeddingConfig embedding = 5;
   optional EncoderConfig encoder = 6;
-  optional PolicyHeadConfig policy_head = 7;
-  optional ValueHeadConfig value_head = 8;
-  optional MovesLeftHeadConfig movesleft_head = 9;
+  repeated PolicyHeadConfig policy_head = 7;
+  repeated ValueHeadConfig value_head = 8;
+  repeated MovesLeftHeadConfig movesleft_head = 9;
 }
 
 message DefaultsConfig {
@@ -42,14 +42,17 @@ message SmolgenConfig {
 }
 
 message PolicyHeadConfig {
-  optional uint32 embedding_size = 1;
-  optional uint32 d_model = 2;
+  optional string name = 1;
+  optional uint32 embedding_size = 2;
+  optional uint32 d_model = 3;
 }
 
 message ValueHeadConfig {
-  optional uint32 num_channels = 1;
+  optional string name = 1;
+  optional uint32 num_channels = 2;
 }
 
 message MovesLeftHeadConfig {
-  optional uint32 num_channels = 1;
+  optional string name = 1;
+  optional uint32 num_channels = 2;
 }

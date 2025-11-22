@@ -92,17 +92,17 @@ def leela_to_modelconfig(
             encoder.mha.smolgen.dense1_b
         )
 
-    model_config.policy_head.embedding_size = size(
-        weights.policy_heads.ip_pol_b
-    )
-    model_config.policy_head.d_model = size(
-        weights.policy_heads.vanilla.ip2_pol_b
-    )
+    policy_head = model_config.policy_head.add()
+    policy_head.name = "vanilla"
+    policy_head.embedding_size = size(weights.policy_heads.ip_pol_b)
+    policy_head.d_model = size(weights.policy_heads.vanilla.ip2_pol_b)
 
-    model_config.value_head.num_channels = size(
-        weights.value_heads.winner.ip_val_b
-    )
+    value_head = model_config.value_head.add()
+    value_head.name = "winner"
+    value_head.num_channels = size(weights.value_heads.winner.ip_val_b)
 
-    model_config.movesleft_head.num_channels = size(weights.ip_mov_b)
+    movesleft_head = model_config.movesleft_head.add()
+    movesleft_head.name = "main"
+    movesleft_head.num_channels = size(weights.ip_mov_b)
 
     return model_config

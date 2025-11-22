@@ -3,7 +3,6 @@ from typing import Dict, Protocol, Sequence, Tuple, TypeVar
 import jax
 import jax.numpy as jnp
 import optax
-from jax import tree_util
 from jax.scipy.special import xlogy
 
 from proto.training_config_pb2 import (
@@ -28,39 +27,60 @@ def _find_head(field: Sequence[T], name: str) -> T:
 class LczeroLoss:
     def __init__(self, config: LossWeightsConfig):
         self.config = config
-        main_policy_config = _find_head(config.policy, "main")
-        winner_value_config = _find_head(config.value, "winner")
-        main_movesleft_config = _find_head(config.movesleft, "main")
-
-        self.weights = {
-            "policy": main_policy_config.weight,
-            "value": winner_value_config.weight,
-            "movesleft": main_movesleft_config.weight,
+        self.policy_losses: Dict[str, PolicyLoss] = {
+            loss_config.name: PolicyLoss(loss_config)
+            for loss_config in config.policy
         }
-        self.policy_loss = PolicyLoss(main_policy_config)
-        self.value_loss = ValueLoss()
-        self.movesleft_loss = MovesLeftLoss()
+        self.policy_weights: Dict[str, float] = {
+            loss_config.name: loss_config.weight
+            for loss_config in config.policy
+        }
+        self.value_losses: Dict[str, ValueLoss] = {
+            loss_config.name: ValueLoss() for loss_config in config.value
+        }
+        self.value_weights: Dict[str, float] = {
+            loss_config.name: loss_config.weight for loss_config in config.value
+        }
+        self.movesleft_losses: Dict[str, MovesLeftLoss] = {
+            loss_config.name: MovesLeftLoss()
+            for loss_config in config.movesleft
+        }
+        self.movesleft_weights: Dict[str, float] = {
+            loss_config.name: loss_config.weight
+            for loss_config in config.movesleft
+        }
 
     def __call__(
         self,
         model: LczeroModel,
         inputs: jax.Array,
-        value_targets: jax.Array,
-        policy_targets: jax.Array,
-        movesleft_targets: jax.Array,
+        value_targets: Dict[str, jax.Array],
+        policy_targets: Dict[str, jax.Array],
+        movesleft_targets: Dict[str, jax.Array],
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        value_pred, policy_pred, movesleft_pred = model(inputs)
+        value_preds, policy_preds, movesleft_preds = model(inputs)
 
-        unweighted_losses = {
-            "value": self.value_loss(value_pred, value_targets),
-            "policy": self.policy_loss(policy_pred, policy_targets),
-            "movesleft": self.movesleft_loss(movesleft_pred, movesleft_targets),
-        }
+        unweighted_losses = {}
+        weighted_losses = []
 
-        data_loss = tree_util.tree_reduce(
-            jnp.add,
-            tree_util.tree_map(jnp.multiply, self.weights, unweighted_losses),
-        )
+        for name, policy_loss_fn in self.policy_losses.items():
+            loss = policy_loss_fn(policy_preds[name], policy_targets[name])
+            unweighted_losses[f"policy/{name}"] = loss
+            weighted_losses.append(loss * self.policy_weights[name])
+
+        for name, value_loss_fn in self.value_losses.items():
+            loss = value_loss_fn(value_preds[name], value_targets[name])
+            unweighted_losses[f"value/{name}"] = loss
+            weighted_losses.append(loss * self.value_weights[name])
+
+        for name, movesleft_loss_fn in self.movesleft_losses.items():
+            loss = movesleft_loss_fn(
+                movesleft_preds[name], movesleft_targets[name]
+            )
+            unweighted_losses[f"movesleft/{name}"] = loss
+            weighted_losses.append(loss * self.movesleft_weights[name])
+
+        data_loss = jnp.sum(jnp.array(weighted_losses))
 
         return data_loss, unweighted_losses
 

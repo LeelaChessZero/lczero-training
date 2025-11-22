@@ -3,11 +3,9 @@ from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-import jax.random
 from flax import nnx
 
-from proto import model_config_pb2, net_pb2
-from proto.hlo_pb2 import XlaShapeProto
+from proto import model_config_pb2
 
 from .embedding import Embedding
 from .encoder import EncoderTower
@@ -42,83 +40,50 @@ class LczeroModel(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_head = ValueHead(
-            in_features=config.embedding.embedding_size,
-            config=config.value_head,
-            defaults=config.defaults,
-            rngs=rngs,
-        )
+        self.value_heads = {
+            head_config.name: ValueHead(
+                in_features=config.embedding.embedding_size,
+                config=head_config,
+                defaults=config.defaults,
+                rngs=rngs,
+            )
+            for head_config in config.value_head
+        }
 
-        self.policy_head = PolicyHead(
-            in_features=config.embedding.embedding_size,
-            config=config.policy_head,
-            defaults=config.defaults,
-            rngs=rngs,
-        )
-        self.movesleft_head = MovesLeftHead(
-            in_features=config.embedding.embedding_size,
-            config=config.movesleft_head,
-            defaults=config.defaults,
-            rngs=rngs,
-        )
+        self.policy_heads = {
+            head_config.name: PolicyHead(
+                in_features=config.embedding.embedding_size,
+                config=head_config,
+                defaults=config.defaults,
+                rngs=rngs,
+            )
+            for head_config in config.policy_head
+        }
+        self.movesleft_heads = {
+            head_config.name: MovesLeftHead(
+                in_features=config.embedding.embedding_size,
+                config=head_config,
+                defaults=config.defaults,
+                rngs=rngs,
+            )
+            for head_config in config.movesleft_head
+        }
 
-    def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    def __call__(
+        self, x: jax.Array
+    ) -> Tuple[
+        dict[str, jax.Array], dict[str, jax.Array], dict[str, jax.Array]
+    ]:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
         x = self.embedding(x)
         x = self.encoders(x)
 
-        value = self.value_head(x)
-        policy = self.policy_head(x)
-        movesleft = self.movesleft_head(x)
+        value = {name: head(x) for name, head in self.value_heads.items()}
+        policy = {name: head(x) for name, head in self.policy_heads.items()}
+        movesleft = {
+            name: head(x) for name, head in self.movesleft_heads.items()
+        }
 
         return value, policy, movesleft
-
-
-def _tmp_make_config() -> model_config_pb2.ModelConfig:
-    config = model_config_pb2.ModelConfig()
-
-    config.defaults.compute_dtype = XlaShapeProto.BF16
-    config.defaults.activation = net_pb2.NetworkFormat.ACTIVATION_MISH
-    config.defaults.ffn_activation = net_pb2.NetworkFormat.ACTIVATION_MISH
-
-    config.embedding.dense_size = 512
-    config.embedding.dff = 1536
-    config.embedding.embedding_size = 1024
-
-    config.encoder.num_blocks = 15
-    config.encoder.dff = 1536
-    config.encoder.d_model = 1024
-    config.encoder.heads = 32
-
-    config.encoder.smolgen.hidden_channels = 32
-    config.encoder.smolgen.hidden_size = 256
-    config.encoder.smolgen.gen_size = 256
-    config.encoder.smolgen.activation = net_pb2.NetworkFormat.ACTIVATION_SWISH
-
-    config.policy_head.embedding_size = 1024
-    config.policy_head.d_model = 1024
-
-    config.value_head.num_channels = 128
-
-    config.movesleft_head.num_channels = 32
-
-    return config
-
-
-if __name__ == "__main__":
-    rngs = nnx.Rngs(params=42)
-    model = LczeroModel(config=_tmp_make_config(), rngs=rngs)
-    # batch_model = nnx.vmap(model, in_axes=0, out_axes=0)
-    print(model)
-
-    key = jax.random.key(0)
-    random_input = jax.random.normal(key, (112, 8, 8))
-    output = model(random_input)
-    print(output)
-    if isinstance(output, (list, tuple)):
-        for o in output:
-            print(o.shape)
-    else:
-        print(output.shape)

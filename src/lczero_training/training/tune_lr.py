@@ -25,13 +25,13 @@ from .training import Training, from_dataloader
 logger = logging.getLogger(__name__)
 
 
-def _prepare_batch(batch: Tuple) -> Dict[str, jax.Array]:
+def _prepare_batch(batch: Tuple) -> Dict:
     inputs, policy, values, _, movesleft = batch
     return {
         "inputs": inputs,
-        "value_targets": values,
-        "policy_targets": policy,
-        "movesleft_targets": movesleft,
+        "value_targets": {"winner": values},
+        "policy_targets": {"vanilla": policy},
+        "movesleft_targets": {"main": movesleft},
     }
 
 
@@ -68,15 +68,13 @@ def _make_optimizer_with_schedule(
 
 def _make_eval_step(
     graphdef: nnx.GraphDef, loss_fn: LczeroLoss
-) -> Callable[[nnx.State, Dict[str, jax.Array]], jax.Array]:
+) -> Callable[[nnx.State, Dict], jax.Array]:
     @partial(nnx.jit, static_argnames=())
-    def eval_step(
-        model_state: nnx.State, batch: Dict[str, jax.Array]
-    ) -> jax.Array:
+    def eval_step(model_state: nnx.State, batch: Dict) -> jax.Array:
         model = nnx.merge(graphdef, model_state)
 
         def calculate_loss(
-            model_arg: LczeroModel, batch_arg: Dict[str, jax.Array]
+            model_arg: LczeroModel, batch_arg: Dict
         ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
             return loss_fn(model_arg, **batch_arg)
 
@@ -84,9 +82,7 @@ def _make_eval_step(
         per_sample_data_loss, _ = loss_vfn(model, batch)
         return jnp.mean(per_sample_data_loss)
 
-    return cast(
-        Callable[[nnx.State, Dict[str, jax.Array]], jax.Array], eval_step
-    )
+    return cast(Callable[[nnx.State, Dict], jax.Array], eval_step)
 
 
 def _plot_results(results: List[Tuple[float, float]], plot_output: str) -> None:
