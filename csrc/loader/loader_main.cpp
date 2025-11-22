@@ -104,7 +104,7 @@ void Run() {
   });
 
   while (true) {
-    TensorTuple batch = loader.GetNext("train");
+    TrainingTensors batch = loader.GetNext("train");
     ++batch_count;
   }
 }

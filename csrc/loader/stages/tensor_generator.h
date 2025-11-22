@@ -1,5 +1,5 @@
 // ABOUTME: Stage that converts FrameType frames into tensor batches.
-// ABOUTME: Produces TensorTuple with tensors for training pipeline.
+// ABOUTME: Produces TrainingTensors with tensors for training pipeline.
 #pragma once
 
 #include <atomic>
@@ -8,6 +8,7 @@
 #include <stop_token>
 #include <vector>
 
+#include "loader/data_loader.h"
 #include "loader/data_loader_metrics.h"
 #include "loader/frame_type.h"
 #include "loader/stages/stage.h"
@@ -21,14 +22,14 @@ namespace lczero {
 namespace training {
 
 // Worker pool that converts FrameType frames into tensor batches.
-// Takes individual FrameType frames as input and outputs TensorTuple
+// Takes individual FrameType frames as input and outputs TrainingTensors
 // containing batched tensors in the format required for training.
 class TensorGenerator
     : public SingleInputStage<TensorGeneratorConfig, FrameType>,
-      public SingleOutputStage<TensorTuple> {
+      public SingleOutputStage<TrainingTensors> {
  public:
   using InputType = FrameType;
-  using OutputType = TensorTuple;
+  using OutputType = TrainingTensors;
 
   explicit TensorGenerator(const TensorGeneratorConfig& config);
   ~TensorGenerator();
@@ -43,8 +44,7 @@ class TensorGenerator
   };
 
   void Worker(std::stop_token stop_token, ThreadContext* context);
-  void ConvertFramesToTensors(const std::vector<FrameType>& frames,
-                              TensorTuple& tensors);
+  TrainingTensors ConvertFramesToTensors(const std::vector<FrameType>& frames);
   void ProcessPlanes(const std::vector<FrameType>& frames,
                      TypedTensor<float>& planes_tensor);
 

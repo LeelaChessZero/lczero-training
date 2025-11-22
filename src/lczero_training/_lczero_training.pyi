@@ -1,7 +1,7 @@
 # ABOUTME: Type stubs for C++ DataLoader PyBind11 bindings.
 # ABOUTME: Provides type annotations for _lczero_training compiled module.
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -14,6 +14,19 @@ class TensorBase:
     def element_size(self) -> int: ...
     def py_format(self) -> str: ...
 
+class TrainingTensors:
+    def __init__(
+        self,
+        input: np.ndarray,
+        policy_heads: Dict[str, np.ndarray],
+        value_heads: Dict[str, np.ndarray],
+        movesleft_heads: Dict[str, np.ndarray],
+    ) -> None: ...
+    input: np.ndarray
+    policy_heads: Dict[str, np.ndarray]
+    value_heads: Dict[str, np.ndarray]
+    movesleft_heads: Dict[str, np.ndarray]
+
 class DataLoader:
     def __init__(self, config: DataLoaderConfig | bytes) -> None: ...
     def add_stages(self, config: DataLoaderConfig | bytes) -> None: ...
@@ -21,10 +34,8 @@ class DataLoader:
         self, request: StageControlRequest | bytes
     ) -> List[Tuple[str, StageControlResponse]]: ...
     def start(self) -> None: ...
-    def get_next(self, alias: str = "") -> Tuple[np.ndarray, ...]: ...
-    def maybe_get_next(
-        self, alias: str = ""
-    ) -> Optional[Tuple[np.ndarray, ...]]: ...
+    def get_next(self, alias: str = "") -> TrainingTensors: ...
+    def maybe_get_next(self, alias: str = "") -> Optional[TrainingTensors]: ...
     def stop(self) -> None: ...
     def get_bucket_metrics(
         self, time_period: int, include_pending: bool

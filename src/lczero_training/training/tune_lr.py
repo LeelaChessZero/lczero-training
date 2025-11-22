@@ -3,7 +3,7 @@ import logging
 import sys
 from contextlib import nullcontext
 from functools import partial
-from typing import Callable, Dict, List, Tuple, cast
+from typing import Any, Callable, Dict, List, Tuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -25,13 +25,12 @@ from .training import Training, from_dataloader
 logger = logging.getLogger(__name__)
 
 
-def _prepare_batch(batch: Tuple) -> Dict:
-    inputs, policy, values, _, movesleft = batch
+def _prepare_batch(batch: Any) -> Dict:
     return {
-        "inputs": inputs,
-        "value_targets": {"winner": values},
-        "policy_targets": {"vanilla": policy},
-        "movesleft_targets": {"main": movesleft},
+        "inputs": batch.input,
+        "value_targets": batch.value_heads,
+        "policy_targets": batch.policy_heads,
+        "movesleft_targets": batch.movesleft_heads,
     }
 
 

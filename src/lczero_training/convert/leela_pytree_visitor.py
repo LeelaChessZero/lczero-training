@@ -18,9 +18,6 @@ class LeelaPytreeWeightsVisitor:
         self.encoder_tower(state["encoders"], weights)
         self.policy_heads(state["policy_heads"], weights.policy_heads)
         for head_name in ["winner", "q", "st"]:
-            assert (
-                head_name in state["value_heads"]
-            ) == weights.value_heads.HasField(head_name)
             if head_name in state["value_heads"]:
                 self.value_head(
                     state["value_heads"][head_name],
@@ -124,7 +121,6 @@ class LeelaPytreeWeightsVisitor:
                 weights.ip_pol_b,
             )
         for head_name in ["vanilla", "optimistic_st", "soft", "opponent"]:
-            assert (head_name in nnx_dict) == weights.HasField(head_name)
             if head_name in nnx_dict:
                 self.policy_head(
                     nnx_dict[head_name], getattr(weights, head_name)

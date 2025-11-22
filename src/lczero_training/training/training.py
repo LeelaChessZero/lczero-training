@@ -12,7 +12,7 @@ from flax import nnx
 from jax import tree_util
 from jax.sharding import PartitionSpec as P
 
-from lczero_training.dataloader import DataLoader
+from lczero_training.dataloader import DataLoader, TrainingTensors
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import JitTrainingState
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def from_dataloader(
     loader: DataLoader,
-) -> Generator[Tuple[np.ndarray, ...], None, None]:
+) -> Generator[TrainingTensors, None, None]:
     while True:
         yield loader.get_next()
 
@@ -207,13 +207,10 @@ class Training:
             return self.update_swa(jit_state, remainder / period_steps)
         return jit_state
 
-    def _validate_and_prepare_batch(
-        self, batch: Tuple[np.ndarray, ...]
-    ) -> dict:
-        b_inputs, b_policy, b_values, _, b_movesleft = batch
+    def _validate_and_prepare_batch(self, batch: TrainingTensors) -> dict:
         logger.info("Fetched batch from dataloader")
 
-        batch_size = b_inputs.shape[0]
+        batch_size = batch.input.shape[0]
         if self._dp_sharding is not None:
             num_devices = jax.device_count()
             if batch_size % num_devices != 0:
@@ -230,10 +227,10 @@ class Training:
             )
 
         batch_dict = {
-            "inputs": b_inputs,
-            "value_targets": {"winner": b_values},
-            "policy_targets": {"vanilla": b_policy},
-            "movesleft_targets": {"main": b_movesleft},
+            "inputs": batch.input,
+            "policy_targets": batch.policy_heads,
+            "value_targets": batch.value_heads,
+            "movesleft_targets": batch.movesleft_heads,
         }
 
         if self._dp_sharding is not None:
@@ -281,7 +278,7 @@ class Training:
     def run(
         self,
         jit_state: JitTrainingState,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[TrainingTensors, None, None],
         num_steps: int,
         step_hook: Optional[StepHook] = None,
     ) -> JitTrainingState:

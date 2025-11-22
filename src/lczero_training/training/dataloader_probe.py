@@ -4,7 +4,7 @@ import logging
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional
 
 import numpy as np
 from google.protobuf import text_format
@@ -20,11 +20,16 @@ def _stop_loader(loader: DataLoader) -> None:
         loader.stop()
 
 
-def _materialize_batch(batch: Sequence[np.ndarray]) -> Tuple[np.ndarray, ...]:
-    return tuple(np.asarray(tensor).copy() for tensor in batch)
+def _materialize_batch(batch: Any) -> dict:
+    return {
+        "input": batch.input,
+        "policy_heads": batch.policy_heads,
+        "value_heads": batch.value_heads,
+        "movesleft_heads": batch.movesleft_heads,
+    }
 
 
-def _store_batches(path: str, batches: List[Tuple[np.ndarray, ...]]) -> None:
+def _store_batches(path: str, batches: List[Any]) -> None:
     output = Path(path)
     if output.parent:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +61,7 @@ def probe_dataloader(
     logger.info("Creating data loader")
     loader = make_dataloader(config.data_loader)
 
-    collected_batches: List[Tuple[np.ndarray, ...]] = []
+    collected_batches: List[Any] = []
     collect_enabled = npz_output is not None
     first_batch_time = 0.0
     remaining_batches = num_batches - 1

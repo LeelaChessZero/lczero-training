@@ -11,7 +11,7 @@ import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 
-from lczero_training._lczero_training import DataLoader
+from lczero_training._lczero_training import DataLoader, TrainingTensors
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import JitTrainingState
@@ -21,25 +21,23 @@ from proto.metrics_config_pb2 import MetricConfig, MetricsConfig
 
 logger = logging.getLogger(__name__)
 
-Batch = Tuple[np.ndarray, ...]
-
 
 @dataclass
 class CachedBatch:
     """Cached batch data with the global step when it was last updated."""
 
-    batch: Batch
+    batch: TrainingTensors
     global_step: int
 
 
-def load_batch_from_npz(npz_filename: str) -> Batch:
+def load_batch_from_npz(npz_filename: str) -> TrainingTensors:
     """Load a batch from an NPZ file.
 
     Args:
         npz_filename: Path to the NPZ file.
 
     Returns:
-        Batch tuple of (inputs, policy, values, _, movesleft).
+        TrainingTensors object.
 
     Raises:
         ValueError: If the NPZ file doesn't contain exactly one batch.
@@ -104,7 +102,7 @@ class _EvaluatingMetric(_Metric, ABC):
         self.loss_fn = loss_fn
 
     @abstractmethod
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> TrainingTensors:
         """Get the batch data to evaluate."""
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -113,7 +111,10 @@ class _EvaluatingMetric(_Metric, ABC):
         self.logger.log(hook_data.global_step, metrics)
 
     def _evaluate(
-        self, batch: Batch, jit_state: JitTrainingState, graphdef: nnx.GraphDef
+        self,
+        batch: TrainingTensors,
+        jit_state: JitTrainingState,
+        graphdef: nnx.GraphDef,
     ) -> Dict[str, jax.Array]:
         """Evaluate loss function on a batch of data."""
         return evaluate_batch(
@@ -122,7 +123,7 @@ class _EvaluatingMetric(_Metric, ABC):
 
 
 def evaluate_batch(
-    batch: Batch,
+    batch: TrainingTensors,
     jit_state: JitTrainingState,
     graphdef: nnx.GraphDef,
     loss_fn: LczeroLoss,
@@ -131,7 +132,7 @@ def evaluate_batch(
     """Evaluate loss function on a batch of data.
 
     Args:
-        batch: Tuple of (inputs, policy, values, _, movesleft).
+        batch: TrainingTensors object.
         jit_state: JIT training state containing model and optimizer state.
         graphdef: Graph definition of the model.
         loss_fn: Loss function to evaluate.
@@ -140,8 +141,6 @@ def evaluate_batch(
     Returns:
         Dictionary of metrics with loss and unweighted losses.
     """
-    b_inputs, b_policy, b_values, _, b_movesleft = batch
-
     model_state = (
         jit_state.swa_state if use_swa_model else jit_state.model_state
     )
@@ -164,10 +163,10 @@ def evaluate_batch(
     loss_vfn = jax.vmap(loss_fn_inner, in_axes=(None, 0), out_axes=0)
 
     batch_dict = {
-        "inputs": jax.device_put(b_inputs),
-        "value_targets": jax.device_put(b_values),
-        "policy_targets": jax.device_put(b_policy),
-        "movesleft_targets": jax.device_put(b_movesleft),
+        "inputs": batch.input,
+        "value_targets": batch.value_heads,
+        "policy_targets": batch.policy_heads,
+        "movesleft_targets": batch.movesleft_heads,
     }
 
     per_sample_loss, unweighted = loss_vfn(model, batch_dict)
@@ -196,7 +195,7 @@ class _DataLoaderMetric(_EvaluatingMetric):
         self.dataloader_name = dataloader_name
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> TrainingTensors:
         return self.cached_batches[self.dataloader_name].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -232,7 +231,7 @@ class _NpzMetric(_EvaluatingMetric):
         self.npz_filename = npz_filename
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> TrainingTensors:
         return self.cached_batches[self.npz_filename].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:

@@ -20,6 +20,7 @@ from typing import (
     Sequence,
     TextIO,
     Tuple,
+    cast,
 )
 
 import jax
@@ -29,7 +30,11 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
 
-from lczero_training.dataloader import DataLoader, make_dataloader
+from lczero_training.dataloader import (
+    DataLoader,
+    TrainingTensors,
+    make_dataloader,
+)
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import TrainingState
@@ -395,7 +400,7 @@ class Evaluation:
     def run(
         self,
         model: LczeroModel,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[TrainingTensors, None, None],
         num_samples: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
@@ -423,7 +428,7 @@ class Evaluation:
     def _process_sample(
         self,
         model: LczeroModel,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[TrainingTensors, None, None],
         sample_idx: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
@@ -439,19 +444,37 @@ class Evaluation:
         ],
         softmax_jax_wdl: bool,
     ) -> None:
-        inputs, policy, values, _, movesleft = next(datagen)
+        batch_tensors = next(datagen)
         logger.info("Fetched batch from dataloader")
 
         batch = {
-            "inputs": jax.device_put(inputs),
-            "value_targets": {"winner": jax.device_put(values)},
-            "policy_targets": {"vanilla": jax.device_put(policy)},
-            "movesleft_targets": {"main": jax.device_put(movesleft)},
+            "inputs": cast(jax.Array, jnp.asarray(batch_tensors.input)),
+            "value_targets": cast(
+                Dict[str, jax.Array],
+                {
+                    k: jnp.asarray(v)
+                    for k, v in batch_tensors.value_heads.items()
+                },
+            ),
+            "policy_targets": cast(
+                Dict[str, jax.Array],
+                {
+                    k: jnp.asarray(v)
+                    for k, v in batch_tensors.policy_heads.items()
+                },
+            ),
+            "movesleft_targets": cast(
+                Dict[str, jax.Array],
+                {
+                    k: jnp.asarray(v)
+                    for k, v in batch_tensors.movesleft_heads.items()
+                },
+            ),
         }
         dumper.dump_tensors(batch, "INPUT")
 
         value_preds, policy_preds, movesleft_preds = model_output_vfn(
-            model, batch["inputs"]
+            model, cast(jax.Array, batch["inputs"])
         )
 
         # Flatten all head outputs for dumping
@@ -472,7 +495,7 @@ class Evaluation:
                 "policy": policy_preds["vanilla"],
                 "movesleft": movesleft_preds["main"],
             }
-            onnx_inputs_np = np.asarray(inputs).copy()
+            onnx_inputs_np = np.asarray(batch["inputs"]).copy()
             onnx_inputs_np[:, 109, ...] *= 99
             onnx_comparator.compare(
                 jax_outputs_for_onnx, onnx_inputs_np, sample_idx
@@ -481,7 +504,9 @@ class Evaluation:
 
         dumper.dump_tensors(outputs, "OUTPUT")
 
-        per_sample_loss, unweighted_losses = loss_vfn(model, batch)
+        per_sample_loss, unweighted_losses = loss_vfn(
+            model, cast(Dict[str, jax.Array], batch)
+        )
         losses = {
             "per_sample_data_loss": per_sample_loss,
             "unweighted_losses": unweighted_losses,
@@ -511,7 +536,7 @@ class Evaluation:
 
 def from_dataloader(
     loader: DataLoader,
-) -> Generator[Tuple[np.ndarray, ...], None, None]:
+) -> Generator[TrainingTensors, None, None]:
     """Infinetely yields batches from a DataLoader."""
     while True:
         yield loader.get_next()

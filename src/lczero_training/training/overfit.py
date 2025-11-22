@@ -30,13 +30,18 @@ def _stop_loader(loader: DataLoader) -> None:
         loader.stop()
 
 
-def _prepare_batch(batch: tuple) -> dict:
-    inputs, policy, values, _, movesleft = batch
+def _prepare_batch(batch: Any) -> dict:
     return {
-        "inputs": jnp.asarray(inputs),
-        "value_targets": jnp.asarray(values),
-        "policy_targets": jnp.asarray(policy),
-        "movesleft_targets": jnp.asarray(movesleft),
+        "inputs": jnp.asarray(batch.input),
+        "value_targets": {
+            k: jnp.asarray(v) for k, v in batch.value_heads.items()
+        },
+        "policy_targets": {
+            k: jnp.asarray(v) for k, v in batch.policy_heads.items()
+        },
+        "movesleft_targets": {
+            k: jnp.asarray(v) for k, v in batch.movesleft_heads.items()
+        },
     }
 
 

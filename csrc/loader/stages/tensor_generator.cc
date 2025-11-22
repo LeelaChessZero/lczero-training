@@ -68,8 +68,7 @@ void TensorGenerator::Worker(std::stop_token stop_token,
       }
 
       // Convert batch to tensors.
-      TensorTuple tensors;
-      ConvertFramesToTensors(batch, tensors);
+      TrainingTensors tensors = ConvertFramesToTensors(batch);
       {
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(tensors), stop_token);
@@ -82,29 +81,21 @@ void TensorGenerator::Worker(std::stop_token stop_token,
   }
 }
 
-void TensorGenerator::ConvertFramesToTensors(
-    const std::vector<FrameType>& frames, TensorTuple& tensors) {
+TrainingTensors TensorGenerator::ConvertFramesToTensors(
+    const std::vector<FrameType>& frames) {
   const size_t batch_size = frames.size();
   constexpr size_t kNumPlanes = 112;
   constexpr size_t kNumPolicyMoves = 1858;
 
-  // Create tensors according to training tuple format:
-  // 1. planes: (batch_size, 112, 64) as float32
-  // 2. probs: (batch_size, 1858) as float32
-  // 3. winner: (batch_size, 3) as float32
-  // 4. best_q: (batch_size, 3) as float32
-  // 5. plies_left: (batch_size,) as float32
+  TrainingTensors result;
 
-  tensors.clear();
-  tensors.reserve(5);
-
-  // 1. Planes tensor: (batch_size, 112, 8, 8)
+  // Input planes: (batch_size, 112, 8, 8)
   auto planes_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, kNumPlanes, 8, 8});
   ProcessPlanes(frames, *planes_tensor);
-  tensors.push_back(std::move(planes_tensor));
+  result.input = std::move(planes_tensor);
 
-  // 2. Probabilities tensor: (batch_size, 1858)
+  // Policy head "vanilla": (batch_size, 1858)
   auto probs_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, kNumPolicyMoves});
   for (size_t i = 0; i < batch_size; ++i) {
@@ -112,9 +103,9 @@ void TensorGenerator::ConvertFramesToTensors(
     std::memcpy(probs_slice.data(), frames[i].probabilities,
                 kNumPolicyMoves * sizeof(float));
   }
-  tensors.push_back(std::move(probs_tensor));
+  result.policy_heads.push_back({"vanilla", std::move(probs_tensor)});
 
-  // 3. Winner tensor: (batch_size, 3)
+  // Value head "winner": (batch_size, 3)
   auto winner_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, 3});
   for (size_t i = 0; i < batch_size; ++i) {
@@ -128,9 +119,9 @@ void TensorGenerator::ConvertFramesToTensors(
     winner_slice[1] = d;
     winner_slice[2] = loss;
   }
-  tensors.push_back(std::move(winner_tensor));
+  result.value_heads.push_back({"winner", std::move(winner_tensor)});
 
-  // 4. Best Q tensor: (batch_size, 3)
+  // Value head "q": (batch_size, 3)
   auto best_q_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, 3});
   for (size_t i = 0; i < batch_size; ++i) {
@@ -144,16 +135,18 @@ void TensorGenerator::ConvertFramesToTensors(
     best_q_slice[1] = d;
     best_q_slice[2] = loss;
   }
-  tensors.push_back(std::move(best_q_tensor));
+  result.value_heads.push_back({"q", std::move(best_q_tensor)});
 
-  // 5. Plies left tensor: (batch_size,)
+  // Movesleft head "main": (batch_size,)
   auto plies_left_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size});
   for (size_t i = 0; i < batch_size; ++i) {
     auto plies_left_slice = plies_left_tensor->slice({static_cast<ssize_t>(i)});
     plies_left_slice[0] = frames[i].plies_left;
   }
-  tensors.push_back(std::move(plies_left_tensor));
+  result.movesleft_heads.push_back({"main", std::move(plies_left_tensor)});
+
+  return result;
 }
 
 void TensorGenerator::ProcessPlanes(const std::vector<FrameType>& frames,
