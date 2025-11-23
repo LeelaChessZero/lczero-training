@@ -1,4 +1,4 @@
-from typing import Dict, Protocol, Sequence, Tuple, TypeVar
+from typing import Dict, List, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -8,48 +8,62 @@ from jax.scipy.special import xlogy
 from lczero_training.training.state import TrainingSample
 from proto.training_config_pb2 import (
     LossWeightsConfig,
+    MovesLeftLossWeightsConfig,
     PolicyLossWeightsConfig,
+    ValueLossWeightsConfig,
 )
 
 from .model import LczeroModel
 
 
-class Named(Protocol):
-    name: str
+class LossBase:
+    def __init__(
+        self,
+        config: Union[
+            PolicyLossWeightsConfig,
+            ValueLossWeightsConfig,
+            MovesLeftLossWeightsConfig,
+        ],
+    ) -> None:
+        self.head_name = config.head_name
+        self.metric_name = config.metric_name or config.head_name
+        self.weight = config.weight
 
-
-T = TypeVar("T", bound=Named)
-
-
-def _find_head(field: Sequence[T], name: str) -> T:
-    return next(head for head in field if head.name == name)
+    def __call__(self, pred: jax.Array, sample: TrainingSample) -> jax.Array:
+        raise NotImplementedError("Subclasses must implement __call__")
 
 
 class LczeroLoss:
-    def __init__(self, config: LossWeightsConfig):
+    policy_losses: List["PolicyLoss"]
+    value_losses: List["ValueLoss"]
+    movesleft_losses: List["MovesLeftLoss"]
+
+    def __init__(self, config: LossWeightsConfig) -> None:
         self.config = config
-        self.policy_losses: Dict[str, PolicyLoss] = {
-            loss_config.name: PolicyLoss(loss_config)
-            for loss_config in config.policy
-        }
-        self.policy_weights: Dict[str, float] = {
-            loss_config.name: loss_config.weight
-            for loss_config in config.policy
-        }
-        self.value_losses: Dict[str, ValueLoss] = {
-            loss_config.name: ValueLoss() for loss_config in config.value
-        }
-        self.value_weights: Dict[str, float] = {
-            loss_config.name: loss_config.weight for loss_config in config.value
-        }
-        self.movesleft_losses: Dict[str, MovesLeftLoss] = {
-            loss_config.name: MovesLeftLoss()
-            for loss_config in config.movesleft
-        }
-        self.movesleft_weights: Dict[str, float] = {
-            loss_config.name: loss_config.weight
-            for loss_config in config.movesleft
-        }
+        self.policy_losses = [
+            PolicyLoss(loss_config) for loss_config in config.policy
+        ]
+        self.value_losses = [
+            ValueLoss(loss_config) for loss_config in config.value
+        ]
+        self.movesleft_losses = [
+            MovesLeftLoss(loss_config) for loss_config in config.movesleft
+        ]
+
+        def _validate_no_duplicate_metrics(
+            loss_type_name: str, losses: Sequence[LossBase]
+        ) -> None:
+            seen = set()
+            for name in (loss.metric_name for loss in losses):
+                if name in seen:
+                    raise ValueError(
+                        f"Duplicate metric name: {loss_type_name}/{name}"
+                    )
+                seen.add(name)
+
+        _validate_no_duplicate_metrics("policy", self.policy_losses)
+        _validate_no_duplicate_metrics("value", self.value_losses)
+        _validate_no_duplicate_metrics("movesleft", self.movesleft_losses)
 
     def __call__(
         self,
@@ -59,33 +73,31 @@ class LczeroLoss:
         # Run model forward pass.
         value_preds, policy_preds, movesleft_preds = model(sample.inputs)
 
-        unweighted_losses = {}
-        weighted_losses = []
+        unweighted_losses: Dict[str, jax.Array] = {}
+        weighted_losses: List[jax.Array] = []
 
-        # Policy losses - pass entire sample.
-        for name, policy_loss_fn in self.policy_losses.items():
-            loss = policy_loss_fn(policy_preds[name], sample)
-            unweighted_losses[f"policy/{name}"] = loss
-            weighted_losses.append(loss * self.policy_weights[name])
+        loss_configs: List[
+            Tuple[str, Dict[str, jax.Array], Sequence[LossBase]]
+        ] = [
+            ("policy", policy_preds, self.policy_losses),
+            ("value", value_preds, self.value_losses),
+            ("movesleft", movesleft_preds, self.movesleft_losses),
+        ]
 
-        # Value losses - pass entire sample (WDL conversion happens in ValueLoss).
-        for name, value_loss_fn in self.value_losses.items():
-            loss = value_loss_fn(value_preds[name], sample)
-            unweighted_losses[f"value/{name}"] = loss
-            weighted_losses.append(loss * self.value_weights[name])
-
-        # Movesleft losses - pass entire sample.
-        for name, movesleft_loss_fn in self.movesleft_losses.items():
-            loss = movesleft_loss_fn(movesleft_preds[name], sample)
-            unweighted_losses[f"movesleft/{name}"] = loss
-            weighted_losses.append(loss * self.movesleft_weights[name])
+        for category_name, preds, losses in loss_configs:
+            for loss_fn in losses:
+                loss = loss_fn(preds[loss_fn.head_name], sample)
+                unweighted_losses[f"{category_name}/{loss_fn.metric_name}"] = (
+                    loss
+                )
+                weighted_losses.append(loss * loss_fn.weight)
 
         data_loss = jnp.sum(jnp.array(weighted_losses))
 
         return data_loss, unweighted_losses
 
 
-class ValueLoss:
+class ValueLoss(LossBase):
     def __call__(
         self,
         value_pred: jax.Array,
@@ -108,12 +120,13 @@ class ValueLoss:
         return value_cross_entropy
 
 
-class PolicyLoss:
+class PolicyLoss(LossBase):
     def __init__(self, config: PolicyLossWeightsConfig):
+        super().__init__(config)
         self.config = config
         if config.type == PolicyLossWeightsConfig.LOSS_TYPE_UNSPECIFIED:
             raise ValueError(
-                f"Policy loss type must be specified for head '{config.name}'."
+                f"Policy loss type must be specified for head '{config.head_name}'."
             )
         self._loss_type = config.type
         temperature = config.temperature
@@ -177,7 +190,7 @@ class PolicyLoss:
         return cross_entropy - target_entropy
 
 
-class MovesLeftLoss:
+class MovesLeftLoss(LossBase):
     def __call__(
         self,
         movesleft_pred: jax.Array,

@@ -70,33 +70,36 @@ message LossWeightsConfig {
 }
 
 message PolicyLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
   enum IllegalMoveHandling {
     TRAIN_TO_ZERO = 0;
     MASK = 1;
   }
-  IllegalMoveHandling illegal_moves = 3;
+  IllegalMoveHandling illegal_moves = 4;
   enum LossType {
     LOSS_TYPE_UNSPECIFIED = 0;
     CROSS_ENTROPY = 1;
     KL = 2;
   }
   // Selects which policy loss implementation to use. Must be specified.
-  LossType type = 4;
+  LossType type = 5;
   // Soft policy temperature applied before normalizing targets for KL loss.
   // Values <= 0 disable the adjustment and keep raw targets.
-  float temperature = 5;
+  float temperature = 6;
 }
 
 message ValueLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
 }
 
 message MovesLeftLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
 }
 
 // Stochastic Weight Averaging configuration.
