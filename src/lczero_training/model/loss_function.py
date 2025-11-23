@@ -1,4 +1,4 @@
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union, cast
 
 import jax
 import jax.numpy as jnp
@@ -137,6 +137,22 @@ class PolicyLoss(LossBase):
             temperature = 1.0
         self._temperature = temperature
 
+    def _apply_temperature_and_normalize(
+        self, policy_targets: jax.Array
+    ) -> jax.Array:
+        if self._temperature == 1.0:
+            return policy_targets
+
+        # Apply temperature scaling.
+        policy_targets = jnp.power(policy_targets, 1.0 / self._temperature)
+
+        # Renormalize after temperature scaling.
+        target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
+        safe_sum = jnp.where(
+            target_sum > 0, target_sum, jnp.ones_like(target_sum)
+        )
+        return policy_targets / safe_sum
+
     def __call__(
         self,
         policy_pred: jax.Array,
@@ -152,45 +168,23 @@ class PolicyLoss(LossBase):
         # Zero out negative targets for illegal moves.
         policy_targets = jax.nn.relu(policy_targets)
 
+        # Apply temperature scaling and renormalization if needed.
+        policy_targets = self._apply_temperature_and_normalize(policy_targets)
+
+        cross_entropy = cast(
+            jax.Array,
+            optax.safe_softmax_cross_entropy(
+                logits=policy_pred, labels=policy_targets
+            ),
+        )
+        if self._loss_type == PolicyLossWeightsConfig.CROSS_ENTROPY:
+            return cross_entropy
+
         if self._loss_type == PolicyLossWeightsConfig.KL:
-            loss = self._kl_loss(policy_pred, policy_targets)
-        elif self._loss_type == PolicyLossWeightsConfig.CROSS_ENTROPY:
-            loss = self._cross_entropy_loss(policy_pred, policy_targets)
-        else:
-            raise AssertionError(
-                f"Unsupported policy loss type: {self._loss_type}."
+            return cross_entropy + jnp.sum(
+                xlogy(policy_targets, policy_targets), axis=-1
             )
-        assert isinstance(loss, jax.Array)
-        return loss
-
-    def _cross_entropy_loss(
-        self, policy_pred: jax.Array, policy_targets: jax.Array
-    ) -> jax.Array:
-        # Safe softmax cross-entropy to avoid NaNs due to -inf in logits.
-        return optax.safe_softmax_cross_entropy(
-            logits=policy_pred, labels=jax.lax.stop_gradient(policy_targets)
-        )
-
-    def _kl_loss(
-        self, policy_pred: jax.Array, policy_targets: jax.Array
-    ) -> jax.Array:
-        if self._temperature != 1.0:
-            policy_targets = jnp.power(policy_targets, 1.0 / self._temperature)
-
-        target_sum = jnp.sum(policy_targets, axis=-1, keepdims=True)
-        safe_sum = jnp.where(
-            target_sum > 0, target_sum, jnp.ones_like(target_sum)
-        )
-        normalized_targets = policy_targets / safe_sum
-        safe_targets = jax.lax.stop_gradient(normalized_targets)
-
-        cross_entropy = optax.safe_softmax_cross_entropy(
-            logits=policy_pred, labels=safe_targets
-        )
-        target_entropy = -jnp.sum(
-            xlogy(normalized_targets, normalized_targets), axis=-1
-        )
-        return cross_entropy - target_entropy
+        raise AssertionError(f"Unknown policy loss type: {self._loss_type}.")
 
 
 class MovesLeftLoss(LossBase):
