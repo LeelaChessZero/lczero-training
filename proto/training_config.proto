@@ -69,6 +69,15 @@ message LossWeightsConfig {
   repeated MovesLeftLossWeightsConfig movesleft = 3;
 }
 
+enum ValueType {
+  RESULT = 0;
+  BEST = 1;
+  PLAYED = 2;
+  ORIG = 3;
+  ROOT = 4;
+  ST = 5;
+}
+
 message PolicyLossWeightsConfig {
   string head_name = 1;
   string metric_name = 2;
@@ -94,12 +103,14 @@ message ValueLossWeightsConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
+  ValueType value_type = 4;
 }
 
 message MovesLeftLossWeightsConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
+  ValueType value_type = 4;
 }
 
 // Stochastic Weight Averaging configuration.

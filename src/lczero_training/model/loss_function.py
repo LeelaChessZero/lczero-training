@@ -98,23 +98,26 @@ class LczeroLoss:
 
 
 class ValueLoss(LossBase):
+    def __init__(self, config: ValueLossWeightsConfig) -> None:
+        super().__init__(config)
+        self.value_type = config.value_type
+
     def __call__(
         self,
         value_pred: jax.Array,
         sample: TrainingSample,
     ) -> jax.Array:
         # Extract raw q/d from sample and compute WDL.
-        # sample.values shape: [6, 3] where index 0 is result.
-        result_q = sample.values[0, 0]
-        result_d = sample.values[0, 1]
+        value_q = sample.values[self.value_type, 0]
+        value_d = sample.values[self.value_type, 1]
         # Compute WDL: w = (1 + q - d) / 2, l = (1 - q - d) / 2
-        result_w = (1.0 + result_q - result_d) / 2.0
-        result_l = (1.0 - result_q - result_d) / 2.0
-        result_wdl = jnp.stack([result_w, result_d, result_l], axis=-1)
+        value_w = (1.0 + value_q - value_d) / 2.0
+        value_l = (1.0 - value_q - value_d) / 2.0
+        value_wdl = jnp.stack([value_w, value_d, value_l], axis=-1)
 
         # The cross-entropy between the predicted value and the target value.
         value_cross_entropy = optax.softmax_cross_entropy(
-            logits=value_pred, labels=jax.lax.stop_gradient(result_wdl)
+            logits=value_pred, labels=jax.lax.stop_gradient(value_wdl)
         )
         assert isinstance(value_cross_entropy, jax.Array)
         return value_cross_entropy
@@ -191,14 +194,18 @@ class PolicyLoss(LossBase):
 
 
 class MovesLeftLoss(LossBase):
+    def __init__(self, config: MovesLeftLossWeightsConfig) -> None:
+        super().__init__(config)
+        self.value_type = config.value_type
+
     def __call__(
         self,
         movesleft_pred: jax.Array,
         sample: TrainingSample,
     ) -> jax.Array:
         # Extract movesleft from sample.
-        # sample.values shape: [6, 3] where index 0 is result, component 2 is movesleft.
-        movesleft_targets = sample.values[0, 2]
+        # sample.values shape: [6, 3], component 2 is movesleft.
+        movesleft_targets = sample.values[self.value_type, 2]
 
         # Scale the loss to similar range as other losses.
         scale = 20.0
