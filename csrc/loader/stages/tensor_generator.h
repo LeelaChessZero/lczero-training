@@ -22,14 +22,14 @@ namespace lczero {
 namespace training {
 
 // Worker pool that converts FrameType frames into tensor batches.
-// Takes individual FrameType frames as input and outputs TrainingTensors
+// Takes individual FrameType frames as input and outputs TensorTuple
 // containing batched tensors in the format required for training.
 class TensorGenerator
     : public SingleInputStage<TensorGeneratorConfig, FrameType>,
-      public SingleOutputStage<TrainingTensors> {
+      public SingleOutputStage<TensorTuple> {
  public:
   using InputType = FrameType;
-  using OutputType = TrainingTensors;
+  using OutputType = TensorTuple;
 
   explicit TensorGenerator(const TensorGeneratorConfig& config);
   ~TensorGenerator();
@@ -44,7 +44,7 @@ class TensorGenerator
   };
 
   void Worker(std::stop_token stop_token, ThreadContext* context);
-  TrainingTensors ConvertFramesToTensors(const std::vector<FrameType>& frames);
+  TensorTuple ConvertFramesToTensors(const std::vector<FrameType>& frames);
   void ProcessPlanes(const std::vector<FrameType>& frames,
                      TypedTensor<float>& planes_tensor);
 

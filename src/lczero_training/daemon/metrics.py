@@ -11,33 +11,37 @@ import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 
-from lczero_training._lczero_training import DataLoader, TrainingTensors
+from lczero_training._lczero_training import DataLoader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import JitTrainingState
+from lczero_training.training.state import JitTrainingState, TrainingSample
 from lczero_training.training.tensorboard import TensorboardLogger
 from lczero_training.training.training import StepHookData
 from proto.metrics_config_pb2 import MetricConfig, MetricsConfig
 
 logger = logging.getLogger(__name__)
 
+# Type alias for batch tuple returned by DataLoader
+# Using ... to allow variable length for compatibility with maybe_get_next
+BatchTuple = tuple[np.ndarray, ...]
+
 
 @dataclass
 class CachedBatch:
     """Cached batch data with the global step when it was last updated."""
 
-    batch: TrainingTensors
+    batch: BatchTuple
     global_step: int
 
 
-def load_batch_from_npz(npz_filename: str) -> TrainingTensors:
+def load_batch_from_npz(npz_filename: str) -> BatchTuple:
     """Load a batch from an NPZ file.
 
     Args:
         npz_filename: Path to the NPZ file.
 
     Returns:
-        TrainingTensors object.
+        BatchTuple (tuple of inputs, probabilities, values arrays).
 
     Raises:
         ValueError: If the NPZ file doesn't contain exactly one batch.
@@ -102,7 +106,7 @@ class _EvaluatingMetric(_Metric, ABC):
         self.loss_fn = loss_fn
 
     @abstractmethod
-    def get_batch(self) -> TrainingTensors:
+    def get_batch(self) -> BatchTuple:
         """Get the batch data to evaluate."""
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -112,7 +116,7 @@ class _EvaluatingMetric(_Metric, ABC):
 
     def _evaluate(
         self,
-        batch: TrainingTensors,
+        batch: BatchTuple,
         jit_state: JitTrainingState,
         graphdef: nnx.GraphDef,
     ) -> Dict[str, jax.Array]:
@@ -123,7 +127,7 @@ class _EvaluatingMetric(_Metric, ABC):
 
 
 def evaluate_batch(
-    batch: TrainingTensors,
+    batch: BatchTuple,
     jit_state: JitTrainingState,
     graphdef: nnx.GraphDef,
     loss_fn: LczeroLoss,
@@ -132,7 +136,7 @@ def evaluate_batch(
     """Evaluate loss function on a batch of data.
 
     Args:
-        batch: TrainingTensors object.
+        batch: BatchTuple (inputs, probabilities, values).
         jit_state: JIT training state containing model and optimizer state.
         graphdef: Graph definition of the model.
         loss_fn: Loss function to evaluate.
@@ -150,26 +154,20 @@ def evaluate_batch(
     model = nnx.merge(graphdef, model_state)
 
     def loss_fn_inner(
-        m: LczeroModel, b: dict
+        m: LczeroModel, sample: TrainingSample
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        return loss_fn(
-            m,
-            inputs=b["inputs"],
-            value_targets=b["value_targets"],
-            policy_targets=b["policy_targets"],
-            movesleft_targets=b["movesleft_targets"],
-        )
+        return loss_fn(m, sample)
 
     loss_vfn = jax.vmap(loss_fn_inner, in_axes=(None, 0), out_axes=0)
 
-    batch_dict = {
-        "inputs": batch.input,
-        "value_targets": batch.value_heads,
-        "policy_targets": batch.policy_heads,
-        "movesleft_targets": batch.movesleft_heads,
-    }
+    # Convert tuple to TrainingSample structure for vmap.
+    batch_sample = TrainingSample(
+        inputs=jnp.asarray(batch[0]),
+        probabilities=jnp.asarray(batch[1]),
+        values=jnp.asarray(batch[2]),
+    )
 
-    per_sample_loss, unweighted = loss_vfn(model, batch_dict)
+    per_sample_loss, unweighted = loss_vfn(model, batch_sample)
     return {
         "loss": jnp.mean(per_sample_loss),
         "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
@@ -195,7 +193,7 @@ class _DataLoaderMetric(_EvaluatingMetric):
         self.dataloader_name = dataloader_name
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> TrainingTensors:
+    def get_batch(self) -> BatchTuple:
         return self.cached_batches[self.dataloader_name].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -231,7 +229,7 @@ class _NpzMetric(_EvaluatingMetric):
         self.npz_filename = npz_filename
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> TrainingTensors:
+    def get_batch(self) -> BatchTuple:
         return self.cached_batches[self.npz_filename].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:

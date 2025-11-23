@@ -99,8 +99,8 @@ void DataLoader::Start() {
   LOG(INFO) << "DataLoader started.";
 }
 
-TrainingTensors DataLoader::GetNext(std::string_view alias) {
-  Queue<TrainingTensors>* q = GetOutputQueue(alias);
+TensorTuple DataLoader::GetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
   if (!q) {
     std::string alias_list = absl::StrJoin(
         outputs_, ", ",
@@ -112,9 +112,8 @@ TrainingTensors DataLoader::GetNext(std::string_view alias) {
   return q->Get();
 }
 
-std::optional<TrainingTensors> DataLoader::MaybeGetNext(
-    std::string_view alias) {
-  Queue<TrainingTensors>* q = GetOutputQueue(alias);
+std::optional<TensorTuple> DataLoader::MaybeGetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
   if (!q) {
     std::string alias_list = absl::StrJoin(
         outputs_, ", ",
@@ -222,8 +221,8 @@ void DataLoader::BuildOutputMapping(const DataLoaderConfig& config) {
           absl::StrCat("Duplicate output alias specified: ", alias));
     }
 
-    Queue<TrainingTensors>* queue =
-        stage_registry_.GetTypedStageOutput<TrainingTensors>(stage_name);
+    Queue<TensorTuple>* queue =
+        stage_registry_.GetTypedStageOutput<TensorTuple>(stage_name);
     if (queue == nullptr) {
       throw std::runtime_error(
           absl::StrCat("Output stage not found or wrong type: ", stage_name));
@@ -232,8 +231,7 @@ void DataLoader::BuildOutputMapping(const DataLoaderConfig& config) {
   }
 }
 
-Queue<TrainingTensors>* DataLoader::GetOutputQueue(
-    std::string_view alias) const {
+Queue<TensorTuple>* DataLoader::GetOutputQueue(std::string_view alias) const {
   auto it = absl::c_find_if(outputs_,
                             [&](const auto& p) { return p.first == alias; });
   if (it == outputs_.end()) return nullptr;

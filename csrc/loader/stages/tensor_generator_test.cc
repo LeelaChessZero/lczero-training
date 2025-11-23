@@ -82,18 +82,22 @@ class TensorGeneratorTest : public ::testing::Test {
     frame.result_d = 0.2f;
     frame.best_q = 0.3f;
     frame.best_d = 0.1f;
+    frame.best_m = 42.5f;
     frame.plies_left = 42.5f;
 
     return frame;
   }
 
-  void VerifyTrainingTensors(const TrainingTensors& tensors,
-                             const std::vector<FrameType>& frames) {
+  void VerifyTensorTuple(const TensorTuple& tensors,
+                         const std::vector<FrameType>& frames) {
     const size_t batch_size = frames.size();
+
+    // Verify tuple has 3 elements
+    ASSERT_EQ(tensors.size(), 3);
 
     // Verify input tensor: (batch_size, 112, 8, 8)
     const auto* planes_tensor =
-        dynamic_cast<const TypedTensor<float>*>(tensors.input.get());
+        dynamic_cast<const TypedTensor<float>*>(tensors[0].get());
     ASSERT_NE(planes_tensor, nullptr);
     EXPECT_EQ(planes_tensor->shape().size(), 4);
     EXPECT_EQ(planes_tensor->shape()[0], batch_size);
@@ -101,57 +105,33 @@ class TensorGeneratorTest : public ::testing::Test {
     EXPECT_EQ(planes_tensor->shape()[2], 8);
     EXPECT_EQ(planes_tensor->shape()[3], 8);
 
-    // Verify policy heads
-    ASSERT_EQ(tensors.policy_heads.size(), 1);
-    EXPECT_EQ(tensors.policy_heads[0].first, "vanilla");
-    const auto* probs_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.policy_heads[0].second.get());
+    // Verify probabilities tensor: (batch_size, 1858)
+    const auto* probs_tensor =
+        dynamic_cast<const TypedTensor<float>*>(tensors[1].get());
     ASSERT_NE(probs_tensor, nullptr);
     EXPECT_EQ(probs_tensor->shape().size(), 2);
     EXPECT_EQ(probs_tensor->shape()[0], batch_size);
     EXPECT_EQ(probs_tensor->shape()[1], 1858);
 
-    // Verify value heads
-    ASSERT_EQ(tensors.value_heads.size(), 2);
-    EXPECT_EQ(tensors.value_heads[0].first, "winner");
-    const auto* winner_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.value_heads[0].second.get());
-    ASSERT_NE(winner_tensor, nullptr);
-    EXPECT_EQ(winner_tensor->shape().size(), 2);
-    EXPECT_EQ(winner_tensor->shape()[0], batch_size);
-    EXPECT_EQ(winner_tensor->shape()[1], 3);
-
-    EXPECT_EQ(tensors.value_heads[1].first, "q");
-    const auto* best_q_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.value_heads[1].second.get());
-    ASSERT_NE(best_q_tensor, nullptr);
-    EXPECT_EQ(best_q_tensor->shape().size(), 2);
-    EXPECT_EQ(best_q_tensor->shape()[0], batch_size);
-    EXPECT_EQ(best_q_tensor->shape()[1], 3);
-
-    // Verify movesleft heads
-    ASSERT_EQ(tensors.movesleft_heads.size(), 1);
-    EXPECT_EQ(tensors.movesleft_heads[0].first, "main");
-    const auto* plies_left_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.movesleft_heads[0].second.get());
-    ASSERT_NE(plies_left_tensor, nullptr);
-    EXPECT_EQ(plies_left_tensor->shape().size(), 1);
-    EXPECT_EQ(plies_left_tensor->shape()[0], batch_size);
+    // Verify values tensor: (batch_size, 6, 3)
+    const auto* values_tensor =
+        dynamic_cast<const TypedTensor<float>*>(tensors[2].get());
+    ASSERT_NE(values_tensor, nullptr);
+    EXPECT_EQ(values_tensor->shape().size(), 3);
+    EXPECT_EQ(values_tensor->shape()[0], batch_size);
+    EXPECT_EQ(values_tensor->shape()[1], 6);
+    EXPECT_EQ(values_tensor->shape()[2], 3);
   }
 
-  void VerifyTensorData(const TrainingTensors& tensors,
+  void VerifyTensorData(const TensorTuple& tensors,
                         const std::vector<FrameType>& frames) {
     const size_t batch_size = frames.size();
     const auto* planes_tensor =
-        dynamic_cast<const TypedTensor<float>*>(tensors.input.get());
-    const auto* probs_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.policy_heads[0].second.get());
-    const auto* winner_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.value_heads[0].second.get());
-    const auto* best_q_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.value_heads[1].second.get());
-    const auto* plies_left_tensor = dynamic_cast<const TypedTensor<float>*>(
-        tensors.movesleft_heads[0].second.get());
+        dynamic_cast<const TypedTensor<float>*>(tensors[0].get());
+    const auto* probs_tensor =
+        dynamic_cast<const TypedTensor<float>*>(tensors[1].get());
+    const auto* values_tensor =
+        dynamic_cast<const TypedTensor<float>*>(tensors[2].get());
 
     for (size_t i = 0; i < batch_size; ++i) {
       const auto& frame = frames[i];
@@ -162,28 +142,17 @@ class TensorGeneratorTest : public ::testing::Test {
         EXPECT_FLOAT_EQ(probs_slice[j], frame.probabilities[j]);
       }
 
-      // Verify winner conversion: result_q=0.5, result_d=0.2
-      // win = (1.0 + 0.5 - 0.2) / 2.0 = 0.65
-      // draw = 0.2
-      // loss = (1.0 - 0.5 - 0.2) / 2.0 = 0.15
-      auto winner_slice = winner_tensor->slice({static_cast<ssize_t>(i)});
-      EXPECT_FLOAT_EQ(winner_slice[0], 0.65f);  // win
-      EXPECT_FLOAT_EQ(winner_slice[1], 0.2f);   // draw
-      EXPECT_FLOAT_EQ(winner_slice[2], 0.15f);  // loss
+      // Verify values tensor [batch, 6, 3] with raw q/d/m values
+      // Index 0: result (q=0.5, d=0.2, m=42.5)
+      auto values_slice = values_tensor->slice({static_cast<ssize_t>(i)});
+      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 0], 0.5f);   // result_q
+      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 1], 0.2f);   // result_d
+      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 2], 42.5f);  // result_m
 
-      // Verify best_q conversion: best_q=0.3, best_d=0.1
-      // win = (1.0 + 0.3 - 0.1) / 2.0 = 0.6
-      // draw = 0.1
-      // loss = (1.0 - 0.3 - 0.1) / 2.0 = 0.3
-      auto best_q_slice = best_q_tensor->slice({static_cast<ssize_t>(i)});
-      EXPECT_FLOAT_EQ(best_q_slice[0], 0.6f);  // win
-      EXPECT_FLOAT_EQ(best_q_slice[1], 0.1f);  // draw
-      EXPECT_FLOAT_EQ(best_q_slice[2], 0.3f);  // loss
-
-      // Verify plies_left.
-      auto plies_left_slice =
-          plies_left_tensor->slice({static_cast<ssize_t>(i)});
-      EXPECT_FLOAT_EQ(plies_left_slice[0], 42.5f);
+      // Index 1: best (q=0.3, d=0.1, m=42.5)
+      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 0], 0.3f);   // best_q
+      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 1], 0.1f);   // best_d
+      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 2], 42.5f);  // best_m
 
       // Verify planes data - check first few planes and meta planes.
       auto planes_slice = planes_tensor->slice({static_cast<ssize_t>(i)});
@@ -242,7 +211,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorShapes) {
   producer.Close();
 
   auto tensors = generator.output_queue()->Get();
-  VerifyTrainingTensors(tensors, frames);
+  VerifyTensorTuple(tensors, frames);
 }
 
 TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
@@ -259,7 +228,7 @@ TEST_F(TensorGeneratorTest, GeneratesCorrectTensorData) {
   producer.Close();
 
   auto tensors = generator.output_queue()->Get();
-  VerifyTrainingTensors(tensors, frames);
+  VerifyTensorTuple(tensors, frames);
   VerifyTensorData(tensors, frames);
 }
 
@@ -286,13 +255,13 @@ TEST_F(TensorGeneratorTest, HandlesMultipleBatches) {
   auto tensors1 = generator.output_queue()->Get();
   std::vector<FrameType> batch1_frames(
       all_frames.begin(), all_frames.begin() + config_.batch_size());
-  VerifyTrainingTensors(tensors1, batch1_frames);
+  VerifyTensorTuple(tensors1, batch1_frames);
 
   // Get second batch.
   auto tensors2 = generator.output_queue()->Get();
   std::vector<FrameType> batch2_frames(
       all_frames.begin() + config_.batch_size(), all_frames.end());
-  VerifyTrainingTensors(tensors2, batch2_frames);
+  VerifyTensorTuple(tensors2, batch2_frames);
 
   // No more batches should be available.
   EXPECT_THROW(generator.output_queue()->Get(), QueueClosedException);
@@ -313,7 +282,7 @@ TEST_F(TensorGeneratorTest, HandlesDifferentBatchSizes) {
   producer.Close();
 
   auto tensors = generator.output_queue()->Get();
-  VerifyTrainingTensors(tensors, frames);
+  VerifyTensorTuple(tensors, frames);
 }
 
 TEST_F(TensorGeneratorTest, HandlesEmptyInput) {
@@ -349,7 +318,7 @@ TEST_F(TensorGeneratorTest, VerifiesPlanesConversion) {
 
   auto tensors = generator.output_queue()->Get();
   const auto* planes_tensor =
-      dynamic_cast<const TypedTensor<float>*>(tensors.input.get());
+      dynamic_cast<const TypedTensor<float>*>(tensors[0].get());
 
   auto planes_slice = planes_tensor->slice({0});
 
@@ -386,29 +355,18 @@ TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   producer.Close();
 
   auto tensors = generator.output_queue()->Get();
-  const auto* winner_tensor = dynamic_cast<const TypedTensor<float>*>(
-      tensors.value_heads[0].second.get());
-  const auto* best_q_tensor = dynamic_cast<const TypedTensor<float>*>(
-      tensors.value_heads[1].second.get());
+  const auto* values_tensor =
+      dynamic_cast<const TypedTensor<float>*>(tensors[2].get());
 
-  auto winner_slice = winner_tensor->slice({0});
-  auto best_q_slice = best_q_tensor->slice({0});
+  auto values_slice = values_tensor->slice({0});
 
-  // Verify winner: q=0.4, d=0.3
-  // win = (1.0 + 0.4 - 0.3) / 2.0 = 0.55
-  // draw = 0.3
-  // loss = (1.0 - 0.4 - 0.3) / 2.0 = 0.15
-  EXPECT_FLOAT_EQ(winner_slice[0], 0.55f);
-  EXPECT_FLOAT_EQ(winner_slice[1], 0.3f);
-  EXPECT_FLOAT_EQ(winner_slice[2], 0.15f);
+  // Verify result values: q=0.4, d=0.3 (raw values, no WDL conversion)
+  EXPECT_FLOAT_EQ(values_slice[0 * 3 + 0], 0.4f);  // result_q
+  EXPECT_FLOAT_EQ(values_slice[0 * 3 + 1], 0.3f);  // result_d
 
-  // Verify best_q: q=-0.2, d=0.1
-  // win = (1.0 + (-0.2) - 0.1) / 2.0 = 0.35
-  // draw = 0.1
-  // loss = (1.0 - (-0.2) - 0.1) / 2.0 = 0.55
-  EXPECT_FLOAT_EQ(best_q_slice[0], 0.35f);
-  EXPECT_FLOAT_EQ(best_q_slice[1], 0.1f);
-  EXPECT_FLOAT_EQ(best_q_slice[2], 0.55f);
+  // Verify best values: q=-0.2, d=0.1 (raw values, no WDL conversion)
+  EXPECT_FLOAT_EQ(values_slice[1 * 3 + 0], -0.2f);  // best_q
+  EXPECT_FLOAT_EQ(values_slice[1 * 3 + 1], 0.1f);   // best_d
 }
 
 }  // namespace training

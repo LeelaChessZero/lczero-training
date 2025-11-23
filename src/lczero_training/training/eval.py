@@ -32,12 +32,11 @@ from google.protobuf import text_format
 
 from lczero_training.dataloader import (
     DataLoader,
-    TrainingTensors,
     make_dataloader,
 )
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import TrainingSample, TrainingState
 from proto import data_loader_config_pb2
 from proto.root_config_pb2 import RootConfig
 
@@ -400,7 +399,7 @@ class Evaluation:
     def run(
         self,
         model: LczeroModel,
-        datagen: Generator[TrainingTensors, None, None],
+        datagen: Generator[tuple[np.ndarray, ...], None, None],
         num_samples: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
@@ -428,12 +427,12 @@ class Evaluation:
     def _process_sample(
         self,
         model: LczeroModel,
-        datagen: Generator[TrainingTensors, None, None],
+        datagen: Generator[tuple[np.ndarray, ...], None, None],
         sample_idx: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
         loss_vfn: Callable[
-            [LczeroModel, Dict[str, jax.Array]],
+            [LczeroModel, TrainingSample],
             Tuple[jax.Array, Dict[str, jax.Array]],
         ],
         model_output_vfn: Callable[
@@ -444,32 +443,14 @@ class Evaluation:
         ],
         softmax_jax_wdl: bool,
     ) -> None:
-        batch_tensors = next(datagen)
+        batch_tuple = next(datagen)
         logger.info("Fetched batch from dataloader")
 
+        # DataLoader now returns tuple: (inputs, probabilities, values)
         batch = {
-            "inputs": cast(jax.Array, jnp.asarray(batch_tensors.input)),
-            "value_targets": cast(
-                Dict[str, jax.Array],
-                {
-                    k: jnp.asarray(v)
-                    for k, v in batch_tensors.value_heads.items()
-                },
-            ),
-            "policy_targets": cast(
-                Dict[str, jax.Array],
-                {
-                    k: jnp.asarray(v)
-                    for k, v in batch_tensors.policy_heads.items()
-                },
-            ),
-            "movesleft_targets": cast(
-                Dict[str, jax.Array],
-                {
-                    k: jnp.asarray(v)
-                    for k, v in batch_tensors.movesleft_heads.items()
-                },
-            ),
+            "inputs": cast(jax.Array, jnp.asarray(batch_tuple[0])),
+            "probabilities": cast(jax.Array, jnp.asarray(batch_tuple[1])),
+            "values": cast(jax.Array, jnp.asarray(batch_tuple[2])),
         }
         dumper.dump_tensors(batch, "INPUT")
 
@@ -504,9 +485,13 @@ class Evaluation:
 
         dumper.dump_tensors(outputs, "OUTPUT")
 
-        per_sample_loss, unweighted_losses = loss_vfn(
-            model, cast(Dict[str, jax.Array], batch)
+        # Convert batch dict to TrainingSample for loss function
+        batch_sample = TrainingSample(
+            inputs=batch["inputs"],
+            probabilities=batch["probabilities"],
+            values=batch["values"],
         )
+        per_sample_loss, unweighted_losses = loss_vfn(model, batch_sample)
         losses = {
             "per_sample_data_loss": per_sample_loss,
             "unweighted_losses": unweighted_losses,
@@ -515,15 +500,9 @@ class Evaluation:
         dumper.dump_structured(batch, outputs, losses)
 
     def _loss_for_grad(
-        self, model_arg: LczeroModel, batch_arg: dict
+        self, model_arg: LczeroModel, sample_arg: TrainingSample
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        return self.loss_fn(
-            model_arg,
-            inputs=batch_arg["inputs"],
-            value_targets=batch_arg["value_targets"],
-            policy_targets=batch_arg["policy_targets"],
-            movesleft_targets=batch_arg["movesleft_targets"],
-        )
+        return self.loss_fn(model_arg, sample_arg)
 
     @staticmethod
     def _model_for_output(
@@ -536,7 +515,7 @@ class Evaluation:
 
 def from_dataloader(
     loader: DataLoader,
-) -> Generator[TrainingTensors, None, None]:
+) -> Generator[tuple[np.ndarray, ...], None, None]:
     """Infinetely yields batches from a DataLoader."""
     while True:
         yield loader.get_next()

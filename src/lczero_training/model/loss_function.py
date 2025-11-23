@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import optax
 from jax.scipy.special import xlogy
 
+from lczero_training.training.state import TrainingSample
 from proto.training_config_pb2 import (
     LossWeightsConfig,
     PolicyLossWeightsConfig,
@@ -53,30 +54,29 @@ class LczeroLoss:
     def __call__(
         self,
         model: LczeroModel,
-        inputs: jax.Array,
-        value_targets: Dict[str, jax.Array],
-        policy_targets: Dict[str, jax.Array],
-        movesleft_targets: Dict[str, jax.Array],
+        sample: TrainingSample,
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        value_preds, policy_preds, movesleft_preds = model(inputs)
+        # Run model forward pass.
+        value_preds, policy_preds, movesleft_preds = model(sample.inputs)
 
         unweighted_losses = {}
         weighted_losses = []
 
+        # Policy losses - pass entire sample.
         for name, policy_loss_fn in self.policy_losses.items():
-            loss = policy_loss_fn(policy_preds[name], policy_targets[name])
+            loss = policy_loss_fn(policy_preds[name], sample)
             unweighted_losses[f"policy/{name}"] = loss
             weighted_losses.append(loss * self.policy_weights[name])
 
+        # Value losses - pass entire sample (WDL conversion happens in ValueLoss).
         for name, value_loss_fn in self.value_losses.items():
-            loss = value_loss_fn(value_preds[name], value_targets[name])
+            loss = value_loss_fn(value_preds[name], sample)
             unweighted_losses[f"value/{name}"] = loss
             weighted_losses.append(loss * self.value_weights[name])
 
+        # Movesleft losses - pass entire sample.
         for name, movesleft_loss_fn in self.movesleft_losses.items():
-            loss = movesleft_loss_fn(
-                movesleft_preds[name], movesleft_targets[name]
-            )
+            loss = movesleft_loss_fn(movesleft_preds[name], sample)
             unweighted_losses[f"movesleft/{name}"] = loss
             weighted_losses.append(loss * self.movesleft_weights[name])
 
@@ -89,11 +89,20 @@ class ValueLoss:
     def __call__(
         self,
         value_pred: jax.Array,
-        value_targets: jax.Array,
+        sample: TrainingSample,
     ) -> jax.Array:
+        # Extract raw q/d from sample and compute WDL.
+        # sample.values shape: [6, 3] where index 0 is result.
+        result_q = sample.values[0, 0]
+        result_d = sample.values[0, 1]
+        # Compute WDL: w = (1 + q - d) / 2, l = (1 - q - d) / 2
+        result_w = (1.0 + result_q - result_d) / 2.0
+        result_l = (1.0 - result_q - result_d) / 2.0
+        result_wdl = jnp.stack([result_w, result_d, result_l], axis=-1)
+
         # The cross-entropy between the predicted value and the target value.
         value_cross_entropy = optax.softmax_cross_entropy(
-            logits=value_pred, labels=jax.lax.stop_gradient(value_targets)
+            logits=value_pred, labels=jax.lax.stop_gradient(result_wdl)
         )
         assert isinstance(value_cross_entropy, jax.Array)
         return value_cross_entropy
@@ -115,9 +124,12 @@ class PolicyLoss:
     def __call__(
         self,
         policy_pred: jax.Array,
-        policy_targets: jax.Array,
+        sample: TrainingSample,
     ) -> jax.Array:
-        policy_targets = jnp.asarray(policy_targets, dtype=policy_pred.dtype)
+        # Extract probabilities from sample.
+        policy_targets = jnp.asarray(
+            sample.probabilities, dtype=policy_pred.dtype
+        )
         if self.config.illegal_moves == PolicyLossWeightsConfig.MASK:
             policy_pred = jnp.where(policy_targets >= 0, policy_pred, -jnp.inf)
 
@@ -169,8 +181,12 @@ class MovesLeftLoss:
     def __call__(
         self,
         movesleft_pred: jax.Array,
-        movesleft_targets: jax.Array,
+        sample: TrainingSample,
     ) -> jax.Array:
+        # Extract movesleft from sample.
+        # sample.values shape: [6, 3] where index 0 is result, component 2 is movesleft.
+        movesleft_targets = sample.values[0, 2]
+
         # Scale the loss to similar range as other losses.
         scale = 20.0
         targets = movesleft_targets / scale

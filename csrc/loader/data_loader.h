@@ -21,13 +21,6 @@ namespace training {
 using TensorDict =
     std::vector<std::pair<std::string, std::unique_ptr<TensorBase>>>;
 
-struct TrainingTensors {
-  std::unique_ptr<TensorBase> input;
-  TensorDict policy_heads;
-  TensorDict value_heads;
-  TensorDict movesleft_heads;
-};
-
 class DataLoader {
  public:
   using MetricsAggregator = ExponentialAggregator<DataLoaderMetricsProto,
@@ -37,8 +30,8 @@ class DataLoader {
   ~DataLoader();
 
   void Start();
-  TrainingTensors GetNext(std::string_view alias);
-  std::optional<TrainingTensors> MaybeGetNext(std::string_view alias);
+  TensorTuple GetNext(std::string_view alias);
+  std::optional<TensorTuple> MaybeGetNext(std::string_view alias);
   void Stop();
   std::pair<std::string, float> GetBucketMetrics(int time_period,
                                                  bool include_pending) const;
@@ -58,10 +51,10 @@ class DataLoader {
       const std::string& serialized_data_loader_config);
   void MetricsThread(std::stop_token stop_token);
   void BuildOutputMapping(const DataLoaderConfig& config);
-  Queue<TrainingTensors>* GetOutputQueue(std::string_view alias) const;
+  Queue<TensorTuple>* GetOutputQueue(std::string_view alias) const;
 
   StageRegistry stage_registry_;
-  std::vector<std::pair<std::string, Queue<TrainingTensors>*>> outputs_;
+  std::vector<std::pair<std::string, Queue<TensorTuple>*>> outputs_;
   MetricsAggregator metrics_aggregator_;
   std::jthread metrics_thread_;
   bool started_ = false;

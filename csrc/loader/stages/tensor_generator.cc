@@ -4,6 +4,7 @@
 #include "loader/stages/tensor_generator.h"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -68,7 +69,7 @@ void TensorGenerator::Worker(std::stop_token stop_token,
       }
 
       // Convert batch to tensors.
-      TrainingTensors tensors = ConvertFramesToTensors(batch);
+      TensorTuple tensors = ConvertFramesToTensors(batch);
       {
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(tensors), stop_token);
@@ -81,21 +82,24 @@ void TensorGenerator::Worker(std::stop_token stop_token,
   }
 }
 
-TrainingTensors TensorGenerator::ConvertFramesToTensors(
+TensorTuple TensorGenerator::ConvertFramesToTensors(
     const std::vector<FrameType>& frames) {
   const size_t batch_size = frames.size();
   constexpr size_t kNumPlanes = 112;
   constexpr size_t kNumPolicyMoves = 1858;
+  constexpr size_t kNumValueTypes = 6;
+  constexpr size_t kValuesPerType = 3;
 
-  TrainingTensors result;
+  TensorTuple result;
+  result.reserve(3);
 
-  // Input planes: (batch_size, 112, 8, 8)
+  // Index 0: Input planes (batch_size, 112, 8, 8)
   auto planes_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, kNumPlanes, 8, 8});
   ProcessPlanes(frames, *planes_tensor);
-  result.input = std::move(planes_tensor);
+  result.push_back(std::move(planes_tensor));
 
-  // Policy head "vanilla": (batch_size, 1858)
+  // Index 1: Probabilities (batch_size, 1858)
   auto probs_tensor = std::make_unique<TypedTensor<float>>(
       std::initializer_list<size_t>{batch_size, kNumPolicyMoves});
   for (size_t i = 0; i < batch_size; ++i) {
@@ -103,48 +107,54 @@ TrainingTensors TensorGenerator::ConvertFramesToTensors(
     std::memcpy(probs_slice.data(), frames[i].probabilities,
                 kNumPolicyMoves * sizeof(float));
   }
-  result.policy_heads.push_back({"vanilla", std::move(probs_tensor)});
+  result.push_back(std::move(probs_tensor));
 
-  // Value head "winner": (batch_size, 3)
-  auto winner_tensor = std::make_unique<TypedTensor<float>>(
-      std::initializer_list<size_t>{batch_size, 3});
+  // Index 2: Values (batch_size, 6, 3) with [q, d, m] for each type.
+  // [0]: result, [1]: best, [2]: played, [3]: orig, [4]: root, [5]: st
+  auto values_tensor =
+      std::make_unique<TypedTensor<float>>(std::initializer_list<size_t>{
+          batch_size, kNumValueTypes, kValuesPerType});
   for (size_t i = 0; i < batch_size; ++i) {
-    auto winner_slice = winner_tensor->slice({static_cast<ssize_t>(i)});
-    // Convert result_q, result_d to win/draw/loss probabilities.
-    const float q = frames[i].result_q;
-    const float d = frames[i].result_d;
-    const float win = (1.0f + q - d) / 2.0f;
-    const float loss = (1.0f - q - d) / 2.0f;
-    winner_slice[0] = win;
-    winner_slice[1] = d;
-    winner_slice[2] = loss;
-  }
-  result.value_heads.push_back({"winner", std::move(winner_tensor)});
+    const auto& frame = frames[i];
+    auto batch_slice = values_tensor->slice({static_cast<ssize_t>(i)});
 
-  // Value head "q": (batch_size, 3)
-  auto best_q_tensor = std::make_unique<TypedTensor<float>>(
-      std::initializer_list<size_t>{batch_size, 3});
-  for (size_t i = 0; i < batch_size; ++i) {
-    auto best_q_slice = best_q_tensor->slice({static_cast<ssize_t>(i)});
-    // Convert best_q, best_d to win/draw/loss probabilities.
-    const float q = frames[i].best_q;
-    const float d = frames[i].best_d;
-    const float win = (1.0f + q - d) / 2.0f;
-    const float loss = (1.0f - q - d) / 2.0f;
-    best_q_slice[0] = win;
-    best_q_slice[1] = d;
-    best_q_slice[2] = loss;
-  }
-  result.value_heads.push_back({"q", std::move(best_q_tensor)});
+    // Index 0: result [result_q, result_d, plies_left]
+    auto result_slice = batch_slice.subspan(0 * kValuesPerType, kValuesPerType);
+    result_slice[0] = frame.result_q;
+    result_slice[1] = frame.result_d;
+    result_slice[2] = frame.plies_left;
 
-  // Movesleft head "main": (batch_size,)
-  auto plies_left_tensor = std::make_unique<TypedTensor<float>>(
-      std::initializer_list<size_t>{batch_size});
-  for (size_t i = 0; i < batch_size; ++i) {
-    auto plies_left_slice = plies_left_tensor->slice({static_cast<ssize_t>(i)});
-    plies_left_slice[0] = frames[i].plies_left;
+    // Index 1: best [best_q, best_d, best_m]
+    auto best_slice = batch_slice.subspan(1 * kValuesPerType, kValuesPerType);
+    best_slice[0] = frame.best_q;
+    best_slice[1] = frame.best_d;
+    best_slice[2] = frame.best_m;
+
+    // Index 2: played [played_q, played_d, played_m]
+    auto played_slice = batch_slice.subspan(2 * kValuesPerType, kValuesPerType);
+    played_slice[0] = frame.played_q;
+    played_slice[1] = frame.played_d;
+    played_slice[2] = frame.played_m;
+
+    // Index 3: orig [orig_q, orig_d, orig_m] (may be NaN)
+    auto orig_slice = batch_slice.subspan(3 * kValuesPerType, kValuesPerType);
+    orig_slice[0] = frame.orig_q;
+    orig_slice[1] = frame.orig_d;
+    orig_slice[2] = frame.orig_m;
+
+    // Index 4: root [root_q, root_d, root_m]
+    auto root_slice = batch_slice.subspan(4 * kValuesPerType, kValuesPerType);
+    root_slice[0] = frame.root_q;
+    root_slice[1] = frame.root_d;
+    root_slice[2] = frame.root_m;
+
+    // Index 5: st [q_st, d_st, NaN]
+    auto st_slice = batch_slice.subspan(5 * kValuesPerType, kValuesPerType);
+    st_slice[0] = frame.q_st;
+    st_slice[1] = frame.d_st;
+    st_slice[2] = std::numeric_limits<float>::quiet_NaN();
   }
-  result.movesleft_heads.push_back({"main", std::move(plies_left_tensor)});
+  result.push_back(std::move(values_tensor));
 
   return result;
 }

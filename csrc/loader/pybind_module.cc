@@ -71,31 +71,13 @@ py::array tensor_to_numpy(std::unique_ptr<TensorBase> tensor) {
       py::cast(raw_tensor, py::return_value_policy::take_ownership));
 }
 
-// Convert TensorDict to Python dict of numpy arrays.
-py::dict tensor_dict_to_python_dict(TensorDict tensor_dict) {
-  py::dict result;
-  for (auto& [name, tensor] : tensor_dict) {
-    result[py::str(name)] = tensor_to_numpy(std::move(tensor));
+// Convert TensorTuple to tuple of numpy arrays.
+py::tuple tensor_tuple_to_numpy_tuple(TensorTuple tensor_tuple) {
+  py::tuple result(tensor_tuple.size());
+  for (size_t i = 0; i < tensor_tuple.size(); ++i) {
+    result[i] = tensor_to_numpy(std::move(tensor_tuple[i]));
   }
   return result;
-}
-
-// Python-side TrainingTensors wrapper class.
-struct PyTrainingTensors {
-  py::array input;
-  py::dict policy_heads;
-  py::dict value_heads;
-  py::dict movesleft_heads;
-};
-
-// Convert C++ TrainingTensors to Python PyTrainingTensors instance.
-PyTrainingTensors training_tensors_to_python(TrainingTensors tensors) {
-  return PyTrainingTensors{
-      tensor_to_numpy(std::move(tensors.input)),
-      tensor_dict_to_python_dict(std::move(tensors.policy_heads)),
-      tensor_dict_to_python_dict(std::move(tensors.value_heads)),
-      tensor_dict_to_python_dict(std::move(tensors.movesleft_heads)),
-  };
 }
 
 PYBIND11_MODULE(_lczero_training, m) {
@@ -104,16 +86,6 @@ PYBIND11_MODULE(_lczero_training, m) {
   m.doc() = "Leela Chess Zero training data loader";
 
   // Configuration is now handled via protobuf serialized strings
-
-  // Define TrainingTensors as a Python class with data attributes.
-  py::class_<PyTrainingTensors>(m, "TrainingTensors")
-      .def(py::init<py::array, py::dict, py::dict, py::dict>(),
-           py::arg("input"), py::arg("policy_heads"), py::arg("value_heads"),
-           py::arg("movesleft_heads"))
-      .def_readwrite("input", &PyTrainingTensors::input)
-      .def_readwrite("policy_heads", &PyTrainingTensors::policy_heads)
-      .def_readwrite("value_heads", &PyTrainingTensors::value_heads)
-      .def_readwrite("movesleft_heads", &PyTrainingTensors::movesleft_heads);
 
   // Expose the main DataLoader class.
   py::class_<DataLoader>(m, "DataLoader")
@@ -160,30 +132,30 @@ PYBIND11_MODULE(_lczero_training, m) {
       .def(
           "get_next",
           [](DataLoader& self, const std::string& alias) {
-            return training_tensors_to_python([&] {
+            return tensor_tuple_to_numpy_tuple([&] {
               py::gil_scoped_release release;
               return self.GetNext(alias);
             }());
           },
           py::arg("alias") = "",
           "Get next batch for the given output alias (default empty) as a "
-          "TrainingTensors object")
+          "tuple of numpy arrays")
       .def(
           "maybe_get_next",
           [](DataLoader& self,
-             const std::string& alias) -> std::optional<PyTrainingTensors> {
+             const std::string& alias) -> std::optional<py::tuple> {
             auto result = [&] {
               py::gil_scoped_release release;
               return self.MaybeGetNext(alias);
             }();
             if (result.has_value()) {
-              return training_tensors_to_python(std::move(*result));
+              return tensor_tuple_to_numpy_tuple(std::move(*result));
             }
             return std::nullopt;
           },
           py::arg("alias") = "",
           "Non-blocking get next batch for the given output alias (default "
-          "empty). Returns TrainingTensors object or None if no data available")
+          "empty). Returns tuple of numpy arrays or None if no data available")
       .def(
           "get_bucket_metrics",
           [](const DataLoader& self, int time_period, bool include_pending) {
