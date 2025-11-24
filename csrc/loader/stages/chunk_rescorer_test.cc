@@ -14,19 +14,6 @@ namespace training {
 
 namespace {
 
-std::vector<FrameType> StubRescore(std::vector<FrameType> frames,
-                                   SyzygyTablebase*, float dist_temp,
-                                   float dist_offset, float dtz_boost,
-                                   int new_input_format) {
-  (void)dist_offset;
-  (void)dtz_boost;
-  (void)new_input_format;
-  for (auto& frame : frames) {
-    frame.result_q = dist_temp;
-  }
-  return frames;
-}
-
 template <typename T>
 class PassthroughStage : public Stage {
  public:
@@ -79,29 +66,8 @@ class ChunkRescorerTest : public ::testing::Test {
   ChunkRescorerConfig config_;
 };
 
-TEST_F(ChunkRescorerTest, AppliesInjectedRescoreFunction) {
-  ChunkRescorer rescorer(config_, StubRescore);
-  rescorer.SetInputs({input_queue_.get()});
-  rescorer.Start();
-
-  FrameType frame{};
-  frame.result_q = 0.1f;
-  auto producer = input_queue_->CreateProducer();
-  producer.Put(MakeChunk({frame}));
-  producer.Close();
-
-  auto output_chunk = rescorer.output_queue()->Get();
-  ASSERT_EQ(output_chunk.frames.size(), 1);
-  EXPECT_FLOAT_EQ(output_chunk.frames[0].result_q, config_.dist_temp());
-  EXPECT_EQ(output_chunk.sort_key, "alpha");
-  EXPECT_EQ(output_chunk.index_within_sort_key, 3u);
-  EXPECT_EQ(output_chunk.use_count, 7u);
-
-  rescorer.Stop();
-}
-
 TEST_F(ChunkRescorerTest, HandlesInputQueueClosure) {
-  ChunkRescorer rescorer(config_, StubRescore);
+  ChunkRescorer rescorer(config_);
   rescorer.SetInputs({input_queue_.get()});
   rescorer.Start();
 

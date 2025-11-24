@@ -10,9 +10,48 @@
 
 namespace lczero {
 namespace training {
+namespace {
 
-ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
-                             RescoreFn rescore_fn)
+void V6ToV7(std::span<FrameType> data, float theta = 5.0f / 6.0f) {
+  if (data.empty()) return;
+
+  const float beta = 1.0f - theta;
+
+  float st_q = 0.0f;
+  float st_d = 0.0f;
+
+  // Iterate backwards to calculate EMA and lookaheads in one go.
+  for (size_t i = data.size(); i-- > 0;) {
+    FrameType& item = data[i];
+
+    // For Q, we operate in an alternating sign domain.
+    const float sign = (i % 2 != 0) ? -1.0f : 1.0f;
+    const float cur_q = item.root_q * sign;
+
+    if (i == data.size() - 1) {
+      st_q = cur_q;
+      st_d = item.root_d;
+    } else {
+      st_q = theta * st_q + beta * cur_q;
+      st_d = theta * st_d + beta * item.root_d;
+    }
+
+    item.version = 7;
+    item.q_st = st_q * sign;
+    item.d_st = std::max(st_d, 0.0f);
+
+    // Handle lookahead indices safely.
+    auto get_idx = [&](size_t offset) {
+      return (i + offset < data.size()) ? data[i + offset].played_idx : 65535;
+    };
+    item.opp_played_idx = get_idx(1);
+    item.next_played_idx = get_idx(2);
+  }
+}
+
+}  // namespace
+
+ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config)
     : SingleInputStage<ChunkRescorerConfig, InputType>(config),
       SingleOutputStage<OutputType>(config.output()),
       syzygy_paths_(config.syzygy_paths()),
@@ -21,10 +60,7 @@ ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config,
       dtz_boost_(config.dtz_boost()),
       new_input_format_(config.new_input_format()),
       thread_pool_(config.threads(), ThreadPoolOptions{}),
-      rescore_fn_(std::move(rescore_fn)) {
-  if (!rescore_fn_) {
-    throw std::invalid_argument("ChunkRescorer requires rescore function");
-  }
+      st_q_theta_(config.st_q_theta()) {
   static absl::once_flag bitboards_initialized_flag;
   absl::call_once(bitboards_initialized_flag, InitializeMagicBitboards);
 
@@ -95,8 +131,10 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
       }();
 
       try {
-        chunk.frames = rescore_fn_(chunk.frames, &tablebase_, dist_temp_,
-                                   dist_offset_, dtz_boost_, new_input_format_);
+        chunk.frames = RescoreTrainingData<FrameType>(
+            chunk.frames, &tablebase_, dist_temp_, dist_offset_, dtz_boost_,
+            new_input_format_);
+        if (chunk.frames.at(0).version == 6) V6ToV7(chunk.frames, st_q_theta_);
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(chunk), stop_token);
       } catch (const std::exception& exception) {

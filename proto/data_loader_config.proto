@@ -106,6 +106,8 @@ message ChunkRescorerConfig {
   optional float deblunder_width = 9;
   // Comma-separated list of Gaviota tablebase directories.
   optional string gaviota_paths = 11;
+  // Soft threshold for st_q when converting v6 to v7.
+  optional float st_q_theta = 12 [default = 0.8333333333];
 }
 
 // Configuration for chunk unpacker that extracts frames from packed chunks.
