@@ -11,13 +11,28 @@ This document describes the various policy and value heads used in the network, 
 *   **Loss Function**: Cross-entropy loss (Kullback-Leibler divergence).
 
 ### 2. Optimistic Short-Term Policy (`optimistic_st`)
-*   **Description**: A policy head trained to be "optimistic" about the outcome, focusing more on moves that lead to better short-term evaluations.
+*   **Description**: A policy head trained to be "optimistic" about the outcome, focusing more on moves that lead to better short-term evaluations. It uses a weighted loss function where positions that the network underestimates (target > prediction) are weighted more heavily.
 *   **Training Target**: The same `probabilities` vector as the `vanilla` head.
 *   **Scaling/Transformation**:
-    *   **Mechanism**: The "optimism" is applied as a **sample weight** in the loss function, not as a transformation of the target tensor itself.
-    *   **Calculation**: Weights are calculated based on the difference between the short-term value target (`st`) and the network's predicted short-term value, scaled by the predicted error.
-    *   **Logic**: Samples where the network underestimates the short-term value (i.e., the position is better than the network thinks) are weighted higher.
-*   **Loss Function**: Weighted Cross-entropy loss.
+    *   **Mechanism**: The "optimism" is applied as a **sample weight** in the loss function.
+    *   **Computation Guide**:
+        1.  **Inputs**:
+            *   `v_st_target`: Short-term value target (scalar, from `st` head target).
+            *   `v_st_pred`: Short-term value prediction (scalar, from `st` head output).
+            *   `v_st_err_pred`: Predicted squared error of the short-term value (scalar, from `st_err` head output).
+        2.  **Standard Deviation Estimation**:
+            *   `sigma = sqrt(v_st_err_pred)`
+        3.  **Z-Score Calculation**:
+            *   `z = (v_st_target - v_st_pred) / (sigma + 1e-5)`
+            *   This measures how many standard deviations the target is away from the prediction. A positive `z` means the position is better than predicted (underestimated).
+        4.  **Weight Calculation**:
+            *   `strength = 2.0` (default configuration)
+            *   `weight = sigmoid((z - strength) * 3)`
+    *   **Interpretation**:
+        *   If `z` is large (positive), meaning the target is much higher than predicted (highly underestimated), the weight approaches 1.
+        *   If `z` is small or negative (overestimated or accurately predicted), the weight approaches 0.
+        *   The `strength` parameter shifts the sigmoid, controlling the threshold of "optimism" required to trigger training.
+*   **Loss Function**: Weighted Cross-entropy loss. `loss = weight * CrossEntropy(target, output)`.
 
 ### 3. Soft Policy (`soft`)
 *   **Description**: A policy head trained on a "softened" version of the MCTS probabilities, encouraging exploration or capturing more of the distribution's shape.
@@ -54,7 +69,13 @@ This document describes the various policy and value heads used in the network, 
 *   **Scaling/Transformation**: None.
 *   **Loss Function**: MSE or Cross-entropy.
 
-### 3. Short-Term Value (`st`)
+### 4. Q-Value Error (`q_err`)
+*   **Description**: Predicts the squared error of the `q` head prediction compared to the target.
+*   **Training Target**: `(q_target - q_pred)^2`.
+*   **Scaling/Transformation**: None.
+*   **Loss Function**: MSE.
+
+### 5. Short-Term Value (`st`)
 *   **Description**: Predicts the short-term evaluation of the position (e.g., from a shallow search or static eval).
 *   **Training Target**: A 3-element probability vector derived from `q_st` and `d_st` in the training data.
     *   `Win = (1 + q_st - d_st) / 2`
@@ -62,6 +83,12 @@ This document describes the various policy and value heads used in the network, 
     *   `Draw = d_st`
 *   **Scaling/Transformation**: None.
 *   **Loss Function**: MSE or Cross-entropy.
+
+### 6. Short-Term Value Error (`st_err`)
+*   **Description**: Predicts the squared error of the `st` head prediction compared to the target. Used for calculating uncertainty/variance for the `optimistic_st` head.
+*   **Training Target**: `(st_target - st_pred)^2`.
+*   **Scaling/Transformation**: None.
+*   **Loss Function**: MSE.
 
 ## Auxiliary Heads
 
