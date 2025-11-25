@@ -29,7 +29,11 @@ class LossBase:
         self.metric_name = config.metric_name or config.head_name
         self.weight = config.weight
 
-    def __call__(self, pred: jax.Array, sample: TrainingSample) -> jax.Array:
+    def __call__(
+        self,
+        pred: Union[jax.Array, Tuple[jax.Array, ...]],
+        sample: TrainingSample,
+    ) -> jax.Array:
         raise NotImplementedError("Subclasses must implement __call__")
 
 
@@ -77,7 +81,14 @@ class LczeroLoss:
         weighted_losses: List[jax.Array] = []
 
         loss_configs: List[
-            Tuple[str, Dict[str, jax.Array], Sequence[LossBase]]
+            Tuple[
+                str,
+                Union[
+                    Dict[str, jax.Array],
+                    Dict[str, Tuple[jax.Array, ...]],
+                ],
+                Sequence[LossBase],
+            ]
         ] = [
             ("policy", policy_preds, self.policy_losses),
             ("value", value_preds, self.value_losses),
@@ -104,9 +115,10 @@ class ValueLoss(LossBase):
 
     def __call__(
         self,
-        value_pred: jax.Array,
+        value_pred: Union[jax.Array, Tuple[jax.Array, ...]],
         sample: TrainingSample,
     ) -> jax.Array:
+        value_logits = cast(Tuple[jax.Array, ...], value_pred)[0]
         # Extract raw q/d from sample and compute WDL.
         value_q = sample.values[self.value_type, 0]
         value_d = sample.values[self.value_type, 1]
@@ -117,7 +129,7 @@ class ValueLoss(LossBase):
 
         # The cross-entropy between the predicted value and the target value.
         value_cross_entropy = optax.softmax_cross_entropy(
-            logits=value_pred, labels=jax.lax.stop_gradient(value_wdl)
+            logits=value_logits, labels=jax.lax.stop_gradient(value_wdl)
         )
         assert isinstance(value_cross_entropy, jax.Array)
         return value_cross_entropy
@@ -155,9 +167,10 @@ class PolicyLoss(LossBase):
 
     def __call__(
         self,
-        policy_pred: jax.Array,
+        policy_pred: Union[jax.Array, Tuple[jax.Array, ...]],
         sample: TrainingSample,
     ) -> jax.Array:
+        policy_pred = cast(jax.Array, policy_pred)
         # Extract probabilities from sample.
         policy_targets = jnp.asarray(
             sample.probabilities, dtype=policy_pred.dtype
@@ -194,9 +207,10 @@ class MovesLeftLoss(LossBase):
 
     def __call__(
         self,
-        movesleft_pred: jax.Array,
+        movesleft_pred: Union[jax.Array, Tuple[jax.Array, ...]],
         sample: TrainingSample,
     ) -> jax.Array:
+        movesleft_pred = cast(jax.Array, movesleft_pred)
         # Extract movesleft from sample.
         # sample.values shape: [6, 3], component 2 is movesleft.
         movesleft_targets = sample.values[self.value_type, 2]

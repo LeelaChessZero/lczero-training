@@ -81,7 +81,9 @@ class LczeroModel(nnx.Module):
     def __call__(
         self, x: jax.Array
     ) -> Tuple[
-        dict[str, jax.Array], dict[str, jax.Array], dict[str, jax.Array]
+        dict[str, Tuple[jax.Array, ...]],
+        dict[str, jax.Array],
+        dict[str, jax.Array],
     ]:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))

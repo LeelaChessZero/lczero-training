@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import jax
 from flax import nnx
 
@@ -31,14 +33,14 @@ class ValueHead(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> Tuple[jax.Array, ...]:
         x = self.embed(x).flatten()
         x = get_activation(self.activation)(x)
         x = self.dense1(x)
         x = get_activation(self.activation)(x)
         x = self.wdl(x)
 
-        return x
+        return (x,)
 
     def predict(self, x: jax.Array) -> jax.Array:
-        return nnx.softmax(self(x))
+        return nnx.softmax(self(x)[0])

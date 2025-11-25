@@ -438,7 +438,9 @@ class Evaluation:
         model_output_vfn: Callable[
             [LczeroModel, jax.Array],
             Tuple[
-                Dict[str, jax.Array], Dict[str, jax.Array], Dict[str, jax.Array]
+                Dict[str, Tuple[jax.Array, ...]],
+                Dict[str, jax.Array],
+                Dict[str, jax.Array],
             ],
         ],
         softmax_jax_wdl: bool,
@@ -460,7 +462,8 @@ class Evaluation:
 
         # Flatten all head outputs for dumping
         outputs = {}
-        for name, pred in value_preds.items():
+        for name, pred_tuple in value_preds.items():
+            pred = pred_tuple[0]
             if softmax_jax_wdl:
                 pred = jax.nn.softmax(pred, axis=-1)
             outputs[f"value_pred/{name}"] = pred
@@ -472,7 +475,7 @@ class Evaluation:
         if onnx_comparator:
             # Compare only legacy heads
             jax_outputs_for_onnx = {
-                "wdl": value_preds["winner"],
+                "wdl": value_preds["winner"][0],
                 "policy": policy_preds["vanilla"],
                 "movesleft": movesleft_preds["main"],
             }
@@ -508,7 +511,9 @@ class Evaluation:
     def _model_for_output(
         model_arg: LczeroModel, inputs_arg: jax.Array
     ) -> Tuple[
-        Dict[str, jax.Array], Dict[str, jax.Array], Dict[str, jax.Array]
+        Dict[str, Tuple[jax.Array, ...]],
+        Dict[str, jax.Array],
+        Dict[str, jax.Array],
     ]:
         return model_arg(inputs_arg)
 
