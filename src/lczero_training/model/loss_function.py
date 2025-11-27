@@ -13,7 +13,7 @@ from proto.training_config_pb2 import (
     ValueLossWeightsConfig,
 )
 
-from .model import LczeroModel
+from .model import LczeroModel, ModelPrediction
 
 
 class LossBase:
@@ -31,7 +31,7 @@ class LossBase:
 
     def __call__(
         self,
-        pred: Union[jax.Array, Tuple[jax.Array, ...]],
+        predictions: ModelPrediction,
         sample: TrainingSample,
     ) -> jax.Array:
         raise NotImplementedError("Subclasses must implement __call__")
@@ -75,33 +75,25 @@ class LczeroLoss:
         sample: TrainingSample,
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
         # Run model forward pass.
-        value_preds, policy_preds, movesleft_preds = model(sample.inputs)
+        predictions = model(sample.inputs)
 
         unweighted_losses: Dict[str, jax.Array] = {}
         weighted_losses: List[jax.Array] = []
 
-        loss_configs: List[
-            Tuple[
-                str,
-                Union[
-                    Dict[str, jax.Array],
-                    Dict[str, Tuple[jax.Array, ...]],
-                ],
-                Sequence[LossBase],
-            ]
-        ] = [
-            ("policy", policy_preds, self.policy_losses),
-            ("value", value_preds, self.value_losses),
-            ("movesleft", movesleft_preds, self.movesleft_losses),
-        ]
+        for policy_loss in self.policy_losses:
+            loss = policy_loss(predictions, sample)
+            unweighted_losses[f"policy/{policy_loss.metric_name}"] = loss
+            weighted_losses.append(loss * policy_loss.weight)
 
-        for category_name, preds, losses in loss_configs:
-            for loss_fn in losses:
-                loss = loss_fn(preds[loss_fn.head_name], sample)
-                unweighted_losses[f"{category_name}/{loss_fn.metric_name}"] = (
-                    loss
-                )
-                weighted_losses.append(loss * loss_fn.weight)
+        for value_loss in self.value_losses:
+            loss = value_loss(predictions, sample)
+            unweighted_losses[f"value/{value_loss.metric_name}"] = loss
+            weighted_losses.append(loss * value_loss.weight)
+
+        for movesleft_loss in self.movesleft_losses:
+            loss = movesleft_loss(predictions, sample)
+            unweighted_losses[f"movesleft/{movesleft_loss.metric_name}"] = loss
+            weighted_losses.append(loss * movesleft_loss.weight)
 
         data_loss = jnp.sum(jnp.array(weighted_losses))
 
@@ -115,10 +107,11 @@ class ValueLoss(LossBase):
 
     def __call__(
         self,
-        value_pred: Union[jax.Array, Tuple[jax.Array, ...]],
+        predictions: ModelPrediction,
         sample: TrainingSample,
     ) -> jax.Array:
-        value_logits = cast(Tuple[jax.Array, ...], value_pred)[0]
+        value_pred = predictions.value[self.head_name]
+        value_logits = value_pred[0]
         # Extract raw q/d from sample and compute WDL.
         value_q = sample.values[self.value_type, 0]
         value_d = sample.values[self.value_type, 1]
@@ -167,10 +160,10 @@ class PolicyLoss(LossBase):
 
     def __call__(
         self,
-        policy_pred: Union[jax.Array, Tuple[jax.Array, ...]],
+        predictions: ModelPrediction,
         sample: TrainingSample,
     ) -> jax.Array:
-        policy_pred = cast(jax.Array, policy_pred)
+        policy_pred = predictions.policy[self.head_name]
         # Extract probabilities from sample.
         policy_targets = jnp.asarray(
             sample.probabilities, dtype=policy_pred.dtype
@@ -207,10 +200,10 @@ class MovesLeftLoss(LossBase):
 
     def __call__(
         self,
-        movesleft_pred: Union[jax.Array, Tuple[jax.Array, ...]],
+        predictions: ModelPrediction,
         sample: TrainingSample,
     ) -> jax.Array:
-        movesleft_pred = cast(jax.Array, movesleft_pred)
+        movesleft_pred = predictions.movesleft[self.head_name]
         # Extract movesleft from sample.
         # sample.values shape: [6, 3], component 2 is movesleft.
         movesleft_targets = sample.values[self.value_type, 2]
@@ -218,11 +211,11 @@ class MovesLeftLoss(LossBase):
         # Scale the loss to similar range as other losses.
         scale = 20.0
         targets = movesleft_targets / scale
-        predictions = movesleft_pred / scale
+        scaled_predictions = movesleft_pred / scale
 
         # Huber loss
         huber_loss = optax.huber_loss(
-            predictions=predictions, targets=targets, delta=10.0 / scale
+            predictions=scaled_predictions, targets=targets, delta=10.0 / scale
         )
         assert isinstance(huber_loss, jax.Array)
         return huber_loss.squeeze()

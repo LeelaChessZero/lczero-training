@@ -1,3 +1,4 @@
+import dataclasses
 import math
 from typing import Tuple
 
@@ -13,6 +14,22 @@ from .movesleft_head import MovesLeftHead
 from .policy_head import PolicyHead
 from .utils import get_dtype
 from .value_head import ValueHead
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass
+class ModelPrediction:
+    """Output predictions from LczeroModel.
+
+    Fields:
+        value: Dictionary mapping head names to value prediction tuples.
+        policy: Dictionary mapping head names to policy logits.
+        movesleft: Dictionary mapping head names to moves-left predictions.
+    """
+
+    value: dict[str, Tuple[jax.Array, ...]]
+    policy: dict[str, jax.Array]
+    movesleft: dict[str, jax.Array]
 
 
 class LczeroModel(nnx.Module):
@@ -78,13 +95,7 @@ class LczeroModel(nnx.Module):
             for head_config in config.movesleft_head
         }
 
-    def __call__(
-        self, x: jax.Array
-    ) -> Tuple[
-        dict[str, Tuple[jax.Array, ...]],
-        dict[str, jax.Array],
-        dict[str, jax.Array],
-    ]:
+    def __call__(self, x: jax.Array) -> ModelPrediction:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))
         x = jnp.transpose(x, (1, 2, 0))
         x = jnp.reshape(x, (64, self._input_channels))
@@ -97,4 +108,4 @@ class LczeroModel(nnx.Module):
             name: head(x) for name, head in self.movesleft_heads.items()
         }
 
-        return value, policy, movesleft
+        return ModelPrediction(value=value, policy=policy, movesleft=movesleft)

@@ -35,7 +35,7 @@ from lczero_training.dataloader import (
     make_dataloader,
 )
 from lczero_training.model.loss_function import LczeroLoss
-from lczero_training.model.model import LczeroModel
+from lczero_training.model.model import LczeroModel, ModelPrediction
 from lczero_training.training.state import TrainingSample, TrainingState
 from proto import data_loader_config_pb2
 from proto.root_config_pb2 import RootConfig
@@ -437,11 +437,7 @@ class Evaluation:
         ],
         model_output_vfn: Callable[
             [LczeroModel, jax.Array],
-            Tuple[
-                Dict[str, Tuple[jax.Array, ...]],
-                Dict[str, jax.Array],
-                Dict[str, jax.Array],
-            ],
+            ModelPrediction,
         ],
         softmax_jax_wdl: bool,
     ) -> None:
@@ -456,9 +452,10 @@ class Evaluation:
         }
         dumper.dump_tensors(batch, "INPUT")
 
-        value_preds, policy_preds, movesleft_preds = model_output_vfn(
-            model, cast(jax.Array, batch["inputs"])
-        )
+        predictions = model_output_vfn(model, cast(jax.Array, batch["inputs"]))
+        value_preds = predictions.value
+        policy_preds = predictions.policy
+        movesleft_preds = predictions.movesleft
 
         # Flatten all head outputs for dumping
         outputs = {}
@@ -510,11 +507,7 @@ class Evaluation:
     @staticmethod
     def _model_for_output(
         model_arg: LczeroModel, inputs_arg: jax.Array
-    ) -> Tuple[
-        Dict[str, Tuple[jax.Array, ...]],
-        Dict[str, jax.Array],
-        Dict[str, jax.Array],
-    ]:
+    ) -> ModelPrediction:
         return model_arg(inputs_arg)
 
 
