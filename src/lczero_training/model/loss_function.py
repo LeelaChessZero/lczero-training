@@ -10,6 +10,7 @@ from proto.training_config_pb2 import (
     LossWeightsConfig,
     MovesLeftLossWeightsConfig,
     PolicyLossWeightsConfig,
+    ValueErrorLossWeightsConfig,
     ValueLossWeightsConfig,
 )
 
@@ -23,6 +24,7 @@ class LossBase:
             PolicyLossWeightsConfig,
             ValueLossWeightsConfig,
             MovesLeftLossWeightsConfig,
+            ValueErrorLossWeightsConfig,
         ],
     ) -> None:
         self.head_name = config.head_name
@@ -41,6 +43,7 @@ class LczeroLoss:
     policy_losses: List["PolicyLoss"]
     value_losses: List["ValueLoss"]
     movesleft_losses: List["MovesLeftLoss"]
+    value_error_losses: List["ValueErrorLoss"]
 
     def __init__(self, config: LossWeightsConfig) -> None:
         self.config = config
@@ -52,6 +55,9 @@ class LczeroLoss:
         ]
         self.movesleft_losses = [
             MovesLeftLoss(loss_config) for loss_config in config.movesleft
+        ]
+        self.value_error_losses = [
+            ValueErrorLoss(loss_config) for loss_config in config.value_error
         ]
 
         def _validate_no_duplicate_metrics(
@@ -68,6 +74,7 @@ class LczeroLoss:
         _validate_no_duplicate_metrics("policy", self.policy_losses)
         _validate_no_duplicate_metrics("value", self.value_losses)
         _validate_no_duplicate_metrics("movesleft", self.movesleft_losses)
+        _validate_no_duplicate_metrics("value_error", self.value_error_losses)
 
     def __call__(
         self,
@@ -94,6 +101,13 @@ class LczeroLoss:
             loss = movesleft_loss(predictions, sample)
             unweighted_losses[f"movesleft/{movesleft_loss.metric_name}"] = loss
             weighted_losses.append(loss * movesleft_loss.weight)
+
+        for value_error_loss in self.value_error_losses:
+            loss = value_error_loss(predictions, sample)
+            unweighted_losses[f"value_error/{value_error_loss.metric_name}"] = (
+                loss
+            )
+            weighted_losses.append(loss * value_error_loss.weight)
 
         data_loss = jnp.sum(jnp.array(weighted_losses))
 
@@ -219,3 +233,39 @@ class MovesLeftLoss(LossBase):
         )
         assert isinstance(huber_loss, jax.Array)
         return huber_loss.squeeze()
+
+
+class ValueErrorLoss(LossBase):
+    def __init__(self, config: ValueErrorLossWeightsConfig) -> None:
+        super().__init__(config)
+        self.value_type = config.value_type
+        self.propagate_value_gradients = config.propagate_value_gradients
+
+    def __call__(
+        self,
+        predictions: ModelPrediction,
+        sample: TrainingSample,
+    ) -> jax.Array:
+        value_pred = predictions.value[self.head_name]
+        wdl_logits = value_pred[0]
+        error_pred = value_pred[1]
+
+        # Convert WDL to Q value.
+        wdl_probs = jax.nn.softmax(wdl_logits)
+        q_weights = jnp.array([1.0, 0.0, -1.0])
+        predicted_q = jnp.dot(wdl_probs, q_weights)
+
+        # Get target Q value.
+        target_q = sample.values[self.value_type, 0]
+
+        # Compute actual squared error.
+        actual_squared_error = jnp.square(predicted_q - target_q)
+
+        # Optionally block gradients to WDL head.
+        if not self.propagate_value_gradients:
+            actual_squared_error = jax.lax.stop_gradient(actual_squared_error)
+
+        # MSE between error prediction and actual error.
+        loss = jnp.square(error_pred - actual_squared_error)
+
+        return loss.squeeze()
