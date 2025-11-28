@@ -79,6 +79,21 @@ enum ValueType {
   ST = 5;
 }
 
+message OptimisticPolicyConfig {
+  // Name of the value head to use for optimism computation.
+  string value_head_name = 1;
+  // Which value type to use from the training sample.
+  ValueType value_type = 2;
+  // Z-score threshold for optimism (e.g. 2.0).
+  float strength = 3;
+  // Epsilon for numerical stability (e.g. 1e-5).
+  float eps = 4;
+  // Sigmoid scaling factor (e.g. 3.0).
+  float alpha = 5;
+  // If false, prevent gradients from flowing to value and error heads.
+  bool propagate_value_gradients = 6;
+}
+
 message PolicyLossWeightsConfig {
   string head_name = 1;
   string metric_name = 2;
@@ -98,6 +113,7 @@ message PolicyLossWeightsConfig {
   // Soft policy temperature applied before normalizing targets for KL loss.
   // Values <= 0 disable the adjustment and keep raw targets.
   float temperature = 6;
+  OptimisticPolicyConfig optimistic = 7;
 }
 
 message ValueLossWeightsConfig {
