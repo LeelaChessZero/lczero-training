@@ -17,6 +17,7 @@ class ValueHead(nnx.Module):
         rngs: nnx.Rngs,
     ):
         self.activation = defaults.activation
+        self.has_error_output = config.has_error_output
         self.embed = nnx.Linear(
             in_features=in_features,
             out_features=config.num_channels,
@@ -32,15 +33,24 @@ class ValueHead(nnx.Module):
             out_features=3,
             rngs=rngs,
         )
+        if self.has_error_output:
+            self.error = nnx.Linear(
+                in_features=128,
+                out_features=1,
+                rngs=rngs,
+            )
 
     def __call__(self, x: jax.Array) -> Tuple[jax.Array, ...]:
         x = self.embed(x).flatten()
         x = get_activation(self.activation)(x)
         x = self.dense1(x)
         x = get_activation(self.activation)(x)
-        x = self.wdl(x)
+        wdl = self.wdl(x)
 
-        return (x,)
+        if self.has_error_output:
+            error = nnx.sigmoid(self.error(x))
+            return (wdl, error)
+        return (wdl,)
 
     def predict(self, x: jax.Array) -> jax.Array:
         return nnx.softmax(self(x)[0])

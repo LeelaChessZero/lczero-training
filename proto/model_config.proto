@@ -51,6 +51,7 @@ message PolicyHeadConfig {
 message ValueHeadConfig {
   optional string name = 1;
   optional uint32 num_channels = 2;
+  optional bool has_error_output = 3;
 }
 
 message MovesLeftHeadConfig {
