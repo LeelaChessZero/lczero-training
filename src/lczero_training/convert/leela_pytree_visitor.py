@@ -141,6 +141,10 @@ class LeelaPytreeWeightsVisitor:
         self.matmul(nnx_dict["embed"], weights.ip_val_w, weights.ip_val_b)
         self.matmul(nnx_dict["dense1"], weights.ip1_val_w, weights.ip1_val_b)
         self.matmul(nnx_dict["wdl"], weights.ip2_val_w, weights.ip2_val_b)
+        if "error" in nnx_dict:
+            self.matmul(
+                nnx_dict["error"], weights.ip_val_err_w, weights.ip_val_err_b
+            )
 
     def movesleft_head(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights
