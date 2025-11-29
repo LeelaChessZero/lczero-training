@@ -116,7 +116,7 @@ class LeelaPytreeWeightsVisitor:
     ) -> None:
         if weights.HasField("ip_pol_w"):
             self.matmul(
-                nnx_dict["policy_shared_embedding"],
+                nnx_dict[min(nnx_dict)]["tokens"],
                 weights.ip_pol_w,
                 weights.ip_pol_b,
             )
