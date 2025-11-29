@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 lc0-leela2jax = "lczero_training.commands.leela2jax:main"
+lc0-jax2leela = "lczero_training.commands.jax2leela:main"
 lc0-describe = "lczero_training.commands.describe_training:main"
 lc0-test-dataloader = "lczero_training.commands.test_dataloader:main"
 lc0-dataloader-viz = "lczero_training.commands.dataloader_viz:main"
