@@ -7,12 +7,12 @@ from jax.scipy.special import xlogy
 
 from lczero_training.training.state import TrainingSample
 from proto.training_config_pb2 import (
-    LossWeightsConfig,
-    MovesLeftLossWeightsConfig,
-    PolicyLossWeightsConfig,
-    ValueCategoricalLossWeightsConfig,
-    ValueErrorLossWeightsConfig,
-    ValueLossWeightsConfig,
+    LossConfig,
+    MovesLeftLossConfig,
+    PolicyLossConfig,
+    ValueCategoricalLossConfig,
+    ValueErrorLossConfig,
+    ValueLossConfig,
 )
 
 from .model import LczeroModel, ModelPrediction
@@ -29,11 +29,11 @@ class LossBase:
     def __init__(
         self,
         config: Union[
-            PolicyLossWeightsConfig,
-            ValueLossWeightsConfig,
-            MovesLeftLossWeightsConfig,
-            ValueErrorLossWeightsConfig,
-            ValueCategoricalLossWeightsConfig,
+            PolicyLossConfig,
+            ValueLossConfig,
+            MovesLeftLossConfig,
+            ValueErrorLossConfig,
+            ValueCategoricalLossConfig,
         ],
     ) -> None:
         self.head_name = config.head_name
@@ -55,7 +55,7 @@ class LczeroLoss:
     value_error_losses: List["ValueErrorLoss"]
     value_categorical_losses: List["ValueCategoricalLoss"]
 
-    def __init__(self, config: LossWeightsConfig) -> None:
+    def __init__(self, config: LossConfig) -> None:
         self.config = config
         self.policy_losses = [
             PolicyLoss(loss_config) for loss_config in config.policy
@@ -139,7 +139,7 @@ class LczeroLoss:
 
 
 class ValueLoss(LossBase):
-    def __init__(self, config: ValueLossWeightsConfig) -> None:
+    def __init__(self, config: ValueLossConfig) -> None:
         super().__init__(config)
         self.value_type = config.value_type
 
@@ -167,10 +167,10 @@ class ValueLoss(LossBase):
 
 
 class PolicyLoss(LossBase):
-    def __init__(self, config: PolicyLossWeightsConfig):
+    def __init__(self, config: PolicyLossConfig):
         super().__init__(config)
         self.config = config
-        if config.type == PolicyLossWeightsConfig.LOSS_TYPE_UNSPECIFIED:
+        if config.type == PolicyLossConfig.LOSS_TYPE_UNSPECIFIED:
             raise ValueError(
                 f"Policy loss type must be specified for head '{config.head_name}'."
             )
@@ -245,7 +245,7 @@ class PolicyLoss(LossBase):
         policy_targets = jnp.asarray(
             sample.probabilities, dtype=policy_pred.dtype
         )
-        if self.config.illegal_moves == PolicyLossWeightsConfig.MASK:
+        if self.config.illegal_moves == PolicyLossConfig.MASK:
             policy_pred = jnp.where(policy_targets >= 0, policy_pred, -jnp.inf)
 
         # Zero out negative targets for illegal moves.
@@ -260,9 +260,9 @@ class PolicyLoss(LossBase):
                 logits=policy_pred, labels=policy_targets
             ),
         )
-        if self._loss_type == PolicyLossWeightsConfig.CROSS_ENTROPY:
+        if self._loss_type == PolicyLossConfig.CROSS_ENTROPY:
             loss = cross_entropy
-        elif self._loss_type == PolicyLossWeightsConfig.KL:
+        elif self._loss_type == PolicyLossConfig.KL:
             loss = cross_entropy + jnp.sum(
                 xlogy(policy_targets, policy_targets), axis=-1
             )
@@ -281,7 +281,7 @@ class PolicyLoss(LossBase):
 
 
 class MovesLeftLoss(LossBase):
-    def __init__(self, config: MovesLeftLossWeightsConfig) -> None:
+    def __init__(self, config: MovesLeftLossConfig) -> None:
         super().__init__(config)
         self.value_type = config.value_type
 
@@ -309,7 +309,7 @@ class MovesLeftLoss(LossBase):
 
 
 class ValueErrorLoss(LossBase):
-    def __init__(self, config: ValueErrorLossWeightsConfig) -> None:
+    def __init__(self, config: ValueErrorLossConfig) -> None:
         super().__init__(config)
         self.value_type = config.value_type
         self.propagate_value_gradients = config.propagate_value_gradients
@@ -343,7 +343,7 @@ class ValueErrorLoss(LossBase):
 
 
 class ValueCategoricalLoss(LossBase):
-    def __init__(self, config: ValueCategoricalLossWeightsConfig) -> None:
+    def __init__(self, config: ValueCategoricalLossConfig) -> None:
         super().__init__(config)
         self.value_type = config.value_type
 

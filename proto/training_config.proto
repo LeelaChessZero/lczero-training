@@ -8,7 +8,7 @@ message TrainingConfig {
   repeated LrSchedule lr_schedule = 2;
   CheckpointConfig checkpoint = 3;
   OptimizerConfig optimizer = 4;
-  LossWeightsConfig losses = 5;
+  LossConfig losses = 5;
   // Maximum gradient norm; set to 0 or omit to disable clipping.
   float max_grad_norm = 6;
   // Stochastic Weight Averaging (SWA) configuration. When absent, SWA is
@@ -63,12 +63,12 @@ message CheckpointConfig {
   int32 max_to_keep = 2;
 }
 
-message LossWeightsConfig {
-  repeated PolicyLossWeightsConfig policy = 1;
-  repeated ValueLossWeightsConfig value = 2;
-  repeated MovesLeftLossWeightsConfig movesleft = 3;
-  repeated ValueErrorLossWeightsConfig value_error = 4;
-  repeated ValueCategoricalLossWeightsConfig value_categorical = 5;
+message LossConfig {
+  repeated PolicyLossConfig policy = 1;
+  repeated ValueLossConfig value = 2;
+  repeated MovesLeftLossConfig movesleft = 3;
+  repeated ValueErrorLossConfig value_error = 4;
+  repeated ValueCategoricalLossConfig value_categorical = 5;
 }
 
 enum ValueType {
@@ -95,7 +95,7 @@ message OptimisticPolicyConfig {
   bool propagate_value_gradients = 6;
 }
 
-message PolicyLossWeightsConfig {
+message PolicyLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
@@ -117,21 +117,21 @@ message PolicyLossWeightsConfig {
   OptimisticPolicyConfig optimistic = 7;
 }
 
-message ValueLossWeightsConfig {
+message ValueLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
   ValueType value_type = 4;
 }
 
-message MovesLeftLossWeightsConfig {
+message MovesLeftLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
   ValueType value_type = 4;
 }
 
-message ValueErrorLossWeightsConfig {
+message ValueErrorLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
@@ -139,7 +139,7 @@ message ValueErrorLossWeightsConfig {
   bool propagate_value_gradients = 5;
 }
 
-message ValueCategoricalLossWeightsConfig {
+message ValueCategoricalLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
