@@ -117,6 +117,8 @@ def leela_to_modelconfig(
             value_head.num_channels = size(head.ip_val_b)
             if head.HasField("ip_val_err_w"):
                 value_head.has_error_output = True
+            if head.HasField("ip_val_cat_b"):
+                value_head.num_categorical_buckets = size(head.ip_val_cat_b)
 
     movesleft_head = model_config.movesleft_head.add()
     movesleft_head.name = "main"

@@ -1,6 +1,6 @@
 import dataclasses
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -27,7 +27,7 @@ class ModelPrediction:
         movesleft: Dictionary mapping head names to moves-left predictions.
     """
 
-    value: dict[str, Tuple[jax.Array, ...]]
+    value: dict[str, Tuple[jax.Array, Optional[jax.Array], Optional[jax.Array]]]
     policy: dict[str, jax.Array]
     movesleft: dict[str, jax.Array]
 

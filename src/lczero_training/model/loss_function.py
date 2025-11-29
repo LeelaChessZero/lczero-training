@@ -193,12 +193,15 @@ class PolicyLoss(LossBase):
 
     def _compute_optimistic_weight(
         self,
-        value_pred: Tuple[jax.Array, ...],
+        value_pred: Tuple[jax.Array, Optional[jax.Array], Optional[jax.Array]],
         target_q: jax.Array,
     ) -> jax.Array:
         """Compute optimistic policy weight from value head predictions."""
         wdl_logits = value_pred[0]
         error_pred = value_pred[1]
+        assert error_pred is not None, (
+            "Error prediction required for optimistic weighting"
+        )
 
         # Optionally block gradients to value and error heads.
         if not self.opt_propagate_gradients:

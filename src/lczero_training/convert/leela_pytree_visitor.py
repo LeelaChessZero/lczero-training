@@ -145,6 +145,12 @@ class LeelaPytreeWeightsVisitor:
             self.matmul(
                 nnx_dict["error"], weights.ip_val_err_w, weights.ip_val_err_b
             )
+        if "categorical" in nnx_dict:
+            self.matmul(
+                nnx_dict["categorical"],
+                weights.ip_val_cat_w,
+                weights.ip_val_cat_b,
+            )
 
     def movesleft_head(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights
