@@ -10,6 +10,7 @@ from proto.training_config_pb2 import (
     LossWeightsConfig,
     MovesLeftLossWeightsConfig,
     PolicyLossWeightsConfig,
+    ValueCategoricalLossWeightsConfig,
     ValueErrorLossWeightsConfig,
     ValueLossWeightsConfig,
 )
@@ -32,6 +33,7 @@ class LossBase:
             ValueLossWeightsConfig,
             MovesLeftLossWeightsConfig,
             ValueErrorLossWeightsConfig,
+            ValueCategoricalLossWeightsConfig,
         ],
     ) -> None:
         self.head_name = config.head_name
@@ -51,6 +53,7 @@ class LczeroLoss:
     value_losses: List["ValueLoss"]
     movesleft_losses: List["MovesLeftLoss"]
     value_error_losses: List["ValueErrorLoss"]
+    value_categorical_losses: List["ValueCategoricalLoss"]
 
     def __init__(self, config: LossWeightsConfig) -> None:
         self.config = config
@@ -65,6 +68,10 @@ class LczeroLoss:
         ]
         self.value_error_losses = [
             ValueErrorLoss(loss_config) for loss_config in config.value_error
+        ]
+        self.value_categorical_losses = [
+            ValueCategoricalLoss(loss_config)
+            for loss_config in config.value_categorical
         ]
 
         def _validate_no_duplicate_metrics(
@@ -82,6 +89,9 @@ class LczeroLoss:
         _validate_no_duplicate_metrics("value", self.value_losses)
         _validate_no_duplicate_metrics("movesleft", self.movesleft_losses)
         _validate_no_duplicate_metrics("value_error", self.value_error_losses)
+        _validate_no_duplicate_metrics(
+            "value_categorical", self.value_categorical_losses
+        )
 
     def __call__(
         self,
@@ -115,6 +125,13 @@ class LczeroLoss:
                 loss
             )
             weighted_losses.append(loss * value_error_loss.weight)
+
+        for value_categorical_loss in self.value_categorical_losses:
+            loss = value_categorical_loss(predictions, sample)
+            unweighted_losses[
+                f"value_categorical/{value_categorical_loss.metric_name}"
+            ] = loss
+            weighted_losses.append(loss * value_categorical_loss.weight)
 
         data_loss = jnp.sum(jnp.array(weighted_losses))
 
@@ -323,3 +340,39 @@ class ValueErrorLoss(LossBase):
         loss = jnp.square(error_pred - actual_squared_error)
 
         return loss.squeeze()
+
+
+class ValueCategoricalLoss(LossBase):
+    def __init__(self, config: ValueCategoricalLossWeightsConfig) -> None:
+        super().__init__(config)
+        self.value_type = config.value_type
+
+    def __call__(
+        self,
+        predictions: ModelPrediction,
+        sample: TrainingSample,
+    ) -> jax.Array:
+        value_pred = predictions.value[self.head_name]
+        categorical_logits = value_pred[2]
+        assert categorical_logits is not None
+
+        # Get target Q value from sample.
+        target_q = sample.values[self.value_type, 0]
+
+        # Convert Q to bucket index: map [-1, 1) to [0, num_buckets).
+        num_buckets = categorical_logits.shape[-1]
+        bucket_index = jnp.floor((target_q + 1.0) / 2.0 * num_buckets).astype(
+            jnp.int32
+        )
+        bucket_index = jnp.clip(bucket_index, 0, num_buckets - 1)
+
+        # Create one-hot target.
+        target_one_hot = jax.nn.one_hot(bucket_index, num_buckets)
+
+        # Compute softmax cross-entropy.
+        loss = optax.softmax_cross_entropy(
+            logits=categorical_logits,
+            labels=jax.lax.stop_gradient(target_one_hot),
+        )
+        assert isinstance(loss, jax.Array)
+        return loss

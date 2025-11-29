@@ -68,6 +68,7 @@ message LossWeightsConfig {
   repeated ValueLossWeightsConfig value = 2;
   repeated MovesLeftLossWeightsConfig movesleft = 3;
   repeated ValueErrorLossWeightsConfig value_error = 4;
+  repeated ValueCategoricalLossWeightsConfig value_categorical = 5;
 }
 
 enum ValueType {
@@ -136,6 +137,13 @@ message ValueErrorLossWeightsConfig {
   float weight = 3;
   ValueType value_type = 4;
   bool propagate_value_gradients = 5;
+}
+
+message ValueCategoricalLossWeightsConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
+  ValueType value_type = 4;
 }
 
 // Stochastic Weight Averaging configuration.
