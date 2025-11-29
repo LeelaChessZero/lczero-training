@@ -16,7 +16,7 @@ class LeelaPytreeWeightsVisitor:
         weights = self.leela_net.weights
         self.embedding_block(state["embedding"], weights)
         self.encoder_tower(state["encoders"], weights)
-        self.policy_heads(state["policy_heads"], weights.policy_heads)
+        self.policy_heads(state, weights.policy_heads)
         for head_name in ["winner", "q", "st"]:
             if head_name in state["value_heads"]:
                 self.value_head(
@@ -114,22 +114,23 @@ class LeelaPytreeWeightsVisitor:
     def policy_heads(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights.PolicyHeads
     ) -> None:
-        if weights.HasField("ip_pol_w"):
+        if "policy_embedding_shared" in nnx_dict:
             self.matmul(
-                nnx_dict[min(nnx_dict)]["tokens"],
+                nnx_dict["policy_embedding_shared"],
                 weights.ip_pol_w,
                 weights.ip_pol_b,
             )
+        policy_heads_dict = nnx_dict["policy_heads"]
         for head_name in ["vanilla", "optimistic_st", "soft", "opponent"]:
-            if head_name in nnx_dict:
+            if head_name in policy_heads_dict:
                 self.policy_head(
-                    nnx_dict[head_name], getattr(weights, head_name)
+                    policy_heads_dict[head_name], getattr(weights, head_name)
                 )
 
     def policy_head(
         self, nnx_dict: nnx.State, weights: net_pb2.Weights.PolicyHead
     ) -> None:
-        if weights.HasField("ip_pol_w"):
+        if "tokens" in nnx_dict:
             self.matmul(nnx_dict["tokens"], weights.ip_pol_w, weights.ip_pol_b)
         self.matmul(nnx_dict["q"], weights.ip2_pol_w, weights.ip2_pol_b)
         self.matmul(nnx_dict["k"], weights.ip3_pol_w, weights.ip3_pol_b)

@@ -67,9 +67,12 @@ class LczeroModel(nnx.Module):
             for head_config in config.value_head
         }
 
-        self.policy_shared_embedding = None
+        # Named to appear before 'policy_heads' alphabetically in pytree state.
+        # This ensures shared embedding appears at parent level during
+        # serialization.
+        self.policy_embedding_shared = None
         if config.HasField("shared_policy_embedding_size"):
-            self.policy_shared_embedding = nnx.Linear(
+            self.policy_embedding_shared = nnx.Linear(
                 in_features=config.embedding.embedding_size,
                 out_features=config.shared_policy_embedding_size,
                 rngs=rngs,
@@ -80,7 +83,7 @@ class LczeroModel(nnx.Module):
                 in_features=config.embedding.embedding_size,
                 config=head_config,
                 defaults=config.defaults,
-                shared_embedding=self.policy_shared_embedding,
+                shared_embedding=self.policy_embedding_shared,
                 rngs=rngs,
             )
             for head_config in config.policy_head
