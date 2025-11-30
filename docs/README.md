@@ -1,7 +1,7 @@
 # Running "new" training pipeline
 
 Note that the code is still in active development, so things change a lot.
-This document was last updated on 2025-10-28.
+The current document was last updated on 2025-11-30.
 
 ## Building
 
@@ -81,7 +81,7 @@ configuration file to be filled.
 Then run:
 
 ```bash
-uv run training-init --config <your_config>.textproto --lczero_model <model>.pb.gz
+uv run lc0-init --config <your_config>.textproto --lczero_model <model>.pb.gz
 ```
 
 The `--lczero_model` parameter is optional. If not given, the network is
@@ -92,7 +92,7 @@ initialized with random weights.
 Run:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 uv run tui --config <your_config>.textproto --logfile train.log
+CUDA_VISIBLE_DEVICES=0 uv run lc0-tui --config <your_config>.textproto --logfile train.log
 ```
 
 Notes:
@@ -146,7 +146,7 @@ The configuration is a text protobuf file, with the following sections:
 
 | Section     | Description                                    |
 | ----------- | ---------------------------------------------- |
-| data_loader | Configuration for the data loader (see below). |
+| data_loader | Configuration for the data loader.             |
 | model       | Model architecture configuration.              |
 | training    | Configuration for the training configuration.  |
 | metrics     | Metrics to export into tensorboard.            |
@@ -173,3 +173,96 @@ that are currently implemented:
 | `chunk_unpacker`          | Extracts positions from chunks                                                                   | Chunks       | Frames                |
 | `shuffling_frame_sampler` | Outputs frames in shuffled order                                                                 | Frames       | Frames                |
 | `tensor_generator`        | Converts frames into training batches in numpy tensor format                                     | Frames       | Training Tensors      |
+
+The pipeline ends with one or more outputs, which provide tuples of batched
+tensors for training.
+
+> [!NOTE]
+> The current format of the training batch is
+>
+> * `inputs`: float32 tensor of shape `[batch_size, 112, 8, 8]`
+> * `policy_target`: float32 tensor of shape `[batch_size, 1862]`
+> * `value_target`: float32 tensor of shape `[batch_size, 6, 3]`, where 6 rows
+>    are sources of the value (`result`, `best`, `played`, `orig`, `root` and
+>    `st`), and 3 columns are (`q` (w-l), `draw`, `movesleft`).
+
+Every stage must have an unique name (may or not be the same as the stage type),
+and arbitrary number of inputs (depending on the stage type; most have one
+input).
+
+Here is the structure of the data loader configuration:
+
+```textproto
+stage {
+  name: "file_provider"
+  file_path_provider {
+    # ...
+  }
+}
+stage {
+  name: "loader"
+  input: "file_provider"
+  chunk_source_reader {
+    # ...
+    output { name: "myoutput" }
+  }
+}
+stage {
+  name: "chunk_shuffler"
+  input: "loader.myoutput"
+  shuffling_chunk_pool {
+    # ...
+  }
+}
+# ...
+stage {
+  name: "tensor_gen"
+  input: "sampler"
+  tensor_generator {
+    batch_size: 256
+    # ...
+  }
+}
+output: "tensor_gen"  # unnamed output
+output: "test:test_tensor_gen"  # named output
+```
+
+#### Stage output configuration
+
+Every stage provides one or more outputs. The configuration of the output is like this (all fields optional):
+
+```textproto
+output {
+  name: "myoutput"
+  queue_capacity: 8  # default: 4
+  overflow_behavior: BLOCK
+}
+```
+
+* By default, outputs are not named, but you can name them.
+* Higher `queue_capacity` allows you to "pre-cache" data, so that when the rate
+  of the producer stage is spiky, the pipeline is not blocked. On the other
+  hand, the data in the queue may be "stale" (i.e. when you train a new network,
+  the data in the queue is still for the old network).
+* `overflow_behavior` controls what happens when the output queue is full:
+  * `BLOCK`: default and what's needed for most stages. The producer stage is
+    blocked until there is space in the queue.
+  * `DROP_NEW` and `KEEP_NEWEST` drops the data from the queue (either the
+    incoming data, or the oldest data in the queue). These are useful e.g. for
+    auxiliary output of a stage (e.g. validation), so that the auxiliary
+    pipeline doesn't block the main pipeline.
+
+### Stage configurations
+
+#### file_path_provider
+
+Watches a directory for existing and new files. First it sends all existing
+files, then sends special "Initial Scan Done" event, and then watches for new
+files.
+
+#### chunk_source_loader
+
+Takes the filenames from the input, and loads them as chunk sources. Skips files
+which are not chunk sources.
+
+* `frame_format`: `V6TrainingData` (default) or `V7TrainingData`.
