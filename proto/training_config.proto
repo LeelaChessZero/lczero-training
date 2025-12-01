@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package lczero.training;
+
+// Configuration for training algorithm and parameters.
+message TrainingConfig {
+  ScheduleConfig schedule = 1;
+  repeated LrSchedule lr_schedule = 2;
+  CheckpointConfig checkpoint = 3;
+  OptimizerConfig optimizer = 4;
+  LossWeightsConfig losses = 5;
+  // Maximum gradient norm; set to 0 or omit to disable clipping.
+  float max_grad_norm = 6;
+  // Stochastic Weight Averaging (SWA) configuration. When absent, SWA is
+  // disabled.
+  SWAConfig swa = 7;
+}
+
+message ScheduleConfig {
+  int32 steps_per_network = 1;
+  int32 chunks_per_network = 2;
+}
+
+message OptimizerConfig {
+  oneof optimizer_type {
+    NadamwOptimizerConfig nadamw = 1;
+  }
+  float momentum = 2;
+}
+
+message LrSchedule {
+  // Optimizer step when this schedule becomes active.
+  int32 starting_step = 1;
+  // Duration of each interval while this schedule is active. Last entry may be
+  // zero to indicate an open-ended tail.
+  repeated uint32 duration_steps = 2;
+  // Learning rate at the beginning of each interval.
+  repeated float lr = 3;
+  enum Transition {
+    CONSTANT = 0;
+    LINEAR = 1;
+    COSINE = 2;
+  }
+  // Transition type to use for each interval. Missing entries default to
+  // CONSTANT.
+  repeated Transition transition = 4;
+  // When true this schedule loops after finishing the final interval.
+  bool loop = 5;
+}
+
+message NadamwOptimizerConfig {
+  float beta_1 = 1;
+  float beta_2 = 2;
+  float epsilon = 3;
+  float weight_decay = 4;
+  bool decay_embedding = 5;
+  bool decay_biases = 6;
+  bool decay_layer_norms = 7;
+}
+
+message CheckpointConfig {
+  string path = 1;
+  int32 max_to_keep = 2;
+}
+
+message LossWeightsConfig {
+  repeated PolicyLossWeightsConfig policy = 1;
+  repeated ValueLossWeightsConfig value = 2;
+  repeated MovesLeftLossWeightsConfig movesleft = 3;
+}
+
+message PolicyLossWeightsConfig {
+  string name = 1;
+  float weight = 2;
+  enum IllegalMoveHandling {
+    TRAIN_TO_ZERO = 0;
+    MASK = 1;
+  }
+  IllegalMoveHandling illegal_moves = 3;
+  enum LossType {
+    LOSS_TYPE_UNSPECIFIED = 0;
+    CROSS_ENTROPY = 1;
+    KL = 2;
+  }
+  // Selects which policy loss implementation to use. Must be specified.
+  LossType type = 4;
+  // Soft policy temperature applied before normalizing targets for KL loss.
+  // Values <= 0 disable the adjustment and keep raw targets.
+  float temperature = 5;
+}
+
+message ValueLossWeightsConfig {
+  string name = 1;
+  float weight = 2;
+}
+
+message MovesLeftLossWeightsConfig {
+  string name = 1;
+  float weight = 2;
+}
+
+// Stochastic Weight Averaging configuration.
+message SWAConfig {
+  // Number of steps between SWA updates.
+  uint32 period_steps = 1;
+  // Maximum effective number of model snapshots to average.
+  uint32 num_averages = 2;
+}

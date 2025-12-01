@@ -1,0 +1,365 @@
+#include "loader/stages/file_path_provider.h"
+
+#include <absl/cleanup/cleanup.h>
+#include <absl/container/flat_hash_set.h>
+#include <absl/log/check.h>
+#include <absl/log/log.h>
+#include <absl/synchronization/mutex.h>
+#include <sys/epoll.h>
+#include <unistd.h>
+
+#include <array>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <filesystem>
+#include <stdexcept>
+#include <string_view>
+#include <thread>
+#include <utility>
+
+#include "loader/data_loader_metrics.h"
+#include "proto/data_loader_config.pb.h"
+
+namespace lczero {
+namespace training {
+
+namespace {
+
+bool ShouldSkipName(std::string_view name) {
+  return !name.empty() && name.front() == '.';
+}
+
+bool ShouldSkipPathEntry(const FilePathProvider::Path& path) {
+  return ShouldSkipName(path.filename().string());
+}
+
+}  // namespace
+
+FilePathProvider::FilePathProvider(const FilePathProviderConfig& config)
+    : SingleOutputStage<File>(config.output()),
+      directory_(config.directory()),
+      producer_(output_queue()->CreateProducer()),
+      load_metric_updater_() {
+  LOG(INFO) << "Initializing FilePathProvider for directory: "
+            << config.directory();
+  inotify_fd_ = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+  CHECK_NE(inotify_fd_, -1)
+      << "Failed to initialize inotify: " << strerror(errno);
+}
+
+FilePathProvider::~FilePathProvider() {
+  LOG(INFO) << "FilePathProvider shutting down.";
+  Stop();
+  if (inotify_fd_ != -1) close(inotify_fd_);
+  LOG(INFO) << "FilePathProvider shutdown complete.";
+}
+
+void FilePathProvider::SetInputs(absl::Span<QueueBase* const> inputs) {
+  if (!inputs.empty()) {
+    throw std::runtime_error(
+        "FilePathProvider expects no inputs, but received " +
+        std::to_string(inputs.size()));
+  }
+}
+
+void FilePathProvider::Start() {
+  LOG(INFO) << "Starting FilePathProvider monitoring thread.";
+  thread_pool_.Enqueue(
+      [this](std::stop_token stop_token) { Worker(stop_token); });
+}
+
+void FilePathProvider::Stop() {
+  if (stop_source_.stop_requested()) return;
+  LOG(INFO) << "Stopping FilePathProvider.";
+  LOG(INFO) << "Stopping all watches...";
+  for (const auto& [wd, path] : watch_descriptors_) {
+    inotify_rm_watch(inotify_fd_, wd);
+  }
+  watch_descriptors_.clear();
+  stop_source_.request_stop();
+  thread_pool_.Shutdown();
+  producer_.Close();
+}
+
+StageMetricProto FilePathProvider::FlushMetrics() {
+  StageMetricProto stage_metric;
+  auto load_metrics = load_metric_updater_.FlushMetrics();
+  load_metrics.set_name("load");
+  *stage_metric.add_load_metrics() = std::move(load_metrics);
+  *stage_metric.add_queue_metrics() =
+      MetricsFromQueue("output", *output_queue());
+  return stage_metric;
+}
+
+void FilePathProvider::AddDirectory(const Path& directory,
+                                    std::stop_token stop_token) {
+  ScanDirectoryWithWatch(directory, stop_token);
+
+  LOG(INFO) << "FilePathProvider registered " << directory
+            << "; active watch descriptors: " << watch_descriptors_.size();
+
+  // Signal that initial scan is complete
+  LOG(INFO) << "FilePathProvider initial scan complete";
+  producer_.Put(
+      {{.filepath = Path{}, .message_type = MessageType::kInitialScanComplete}},
+      stop_token);
+}
+
+void FilePathProvider::ScanDirectoryWithWatch(const Path& directory,
+                                              std::stop_token stop_token) {
+  // Step 1: Set up watch first
+  int wd = inotify_add_watch(inotify_fd_, directory.c_str(),
+                             IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
+                                 IN_DELETE | IN_DELETE_SELF | IN_MOVE);
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << directory << ": "
+                   << strerror(errno);
+  watch_descriptors_[wd] = directory;
+
+  // Step 2: Scan directory non-recursively, remembering files and subdirs
+  std::vector<Path> files;
+  std::vector<Path> subdirectories;
+  std::error_code ec;
+  auto iterator = std::filesystem::directory_iterator(directory, ec);
+  CHECK(!ec) << "Failed to iterate directory " << directory << ": "
+             << ec.message();
+
+  for (const auto& entry : iterator) {
+    const Path entry_path = entry.path();
+    if (ShouldSkipPathEntry(entry_path)) continue;
+
+    if (entry.is_regular_file(ec) && !ec) {
+      files.push_back(entry_path);
+    } else if (entry.is_directory(ec) && !ec) {
+      subdirectories.push_back(entry_path);
+    }
+  }
+
+  const size_t initial_file_count = files.size();
+  const size_t subdirectory_count = subdirectories.size();
+  LOG(INFO) << "FilePathProvider scanned " << directory << " discovering "
+            << initial_file_count << " file(s) and " << subdirectory_count
+            << " subdirectory(ies) before watch reconciliation.";
+
+  // Send notifications for discovered files
+  constexpr size_t kBatchSize = 10000;
+  std::vector<File> batch;
+  batch.reserve(kBatchSize);
+
+  auto flush_batch = [&]() {
+    if (batch.empty()) return;
+    producer_.Put(batch, stop_token);
+    batch.clear();
+  };
+
+  for (const auto& filepath : files) {
+    batch.push_back(
+        {.filepath = filepath.string(), .message_type = MessageType::kFile});
+    if (batch.size() >= kBatchSize) flush_batch();
+  }
+
+  if (initial_file_count > 0) {
+    LOG(INFO) << "FilePathProvider enqueued " << initial_file_count
+              << " file(s) from initial scan of " << directory;
+  }
+
+  // Step 3: Read from watch descriptor, skipping already discovered files
+  ProcessWatchEventsForNewItems(files);
+
+  // Step 4: Clean the files vector to save memory
+  files.clear();
+
+  // Step 5: Recursively call for subdirectories
+  for (const auto& subdir : subdirectories) {
+    if (stop_token.stop_requested()) return;
+    ScanDirectoryWithWatch(subdir, stop_token);
+  }
+
+  // Flush any remaining files
+  flush_batch();
+}
+
+void FilePathProvider::ProcessWatchEventsForNewItems(
+    const std::vector<Path>& known_files) {
+  // Create a set for fast lookup of already discovered files
+  absl::flat_hash_set<std::string> known_file_set;
+  for (const auto& file : known_files) {
+    known_file_set.insert(file.string());
+  }
+
+  // Process any events that may have occurred during scanning
+  std::array<char, 4096> buffer;
+  std::vector<File> new_files;
+
+  while (true) {
+    ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
+    if (length <= 0) break;  // No more events to process
+
+    ssize_t offset = 0;
+    while (offset < length) {
+      const struct inotify_event* event =
+          reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
+
+      const bool skip_entry = event->len > 0 && ShouldSkipName(event->name);
+
+      // Only process file creation/write events, skip already known files
+      if ((event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) != 0 &&
+          event->len > 0 && !skip_entry) {
+        const Path directory(watch_descriptors_.at(event->wd));
+        Path filepath = directory / event->name;
+        std::string filepath_string = filepath.string();
+
+        // Only add if we haven't seen this file before
+        if (!known_file_set.contains(filepath_string)) {
+          new_files.push_back({.filepath = std::move(filepath_string),
+                               .message_type = MessageType::kFile});
+        }
+      }
+
+      offset += sizeof(struct inotify_event) + event->len;
+    }
+  }
+
+  // Send notifications for any new files discovered through watch events
+  if (!new_files.empty()) {
+    LOG(INFO) << "FilePathProvider observed " << new_files.size()
+              << " new file(s) while reconciling race events.";
+    producer_.Put(new_files);
+  }
+}
+
+void FilePathProvider::AddWatchRecursive(const Path& path) {
+  // Add watch for current directory
+  int wd = inotify_add_watch(inotify_fd_, path.c_str(),
+                             IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE |
+                                 IN_DELETE | IN_DELETE_SELF | IN_MOVE);
+  CHECK_NE(wd, -1) << "Failed to add inotify watch for " << path << ": "
+                   << strerror(errno);
+  watch_descriptors_[wd] = path;
+
+  // Recursively add watches for subdirectories
+  std::error_code ec;
+  auto iterator = std::filesystem::directory_iterator(path, ec);
+  CHECK(!ec) << "Failed to iterate directory " << path << ": " << ec.message();
+
+  for (const auto& entry : iterator) {
+    const Path entry_path = entry.path();
+    if (ShouldSkipPathEntry(entry_path)) continue;
+    if (!entry.is_directory(ec) || ec) continue;
+    AddWatchRecursive(entry_path);
+  }
+}
+
+void FilePathProvider::RemoveWatchRecursive(const Path& base) {
+  absl::erase_if(watch_descriptors_, [&](const auto& pair) {
+    const auto& [wd, path] = pair;
+    const auto mismatch_iter = absl::c_mismatch(base, path).first;
+    // If path is not a subdirectory (or equal) of base, skip.
+    if (mismatch_iter != base.end()) return false;
+    inotify_rm_watch(inotify_fd_, wd);
+    return true;
+  });
+}
+
+void FilePathProvider::Worker(std::stop_token stop_token) {
+  // Perform directory scanning in background thread
+  AddDirectory(directory_, stop_token);
+
+  int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+  CHECK_NE(epoll_fd, -1) << "Failed to create epoll fd: " << strerror(errno);
+  absl::Cleanup epoll_cleanup([epoll_fd]() { close(epoll_fd); });
+
+  struct epoll_event event;
+  event.events = EPOLLIN;
+  event.data.fd = inotify_fd_;
+  CHECK_EQ(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, inotify_fd_, &event), 0)
+      << "Failed to add inotify fd to epoll: " << strerror(errno);
+
+  while (!stop_token.stop_requested()) {
+    {
+      LoadMetricPauser pauser(load_metric_updater_);
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      if (stop_token.stop_requested()) {
+        pauser.DoNotResume();
+        break;
+      }
+    }
+
+    struct epoll_event event;
+    int nfds = epoll_wait(epoll_fd, &event, 1, 0);  // Non-blocking check
+    CHECK_NE(nfds, -1) << "epoll_wait failed: " << strerror(errno);
+    if (nfds == 0) continue;  // No events.
+
+    do {
+      assert(nfds == 1 && event.data.fd == inotify_fd_);
+      ProcessInotifyEvents(producer_, stop_token);
+      nfds = epoll_wait(epoll_fd, &event, 1, 0);
+    } while (nfds > 0);
+  }
+}
+
+void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
+                                            std::stop_token stop_token) {
+  constexpr size_t kNotifyBatchSize = 10000;
+  std::vector<File> files;
+  std::array<char, 4096> buffer;
+
+  auto flush_batch = [&]() {
+    if (files.empty()) return;
+    producer.Put(files, stop_token);
+    files.clear();
+  };
+
+  while (true) {
+    ssize_t length = read(inotify_fd_, buffer.data(), buffer.size());
+    if (length <= 0) break;  // No more events to process
+
+    ssize_t offset = 0;
+    while (offset < length) {
+      const struct inotify_event* event =
+          reinterpret_cast<const struct inotify_event*>(buffer.data() + offset);
+      auto file = ProcessInotifyEvent(*event, stop_token);
+      if (file) files.push_back(*file);
+      if (files.size() >= kNotifyBatchSize) flush_batch();
+      offset += sizeof(struct inotify_event) + event->len;
+    }
+  }
+
+  flush_batch();  // Flush any remaining files in the batch
+}
+
+auto FilePathProvider::ProcessInotifyEvent(const struct inotify_event& event,
+                                           std::stop_token stop_token)
+    -> std::optional<File> {
+  if (event.mask & IN_IGNORED) return std::nullopt;
+
+  const Path directory(watch_descriptors_.at(event.wd));
+  const bool has_name = event.len > 0 && event.name[0] != '\0';
+  const bool skip_entry = has_name && ShouldSkipName(event.name);
+  const Path filepath = has_name ? directory / event.name : directory;
+
+  // Handle different event types
+  if ((event.mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) != 0 && has_name &&
+      !skip_entry) {
+    // File finished writing or moved into directory
+    return File{.filepath = filepath, .message_type = MessageType::kFile};
+  }
+
+  constexpr uint32_t kDirCreateMask = IN_CREATE | IN_ISDIR;
+  constexpr uint32_t kDirDeleteMask = IN_DELETE | IN_ISDIR;
+  if ((event.mask & kDirCreateMask) == kDirCreateMask) {
+    if (!has_name || skip_entry) return std::nullopt;
+    ScanDirectoryWithWatch(filepath, stop_token);
+  } else if ((event.mask & kDirDeleteMask) == kDirDeleteMask) {
+    if (!has_name || skip_entry) return std::nullopt;
+    // Directory deleted - remove all watches for it and subdirectories
+    RemoveWatchRecursive(filepath);
+  } else if (event.mask & IN_DELETE_SELF) {
+    RemoveWatchRecursive(directory);
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace training
+}  // namespace lczero

@@ -1,0 +1,38 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Sentinel message for training batch sample type.
+message TrainingBatch {}
+
+// Configuration for individual metric collection.
+message MetricConfig {
+  // Name of the metric.
+  optional string name = 1;
+  // Whether to use the SWA model for this metric.
+  optional bool use_swa_model = 2;
+  // Period for metric collection.
+  optional int32 period = 3 [default = 1];
+  // Whether to use global steps instead of epoch-relative steps.
+  optional bool use_global_steps = 4 [default = false];
+  // Whether to collect metric after epoch completion.
+  optional bool after_epoch = 5;
+
+  // Source of data for metric calculation.
+  oneof sample {
+    // Use training batch data.
+    TrainingBatch training_batch = 6;
+    // Name of dataloader output to use.
+    string dataloader_output = 7;
+    // Path to numpy tensor file (.npz).
+    string npz_filename = 8;
+  }
+}
+
+// Configuration for metrics collection and export.
+message MetricsConfig {
+  // Directory path where TensorBoard event files will be written.
+  optional string tensorboard_path = 1;
+  // List of metrics to collect during training.
+  repeated MetricConfig metric = 2;
+}

@@ -1,0 +1,106 @@
+[project]
+name = "lczero-training"
+version = "0.1.0"
+description = "Training scripts and data loading for Leela Chess Zero"
+authors = [{ name = "Leela Chess Zero Team" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pybind11>=2.10.0",
+    "numpy>=1.24.0",
+    "textual[dev]>=0.47.0",
+    "protobuf==6.32.1",
+    "mypy>=1.17.1",
+    "pytest>=8.4.1",
+    "anyio>=4.10.0",
+    "jax[cuda12]==0.7.1",
+    "flax>=0.11.1",
+    "optax>=0.2.5",
+    "orbax-checkpoint>=0.11.23",
+    "python-dotenv>=1.1.1",
+    "requests[socks]>=2.32.5",
+    "matplotlib>=3.10.6",
+    "jaxlib==0.7.1",
+    "onnxruntime>=1.23.1",
+    "onnxruntime-gpu>=1.23.0",
+    "tensorboardx>=2.6.4",
+    "graphviz>=0.21",
+]
+
+[project.scripts]
+lc0-leela2jax = "lczero_training.commands.leela2jax:main"
+lc0-describe = "lczero_training.commands.describe_training:main"
+lc0-test-dataloader = "lczero_training.commands.test_dataloader:main"
+lc0-dataloader-viz = "lczero_training.commands.dataloader_viz:main"
+lc0-overfit = "lczero_training.commands.overfit:main"
+lc0-init = "lczero_training.commands.training_init:main"
+lc0-eval = "lczero_training.commands.training_eval:main"
+lc0-tune-lr = "lczero_training.commands.tune_lr:main"
+lc0-migrate-checkpoint = "lczero_training.commands.migrate_checkpoint:main"
+lc0-backfill-metrics = "lczero_training.commands.backfill_metrics:main"
+lc0-train = "lczero_training.commands.train:main"
+lc0-daemon = "lczero_training.commands.daemon:main"
+lc0-tui = "lczero_training.commands.tui:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "mypy>=1.0.0",
+    "typing-extensions>=4.0.0",
+    "mypy-extensions>=0.4.0",
+    "pathspec>=0.11.0",
+]
+
+[build-system]
+requires = ["setuptools>=64", "pybind11>=2.10.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.so", "*.dll", "*.dylib"]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.76.0",
+    "mypy-protobuf>=3.6.0",
+    "textual-dev>=1.7.0",
+    "types-protobuf>=6.30.2.20250809",
+    "types-requests>=2.32.4.20250913",
+]
+
+[tool.mypy]
+mypy_path = "src"
+# TEMPORARY: Disable misc errors due to protobuf bug in PR #23156
+# (https://github.com/protocolbuffers/protobuf/pull/23156)
+# Revert when protobuf fixes __slots__ = () in generated .pyi files
+disable_error_code = ["misc"]
+
+[[tool.mypy.overrides]]
+module = "orbax.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "optax"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "onnxruntime"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tensorboardX"
+ignore_missing_imports = true
+
+
+[tool.pytest.ini_options]
+testpaths = ["src"]
+python_files = ["test_*.py", "*_test.py"]
+pythonpath = ["src"]
+addopts = "-v"
+
+[tool.ruff]
+exclude = ["*_pb2.py*"]
+line-length = 80

@@ -1,0 +1,242 @@
+#include "loader/data_loader.h"
+
+#include <absl/algorithm/container.h>
+#include <absl/log/log.h>
+#include <absl/strings/str_cat.h>
+#include <absl/strings/str_join.h>
+
+#include <chrono>
+#include <cmath>
+#include <optional>
+#include <stdexcept>
+
+#include "loader/data_loader_metrics.h"
+
+namespace lczero {
+namespace training {
+DataLoaderConfig DataLoader::ParseConfig(const std::string& serialized_config) {
+  DataLoaderConfig config;
+  config.ParseFromString(serialized_config);
+  return config;
+}
+
+DataLoader::DataLoader(const std::string& serialized_data_loader_config)
+    : metrics_aggregator_(
+          [](DataLoaderMetricsProto& m) { m.Clear(); },
+          [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
+            UpdateFrom(dest, src);
+          }) {
+  DataLoaderConfig config = ParseConfig(serialized_data_loader_config);
+  AddStages(config);
+  BuildOutputMapping(config);
+  LOG(INFO) << "DataLoader initialized with " << stage_registry_.size()
+            << " stage(s) and " << outputs_.size() << " output(s).";
+}
+
+DataLoader::~DataLoader() { Stop(); }
+
+void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
+  AddStages(ParseConfig(serialized_data_loader_config));
+}
+
+void DataLoader::AddStages(const DataLoaderConfig& config) {
+  for (const auto& stage_config : config.stage()) AddStage(stage_config);
+  for (const auto& stage_config : config.stage()) SetStageInputs(stage_config);
+}
+
+void DataLoader::AddStage(const StageConfig& stage_config) {
+  if (started_) {
+    throw std::runtime_error("Cannot add stages after DataLoader has started.");
+  }
+
+  auto stage = CreateStage(stage_config);
+  if (!stage_config.has_name()) {
+    throw std::runtime_error("Stage configuration is missing name.");
+  }
+
+  LOG(INFO) << "Adding stage '" << stage_config.name() << "'.";
+  stage_registry_.AddStage(stage_config.name(), std::move(stage));
+}
+
+void DataLoader::SetStageInputs(const StageConfig& stage_config) {
+  // Resolve input names to queue pointers.
+  std::vector<QueueBase*> input_queues;
+  input_queues.reserve(stage_config.input_size());
+  for (const auto& input_name : stage_config.input()) {
+    QueueBase* queue = stage_registry_.GetStageOutput(input_name);
+    if (!queue) {
+      throw std::runtime_error(absl::StrCat("Input stage '", input_name,
+                                            "' not found for stage '",
+                                            stage_config.name(), "'."));
+    }
+    input_queues.push_back(queue);
+  }
+
+  // Wire up inputs.
+  auto it = absl::c_find_if(stage_registry_.stages(), [&](const auto& p) {
+    return p.first == stage_config.name();
+  });
+  if (it == stage_registry_.stages().end()) {
+    throw std::runtime_error(absl::StrCat("Stage '", stage_config.name(),
+                                          "' not found in registry."));
+  }
+  it->second->SetInputs(absl::MakeSpan(input_queues));
+}
+
+void DataLoader::Start() {
+  if (started_) {
+    throw std::runtime_error("DataLoader has already been started.");
+  }
+  for (auto& [name, stage] : stage_registry_.stages()) {
+    LOG(INFO) << "Starting stage '" << name << "'.";
+    stage->Start();
+  }
+
+  metrics_thread_ = std::jthread(
+      [this](std::stop_token stop_token) { MetricsThread(stop_token); });
+  started_ = true;
+  stopped_ = false;
+  LOG(INFO) << "DataLoader started.";
+}
+
+TensorTuple DataLoader::GetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
+  if (!q) {
+    std::string alias_list = absl::StrJoin(
+        outputs_, ", ",
+        [](std::string* out, const auto& p) { absl::StrAppend(out, p.first); });
+    throw std::runtime_error(absl::StrCat("Unknown DataLoader output: '", alias,
+                                          "'. Available outputs: [", alias_list,
+                                          "]."));
+  }
+  return q->Get();
+}
+
+std::optional<TensorTuple> DataLoader::MaybeGetNext(std::string_view alias) {
+  Queue<TensorTuple>* q = GetOutputQueue(alias);
+  if (!q) {
+    std::string alias_list = absl::StrJoin(
+        outputs_, ", ",
+        [](std::string* out, const auto& p) { absl::StrAppend(out, p.first); });
+    throw std::runtime_error(absl::StrCat("Unknown DataLoader output: '", alias,
+                                          "'. Available outputs: [", alias_list,
+                                          "]."));
+  }
+  return q->MaybeGet();
+}
+
+void DataLoader::Stop() {
+  if (stopped_) return;
+
+  LOG(INFO) << "Stopping DataLoader.";
+
+  if (metrics_thread_.joinable()) {
+    metrics_thread_.request_stop();
+    metrics_thread_.join();
+  }
+
+  for (auto& [name, stage] : stage_registry_.stages()) {
+    LOG(INFO) << "Stopping stage '" << name << "'.";
+    stage->Stop();
+  }
+
+  stopped_ = true;
+  started_ = false;
+  LOG(INFO) << "DataLoader stopped.";
+}
+
+std::pair<std::string, float> DataLoader::GetBucketMetrics(
+    int time_period, bool include_pending) const {
+  auto [metrics, duration] = metrics_aggregator_.GetBucketMetrics(
+      static_cast<TimePeriod>(time_period),
+      include_pending ? std::make_optional(std::chrono::steady_clock::now())
+                      : std::nullopt);
+  float duration_seconds = std::chrono::duration<float>(duration).count();
+  return {metrics.OutputAsString(), duration_seconds};
+}
+
+std::pair<std::string, float> DataLoader::GetAggregateEndingNow(
+    float duration_seconds, bool include_pending) const {
+  std::chrono::nanoseconds duration_ns =
+      std::isinf(duration_seconds)
+          ? std::chrono::nanoseconds::max()
+          : std::chrono::nanoseconds(
+                static_cast<int64_t>(duration_seconds * 1e9));
+  auto [metrics, duration] = metrics_aggregator_.GetAggregateEndingNow(
+      duration_ns, include_pending
+                       ? std::make_optional(std::chrono::steady_clock::now())
+                       : std::nullopt);
+  float result_duration_seconds =
+      std::chrono::duration<float>(duration).count();
+  return {metrics.OutputAsString(), result_duration_seconds};
+}
+
+void DataLoader::MetricsThread(std::stop_token stop_token) {
+  while (!stop_token.stop_requested()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    DataLoaderMetricsProto metrics;
+    for (auto& [name, stage] : stage_registry_.stages()) {
+      StageMetricProto stage_metric = stage->FlushMetrics();
+      stage_metric.set_name(name);
+      *metrics.add_stage_metrics() = std::move(stage_metric);
+    }
+
+    metrics_aggregator_.RecordMetrics(std::move(metrics));
+    metrics_aggregator_.Advance(std::chrono::steady_clock::now());
+  }
+  LOG(INFO) << "Metrics thread stopping.";
+}
+
+std::vector<std::pair<std::string, StageControlResponse>>
+DataLoader::SendControlMessage(const StageControlRequest& request) {
+  std::vector<std::pair<std::string, StageControlResponse>> responses;
+  responses.reserve(stage_registry_.size());
+  for (auto& [name, stage] : stage_registry_.stages()) {
+    std::optional<StageControlResponse> response = stage->Control(request);
+    if (response.has_value()) {
+      responses.emplace_back(name, std::move(*response));
+    }
+  }
+  return responses;
+}
+
+void DataLoader::BuildOutputMapping(const DataLoaderConfig& config) {
+  outputs_.clear();
+  outputs_.reserve(config.output_size());
+
+  for (const auto& out_spec : config.output()) {
+    auto it = absl::c_find(out_spec, ':');
+    std::string alias = it == out_spec.end()
+                            ? std::string("")
+                            : std::string(out_spec.begin(), it);
+    std::string stage_name = it == out_spec.end()
+                                 ? std::string(out_spec)
+                                 : std::string(it + 1, out_spec.end());
+
+    // Ensure alias is unique.
+    if (absl::c_find_if(outputs_, [&](const auto& p) {
+          return p.first == alias;
+        }) != outputs_.end()) {
+      throw std::runtime_error(
+          absl::StrCat("Duplicate output alias specified: ", alias));
+    }
+
+    Queue<TensorTuple>* queue =
+        stage_registry_.GetTypedStageOutput<TensorTuple>(stage_name);
+    if (queue == nullptr) {
+      throw std::runtime_error(
+          absl::StrCat("Output stage not found or wrong type: ", stage_name));
+    }
+    outputs_.emplace_back(std::move(alias), queue);
+  }
+}
+
+Queue<TensorTuple>* DataLoader::GetOutputQueue(std::string_view alias) const {
+  auto it = absl::c_find_if(outputs_,
+                            [&](const auto& p) { return p.first == alias; });
+  if (it == outputs_.end()) return nullptr;
+  return it->second;
+}
+
+}  // namespace training
+}  // namespace lczero

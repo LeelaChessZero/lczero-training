@@ -1,0 +1,55 @@
+syntax = "proto2";
+
+import "proto/net.proto";
+import "proto/hlo.proto";
+
+package lczero.training;
+
+message ModelConfig {
+  optional DefaultsConfig defaults = 4;
+  optional EmbeddingConfig embedding = 5;
+  optional EncoderConfig encoder = 6;
+  optional PolicyHeadConfig policy_head = 7;
+  optional ValueHeadConfig value_head = 8;
+  optional MovesLeftHeadConfig movesleft_head = 9;
+}
+
+message DefaultsConfig {
+  optional pblczero.XlaShapeProto.Type compute_dtype = 2;
+  optional pblczero.NetworkFormat.ActivationFunction activation = 4;
+  optional pblczero.NetworkFormat.ActivationFunction ffn_activation = 5;
+}
+
+message EmbeddingConfig {
+  optional uint32 dense_size = 1;
+  optional uint32 embedding_size = 2;
+  optional uint32 dff = 3;
+}
+
+message EncoderConfig {
+  optional uint32 num_blocks = 3;
+  optional uint32 dff = 4;
+  optional uint32 d_model = 5;
+  optional uint32 heads = 6;
+  optional SmolgenConfig smolgen = 9;
+}
+
+message SmolgenConfig {
+  optional uint32 hidden_channels = 1;
+  optional uint32 hidden_size = 2;
+  optional uint32 gen_size = 3;
+  optional pblczero.NetworkFormat.ActivationFunction activation = 5;
+}
+
+message PolicyHeadConfig {
+  optional uint32 embedding_size = 1;
+  optional uint32 d_model = 2;
+}
+
+message ValueHeadConfig {
+  optional uint32 num_channels = 1;
+}
+
+message MovesLeftHeadConfig {
+  optional uint32 num_channels = 1;
+}

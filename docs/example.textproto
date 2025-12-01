@@ -1,0 +1,165 @@
+# Example configuration file for lczero-training
+# This file demonstrates all available configuration options with their default
+# values and explanations of what each setting controls.
+
+name: "little-teapot"
+data_loader {
+  stage {
+    name: "file_path_provider"
+    file_path_provider {
+      # Directory with training data files.
+      directory: "/home/crem/tmp/2025-07/lczero-training/data2"
+      output {
+        queue_capacity: 16 # Internal file queue size
+      }
+    }
+  }
+  stage {
+    name: "chunk_source_loader"
+    input: "file_path_provider"
+    chunk_source_loader {
+      threads: 1  # Threads for loading chunks
+      output {
+        queue_capacity: 16  # Output queue for chunk sources
+      }
+    }
+  }
+  stage {
+    name: "shuffling_chunk_pool"
+    input: "chunk_source_loader"
+    shuffling_chunk_pool {
+      chunk_pool_size: 50000        # Shuffle buffer size (chunks in memory)
+      source_ingestion_threads: 1   # Threads for ingesting new sources
+      chunk_loading_threads: 4      # Threads for loading chunk data
+      output {
+        queue_capacity: 16  # Output queue for shuffled chunks
+      }
+    }
+  }
+  stage {
+    name: "chunk_rescorer"
+    input: "shuffling_chunk_pool"
+    chunk_rescorer {
+      threads: 1  # Threads for chunk rescoring
+      output {
+        queue_capacity: 16  # Output queue for rescored chunks
+      }
+      syzygy_paths: "/path/to/tb"  # Tablebase search paths (comma-separated)
+      dist_temp: 1.0        # Policy temperature applied during rescoring
+      dist_offset: 0.0      # Policy offset applied during rescoring
+      dtz_boost: 0.0        # DTZ boost for endgame policy tuning
+      new_input_format: -1  # Keep original input format (-1 disables change)
+      deblunder_threshold: 0.10  # Threshold for policy deblundering adjustments
+      deblunder_width: 0.06      # Width controlling smoothing around threshold
+    }
+  }
+  stage {
+    name: "chunk_unpacker"
+    input: "chunk_rescorer"
+    chunk_unpacker {
+      threads: 1  # Threads for unpacking chunks
+      # Probability of sampling each position within a chunk.
+      position_sampling_rate: 0.03
+      output {
+        queue_capacity: 16  # Output queue for unpacked frames
+      }
+    }
+  }
+  stage {
+    name: "shuffling_frame_sampler"
+    input: "chunk_unpacker"
+    shuffling_frame_sampler {
+      threads: 1                          # Threads for frame sampling
+      reservoir_size_per_thread: 1000000  # Sampling reservoir per thread
+      output {
+        queue_capacity: 16  # Output queue for sampled frames
+      }
+    }
+  }
+  stage {
+    name: "tensor_generator"
+    input: "shuffling_frame_sampler"
+    tensor_generator {
+      threads: 1       # Threads for tensor generation
+      batch_size: 128  # Batch size for tensors
+      output {
+        queue_capacity: 8  # Output queue for batched tensors
+      }
+    }
+  }
+  output: "tensor_generator"
+}
+model {
+  defaults {
+    compute_dtype: F32
+    activation: ACTIVATION_MISH
+    ffn_activation: ACTIVATION_MISH
+  }
+  embedding { dense_size: 512 embedding_size: 1024 dff: 1536 }
+  encoder {
+    num_blocks: 15
+    dff: 1536
+    d_model: 1024
+    heads: 32
+    smolgen {
+      hidden_channels: 32
+      hidden_size: 256
+      gen_size: 256
+      activation: ACTIVATION_SWISH
+    }
+  }
+  policy_head { embedding_size: 1024 d_model: 1024 }
+  value_head { num_channels: 128 }
+  movesleft_head { num_channels: 32 }
+}
+training {
+  schedule {
+    steps_per_network: 250
+    chunks_per_network: 50000
+  }
+  lr_schedule {
+    starting_step: 0
+    duration_steps: 0  # 0 means indefinite duration
+    lr: 0.001
+  }
+  # Example multi-phase schedule with warmup:
+  # lr_schedule {
+  #   starting_step: 0
+  #   duration_steps: [1500, 500, 0]  # Warmup, transition, then indefinite
+  #   lr: [0.0, 0.0005, 0.0005]       # Start at 0, ramp to 0.0005, hold
+  #   transition: [LINEAR, CONSTANT]  # Linear warmup, then constant
+  #   # Missing transitions default to CONSTANT. Last duration 0 = indefinite.
+  # }
+  checkpoint {
+    path: "/home/crem/tmp/2025-09/lc0_training/checkpoint"
+    max_to_keep: 5
+  }
+  optimizer {
+    nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
+  }
+  max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
+  losses {
+    policy {
+      name: "main"
+      weight: 1.0
+      illegal_moves: MASK
+      type: CROSS_ENTROPY
+    }
+    policy {
+      name: "main"
+      weight: 1.0
+      illegal_moves: MASK
+      type: KL
+      temperature: 1.0  # Softmax temperature applied before KL evaluation
+    }
+    value { name: "winner" weight: 1.0 }
+    movesleft { name: "main" weight: 1.0 }
+  }
+}
+metrics {
+  tensorboard_path: "/tmp/tensorboard/myrun"
+}
+export {
+  path: "/home/crem/tmp/2025-08/lc0_training/exported_models/"
+  upload_training_run: 3
+}

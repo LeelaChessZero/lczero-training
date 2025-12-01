@@ -1,0 +1,68 @@
+syntax = "proto2";
+
+package lczero;
+
+// Load metric that accumulates seconds of load time.
+// Separate proto to support LoadMetricUpdaterProto functionality.
+message LoadMetricProto {
+  optional string name = 1;
+  optional double load_seconds = 2 [default = 0.0];
+  optional double total_seconds = 3 [default = 0.0];
+}
+
+// Statistics metric for integer values.
+message StatisticsProtoInt64 {
+  optional int64 min = 1 [default = 9223372036854775807];
+  optional int64 max = 2 [default = -9223372036854775807];
+  optional int64 sum = 3 [default = 0];
+  optional int64 count = 4 [default = 0];
+  optional int64 latest = 5 [default = 0];
+}
+
+// Statistics metric for double values.
+message StatisticsProtoDouble {
+  optional string name = 1;
+  optional double min = 2 [default = 1.7976931348623157e+308];
+  optional double max = 3 [default = -1.7976931348623157e+308];
+  optional double sum = 4 [default = 0.0];
+  optional int64 count = 5 [default = 0];
+  optional double latest = 6 [default = 0.0];
+}
+
+// Metrics for queue performance monitoring.
+message QueueMetricProto {
+  optional string name = 1;
+  optional uint64 put_count = 2 [default = 0];
+  optional uint64 get_count = 3 [default = 0];
+  optional uint64 drop_count = 4 [default = 0];
+  optional StatisticsProtoInt64 queue_fullness = 5;
+  optional uint64 queue_capacity = 6 [default = 0];
+}
+
+message CountMetricProto {
+  optional string name = 1;
+  optional uint64 count = 2 [default = 0];
+}
+
+// Gauge metric for values that represent current state.
+message GaugeMetricProto {
+  optional string name = 1;
+  optional uint64 value = 2 [default = 0];
+  optional uint64 capacity = 3;
+}
+
+// Top-level metrics for the DataLoader.
+message StageMetricProto {
+  optional string name = 1;
+  repeated LoadMetricProto load_metrics = 3;
+  repeated QueueMetricProto queue_metrics = 4;
+  repeated CountMetricProto count_metrics = 5;
+  repeated GaugeMetricProto gauge_metrics = 11;
+  repeated StatisticsProtoDouble statistics_metrics = 12;
+  optional string last_chunk_key = 8;
+  optional string anchor = 9;
+}
+
+message DataLoaderMetricsProto {
+  repeated StageMetricProto stage_metrics = 1;
+}

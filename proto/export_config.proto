@@ -1,0 +1,13 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Configuration for model export settings.
+message ExportConfig {
+  // Directory path where exported models will be saved.
+  optional string path = 1;
+  // Training run ID for uploading to training website. Only uploads when set.
+  optional int32 upload_training_run = 2;
+  // Whether to export the SWA model instead of the main model.
+  optional bool export_swa_model = 3;
+}

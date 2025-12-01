@@ -1,0 +1,198 @@
+syntax = "proto2";
+
+package lczero.training;
+
+// Configuration for output queue used by stages.
+message QueueConfig {
+  // Queue overflow behavior.
+  enum OverflowBehavior {
+    BLOCK = 0;
+    DROP_NEW = 1;
+    KEEP_NEWEST = 2;
+  }
+
+  // Optional name for the output (used for multi-output stages).
+  optional string name = 1;
+  // Size of the output queue.
+  optional uint64 queue_capacity = 2 [default = 4];
+  // Overflow behavior of the output queue.
+  optional OverflowBehavior overflow_behavior = 3;
+}
+
+// Configuration for file path provider that watches directories for new
+// training files. Maps to FilePathProviderOptions in
+// csrc/loader/chunk_feed/file_path_provider.h
+message FilePathProviderConfig {
+  // Path to directory containing training data files.
+  optional string directory = 1;
+  // Output queue configuration.
+  optional QueueConfig output = 2;
+}
+
+// Configuration for chunk source loader that converts file paths to chunk
+// sources. Maps to ChunkSourceLoaderOptions in
+// csrc/loader/chunk_feed/chunk_source_loader.h
+message ChunkSourceLoaderConfig {
+  // Number of worker threads for loading.
+  optional uint64 threads = 1 [default = 1];
+  // Output queue configuration.
+  optional QueueConfig output = 2;
+}
+
+message PositionSamplingConfig {
+  optional float diff_focus_q_weight = 1 [default = 0.0];
+  optional float diff_focus_pol_scale = 2 [default = 1.0];
+  optional float diff_focus_alpha = 3 [default = 1.0];
+  optional float diff_focus_beta = 4 [default = 0.0];
+  optional float diff_focus_gamma = 5 [default = 1.0];
+  optional float diff_focus_tau = 6 [default = 1.0];
+  optional float default_weight = 7 [default = 1.0];
+}
+
+// Configuration for shuffling chunk pool that manages chunk shuffling and
+// loading. Maps to ShufflingChunkPoolOptions in
+// csrc/loader/chunk_feed/shuffling_chunk_pool.h
+message ShufflingChunkPoolConfig {
+  // Size of the chunk shuffle buffer.
+  optional uint64 chunk_pool_size = 1 [default = 100000];
+  // Threads for ingesting new chunk sources (lightweight).
+  optional uint64 source_ingestion_threads = 3 [default = 1];
+  // Threads for loading chunk data.
+  optional uint64 chunk_loading_threads = 4 [default = 4];
+  // Output queue configuration.
+  optional QueueConfig output = 5;
+  // When set to a positive value, enable Hanse single-position sampling.
+  // Probability to accept a chunk is
+  //   min(1.0, num_records / hanse_sampling_threshold) ** hanse_sampling_gamma
+  // where num_records is the number of frames in the chunk.
+  optional uint64 hanse_sampling_threshold = 6;  // by default, disabled.
+  optional double hanse_sampling_gamma = 7 [default = 1.0];
+  optional PositionSamplingConfig position_sampling = 11;
+  // Optional output queue for cache hit frames.
+  optional QueueConfig cachehit_output = 8;
+  // Size of the position cache per chunk.
+  optional uint64 position_cache_size = 9;
+  // Threads for caching positions.
+  optional uint64 caching_threads = 10 [default = 1];
+}
+
+// Configuration for chunk rescorer that adjusts chunk metadata using
+// tablebases. Maps to ChunkRescorerOptions in
+// csrc/loader/stages/chunk_rescorer.h
+message ChunkRescorerConfig {
+  // Number of worker threads for rescoring.
+  optional uint64 threads = 1 [default = 1];
+  // Output queue configuration.
+  optional QueueConfig output = 2;
+  // Comma-separated list of Syzygy tablebase directories.
+  optional string syzygy_paths = 3;
+  // Policy reshaping temperature.
+  optional float dist_temp = 4 [default = 1.0];
+  // Policy offset applied during rescoring.
+  optional float dist_offset = 5 [default = 0.0];
+  // DTZ boost factor when policy adjustments apply.
+  optional float dtz_boost = 6 [default = 0.0];
+  // Optional conversion target for input format (-1 keeps original).
+  optional int32 new_input_format = 7 [default = -1];
+  // Optional deblunder threshold for policy adjustments.
+  optional float deblunder_threshold = 8;
+  // Optional deblunder width controlling smoothing around the threshold.
+  optional float deblunder_width = 9;
+  // Comma-separated list of Gaviota tablebase directories.
+  optional string gaviota_paths = 11;
+}
+
+// Configuration for chunk unpacker that extracts frames from packed chunks.
+// Maps to ChunkUnpackerOptions in csrc/loader/chunk_feed/chunk_unpacker.h
+message ChunkUnpackerConfig {
+  // Number of worker threads for unpacking.
+  optional uint64 threads = 1 [default = 1];
+  // Probability of sampling each position within a chunk.
+  optional float position_sampling_rate = 2 [default = 1.0];
+  // Number of positions to take from each chunk.
+  optional uint32 position_count = 3;
+  // Output queue configuration.
+  optional QueueConfig output = 4;
+  // Number of positions to prefetch for caching.
+  optional uint32 prefetch_count = 5;
+  // Optional output queue for prefetch cache requests.
+  optional QueueConfig prefetch_output = 6;
+
+  optional PositionSamplingConfig position_sampling = 7;
+}
+
+// Configuration for shuffling frame sampler using reservoir sampling.
+// Maps to ShufflingFrameSamplerOptions in csrc/loader/shuffling_frame_sampler.h
+message ShufflingFrameSamplerConfig {
+  // Number of worker threads.
+  optional uint64 threads = 1 [default = 1];
+  // Size of sampling reservoir per thread.
+  optional uint64 reservoir_size_per_thread = 2 [default = 1000000];
+  // Output queue configuration.
+  optional QueueConfig output = 3;
+}
+
+// Configuration for tensor generator that converts frames to batched tensors.
+// Maps to TensorGeneratorOptions in csrc/loader/tensor_generator.h
+message TensorGeneratorConfig {
+  // Number of worker threads for tensor generation.
+  optional uint64 threads = 1 [default = 1];
+  // Batch size for tensor generation.
+  optional uint64 batch_size = 2 [default = 1024];
+  // Output queue configuration.
+  optional QueueConfig output = 3;
+}
+
+// Configuration for a stage that splits incoming ChunkSources into several
+// outputs based on a deterministic hash of (chunk source name, index within
+// source). For each configured output, provides a name, weight that controls
+// the proportion of indices assigned to it, and queue parameters.
+message ChunkSourceSplitterConfig {
+  // List of output queue configurations.
+  repeated QueueConfig output = 1;
+  // Relative weights for hash-based assignment (parallel to output).
+  repeated uint64 weight = 2;
+}
+
+// Configuration for simple chunk shuffler that processes one chunk source at a
+// time and outputs all chunks in shuffled order.
+message SimpleChunkExtractorConfig {
+  // Output queue configuration.
+  optional QueueConfig output = 1;
+}
+
+// Configuration for join stage that merges multiple input streams.
+message JoinPositionsConfig {
+  // Output queue configuration.
+  optional QueueConfig output = 1;
+}
+
+// Stage-level configuration providing a name and stage-specific options.
+message StageConfig {
+  // Unique name used to reference the stage output.
+  optional string name = 1;
+  // Names of upstream stages providing input to this stage.
+  repeated string input = 2;
+  // Field 3 reserved for future output configuration.
+  optional FilePathProviderConfig file_path_provider = 4;
+  optional ChunkSourceLoaderConfig chunk_source_loader = 5;
+  optional ShufflingChunkPoolConfig shuffling_chunk_pool = 6;
+  optional ChunkUnpackerConfig chunk_unpacker = 7;
+  optional ShufflingFrameSamplerConfig shuffling_frame_sampler = 8;
+  optional TensorGeneratorConfig tensor_generator = 9;
+  optional ChunkRescorerConfig chunk_rescorer = 10;
+  optional ChunkSourceSplitterConfig chunk_source_splitter = 11;
+  optional SimpleChunkExtractorConfig simple_chunk_extractor = 12;
+  optional JoinPositionsConfig join_positions = 13;
+}
+
+// Main configuration class for the DataLoader containing all component
+// configurations.
+message DataLoaderConfig {
+  // Ordered list of stage configurations comprising the pipeline.
+  repeated StageConfig stage = 1;
+  // Exposed outputs, each with an optional alias used by clients to fetch
+  // data. Expected format: "alias:stage.output", where "alias:" and ".output"
+  // are optional.
+  repeated string output = 2;
+}

@@ -1,0 +1,236 @@
+Screen {
+    background: $primary;
+}
+
+HeaderBar {
+    dock: top;
+    height: 1;
+    background: $primary-darken-1;
+    color: $text;
+}
+
+DataPipelinePane {
+    background: $surface;
+    color: $text;
+    border: none;
+    margin: 1;
+    padding: 0 1;
+    layout: vertical;
+    overflow-y: auto;
+    height: 27;
+}
+
+#training-status-container {
+    height: 12;
+    layout: horizontal;
+}
+
+TrainingScheduleWidget {
+    background: $surface;
+    color: $text;
+    border: solid $primary;
+    margin: 1;
+    width: 1fr;
+}
+
+JAXTrainingPane {
+    background: $surface;
+    color: $text;
+    border: solid $primary;
+    margin: 1;
+    width: 1fr;
+}
+
+RichLog {
+    height: 1fr;
+    background: $panel;
+    color: $text;
+    margin: 0;
+    width: 100%;
+    overflow-y: scroll;
+}
+
+.stage-content, .queue-content {
+    text-align: left;
+}
+
+.dataloader-row {
+    layout: grid;
+    grid-size: 6 8;
+    grid-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
+    grid-rows: 1;
+    grid-gutter: 0;
+    border: none;
+    padding: 0;
+    margin: 0;
+    height: auto;
+    min-height: 1;
+    width: 100%;
+}
+
+.stage-row {
+    background: $surface;
+    color: $text;
+    grid-size: 5 8;
+    grid-columns: 1fr 1fr 1fr 1fr 1fr;
+}
+
+.queue-row {
+    background: $surface-darken-2;
+    color: $text;
+    grid-size: 6 1;
+}
+
+.statistics-row {
+    background: $surface-darken-1;
+    color: $text;
+    grid-size: 1 1;
+}
+
+.statistics-full {
+    background: $surface-darken-1;
+    color: $text;
+    padding: 0 1;
+    margin: 0;
+    height: auto;
+    min-height: 1;
+    width: 100%;
+}
+
+.row-label {
+    padding: 0 1 0 0;
+    margin: 0;
+    height: 1;
+    max-height: 1;
+    text-style: bold;
+    color: $text;
+    content-align: left middle;
+    text-wrap: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.grid-spacer {
+    width: 1;
+    height: 1;
+    max-height: 1;
+    background: transparent;
+}
+
+.metric-chip {
+    background: $surface-darken-1;
+    color: $text;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    height: 1;
+    max-height: 1;
+    border: none;
+    content-align: center middle;
+    width: auto;
+    min-width: 10;
+    text-wrap: nowrap;
+    overflow: hidden;
+}
+
+.load-chip {
+    background: $primary-darken-2;
+    color: $text;
+}
+
+.info-chip {
+    background: $surface-darken-1;
+    color: $text;
+}
+
+.warning-chip {
+    background: $warning;
+    color: $text;
+}
+
+.queue-name-chip {
+    background: transparent;
+    color: $text-muted;
+    padding: 0;
+    margin-right: 1;
+    height: 1;
+    max-height: 1;
+    text-wrap: nowrap;
+    overflow: hidden;
+}
+
+.queue-fill {
+    height: 1;
+    max-height: 1;
+    width: 1fr;
+    margin-right: 1;
+}
+
+.queue-fill-text {
+    background: transparent;
+    color: $text;
+    margin: 0;
+    padding: 0;
+    height: 1;
+    max-height: 1;
+    text-wrap: nowrap;
+    overflow: hidden;
+    width: auto;
+}
+
+.queue-rate--zero {
+    color: $error;
+}
+
+.queue-rate, .queue-total {
+    text-wrap: nowrap;
+}
+
+
+.jax-training-content {
+    padding: 1;
+}
+
+/* Training widgets styles */
+.time-label {
+    width: auto;
+    padding: 0;
+    margin-right: 1;
+    text-align: left;
+}
+
+.time-progress-bar {
+    width: 1fr;
+    height: 1;
+}
+
+.time-progress-bar .bar--indeterminate {
+    background: $panel;
+}
+
+.time-progress-bar .bar--bar {
+    background: $panel;
+}
+
+.time-ratio {
+    width: auto;
+    padding: 0;
+    text-align: right;
+}
+
+TimeProgressWidget {
+    height: 1;
+    layout: horizontal;
+}
+
+ChunksProgressWidget {
+    height: 1;
+    layout: horizontal;
+}
+
+#uptime-stage-display, #epochs-display {
+    height: 1;
+}
+
+.log-content {
+    padding: 0;
+}

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
 
-protoc --proto_path=libs/lczero-common --python_out=tf libs/lczero-common/proto/net.proto
-protoc --proto_path=libs/lczero-common --python_out=tf libs/lczero-common/proto/chunk.proto
+protoc --proto_path=libs/lc0 --python_out=tf proto/net.proto
 touch tf/proto/__init__.py
