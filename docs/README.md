@@ -266,3 +266,21 @@ Takes the filenames from the input, and loads them as chunk sources. Skips files
 which are not chunk sources.
 
 * `frame_format`: `V6TrainingData` (default) or `V7TrainingData`.
+
+#### shuffling_chunk_pool
+
+Shuffling chunk pool is the central part of the data loader. In most cases,
+it is the only stage responsible for shuffling the data. In some cases, you may
+want to have secondary shuffling_frame_sampler after it (e.g. for SL training).
+
+Every chunk source has a "sort key" (currently, it's the file name without
+path). It's needed to determine the order of chunks to use for the sliding
+window.
+
+* `chunk_pool_size`: The size of the training window, in number of chunks. Even
+  when there are not enough chunks yet, the stage will output chunks from what
+  it has. It will not start producing data until the "initial scan done" event
+  is received from the file_path_provider.
+  * For RL training, typical values are 250k to 5M.
+  * For SL training, it should be larger than all data, so that all data is used
+    for training.
