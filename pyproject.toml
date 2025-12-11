@@ -42,6 +42,7 @@ lc0-backfill-metrics = "lczero_training.commands.backfill_metrics:main"
 lc0-train = "lczero_training.commands.train:main"
 lc0-daemon = "lczero_training.commands.daemon:main"
 lc0-tui = "lczero_training.commands.tui:main"
+lc0-weights = "lczero_training.commands.weights_tool:main"
 
 [project.optional-dependencies]
 dev = [

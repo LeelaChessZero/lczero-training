@@ -129,6 +129,7 @@ below).
 | lc0-tune-lr            | Trains on exponentially increasing learning rate, and outputs losses into csv file. Useful for picking a LR. |
 | lc0-backfill-metrics   | Loads older checkpoints computes metrics for them, and exports them to tensorboard.                          |
 | lc0-train              | Trains a single epoch (doesn't save or export the model though). Used for benchmarking.                      |
+| lc0-weights            | Manipulates weight files: arithmetic operations, grafting components, format conversion. See [weights_tool.md](weights_tool.md). |
 
 ### C++ tools
 
