@@ -5,6 +5,11 @@ package lczero.training;
 // Sentinel message for training batch sample type.
 message TrainingBatch {}
 
+// Configuration for weight-based metrics.
+message WeightsMetric {
+  optional bool rms = 1;
+}
+
 // Configuration for individual metric collection.
 message MetricConfig {
   // Name of the metric.
@@ -26,6 +31,8 @@ message MetricConfig {
     string dataloader_output = 7;
     // Path to numpy tensor file (.npz).
     string npz_filename = 8;
+    // Weight-based metrics.
+    WeightsMetric weights = 9;
   }
 }
 

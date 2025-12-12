@@ -12,6 +12,8 @@ import numpy as np
 from flax import nnx
 
 from lczero_training._lczero_training import DataLoader
+from lczero_training.daemon.metrics_base import _Metric
+from lczero_training.daemon.rms_metrics import _RmsMetric
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import JitTrainingState, TrainingSample
@@ -53,27 +55,6 @@ def load_batch_from_npz(npz_filename: str) -> BatchTuple:
                 f"Expected 1 batch in npz '{npz_filename}', got {batches.size}"
             )
         return batches[0]
-
-
-class _Metric(ABC):
-    """Base class for individual metric tracking."""
-
-    def __init__(self, config: MetricConfig, logger: TensorboardLogger):
-        self.config = config
-        self.logger = logger
-
-    def should_log(
-        self, global_step: int, local_step: int, steps_per_epoch: int
-    ) -> bool:
-        """Check if it's time to log this metric."""
-        if self.config.after_epoch and local_step + 1 == steps_per_epoch:
-            return True
-        step = global_step if self.config.use_global_steps else local_step
-        return (step + 1) % self.config.period == 0
-
-    @abstractmethod
-    def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
-        """Log the metric for the current step."""
 
 
 class _TrainingBatchMetric(_Metric):
@@ -280,6 +261,13 @@ class Metrics:
                     mc.npz_filename,
                     self._cached_batches,
                 )
+            elif mc.HasField("weights"):
+                if mc.weights.rms:
+                    metric = _RmsMetric(mc, tb_logger)
+                else:
+                    raise ValueError(
+                        f"Metric '{mc.name}': No weight metric type specified"
+                    )
             else:
                 raise ValueError(f"Metric '{mc.name}' has no sample source")
 
