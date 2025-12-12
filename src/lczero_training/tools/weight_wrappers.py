@@ -173,11 +173,19 @@ class NetWrapper:
             return
 
         if isinstance(value, NetWrapper):
-            getattr(self._proto, name).CopyFrom(value._proto)
-            self._attr_cache[name] = value
+            dest_proto = getattr(self._proto, name)
+            dest_proto.CopyFrom(value._proto)
+            # Create new wrapper for destination proto to maintain cache consistency.
+            self._attr_cache[name] = NetWrapper(
+                dest_proto, self._fallback_encoding
+            )
         elif isinstance(value, LayerWrapper):
-            getattr(self._proto, name).CopyFrom(value._proto)
-            self._attr_cache[name] = value
+            dest_proto = getattr(self._proto, name)
+            dest_proto.CopyFrom(value._proto)
+            # Create new wrapper for destination proto to maintain cache consistency.
+            self._attr_cache[name] = LayerWrapper(
+                dest_proto, self._fallback_encoding
+            )
         else:
             setattr(self._proto, name, value)
 
