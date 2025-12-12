@@ -4,7 +4,6 @@ import gzip
 from typing import Any, Iterator
 
 import numpy as np
-from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message
 
 from proto import net_pb2
@@ -255,7 +254,7 @@ class NetWrapper:
                 continue
 
             # Skip optional fields that are not set in both inputs.
-            if field_desc.label == FieldDescriptor.LABEL_OPTIONAL:
+            if not field_desc.is_required and not field_desc.is_repeated:
                 lhs_has = lhs._proto.HasField(field_name)
                 rhs_has = rhs._proto.HasField(field_name)
                 if not lhs_has or not rhs_has:
@@ -293,7 +292,7 @@ class NetWrapper:
                 continue
 
             # Skip optional fields that are not set in both inputs.
-            if field_desc.label == FieldDescriptor.LABEL_OPTIONAL:
+            if not field_desc.is_required and not field_desc.is_repeated:
                 lhs_has = lhs._proto.HasField(field_name)
                 rhs_has = rhs._proto.HasField(field_name)
                 if not lhs_has or not rhs_has:
@@ -332,7 +331,8 @@ class NetWrapper:
 
             # Skip unset optional fields to avoid creating them in output.
             if (
-                field_desc.label == FieldDescriptor.LABEL_OPTIONAL
+                not field_desc.is_required
+                and not field_desc.is_repeated
                 and not source._proto.HasField(field_name)
             ):
                 continue
