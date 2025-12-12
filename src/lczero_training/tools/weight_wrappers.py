@@ -196,7 +196,7 @@ class NetWrapper:
 
         self._commit_all(encoding)
 
-        serialized = self._proto.SerializeToString()
+        serialized = self._proto.SerializePartialToString()
         if path.endswith(".gz"):
             with gzip.open(path, "wb") as f:
                 f.write(serialized)
