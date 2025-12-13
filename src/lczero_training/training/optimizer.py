@@ -25,12 +25,31 @@ def _make_nadamw_weight_decay_mask(
     def is_bias(path: tuple[object, ...]) -> bool:
         return str(path[-1]).lower() == "bias"
 
+    def is_policy_head(path: tuple[object, ...]) -> bool:
+        return "policy_heads" in map(str, path)
+
+    def is_value_head(path: tuple[object, ...]) -> bool:
+        return "value_heads" in map(str, path)
+
+    def is_movesleft_head(path: tuple[object, ...]) -> bool:
+        return "movesleft_heads" in map(str, path)
+
+    def is_policy_embedding_shared(path: tuple[object, ...]) -> bool:
+        return "policy_embedding_shared" in map(str, path)
+
     def mask_fn(path: tuple[object, ...], variable: nnx.Variable) -> bool:
         if is_bias(path) and not config.decay_biases:
             return False
         if is_layer_norm(path) and not config.decay_layer_norms:
             return False
         if is_embedding(path) and not config.decay_embedding:
+            return False
+        if not config.decay_policy_heads:
+            if is_policy_head(path) or is_policy_embedding_shared(path):
+                return False
+        if is_value_head(path) and not config.decay_value_heads:
+            return False
+        if is_movesleft_head(path) and not config.decay_movesleft_heads:
             return False
         return True
 

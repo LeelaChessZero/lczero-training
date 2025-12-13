@@ -56,6 +56,9 @@ message NadamwOptimizerConfig {
   bool decay_embedding = 5;
   bool decay_biases = 6;
   bool decay_layer_norms = 7;
+  bool decay_policy_heads = 8;
+  bool decay_value_heads = 9;
+  bool decay_movesleft_heads = 10;
 }
 
 message CheckpointConfig {
