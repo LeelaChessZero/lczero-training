@@ -153,3 +153,40 @@ def test_policy_head_map_assignment() -> None:
         assert np.isclose(policy_value[0], 15.0, rtol=1e-4)
     finally:
         os.unlink(tmp_path)
+
+
+def test_noop_arithmetic() -> None:
+    """Test that 0.3*A + 0.7*A equals A (no-op operation)."""
+    # Create network A with simple weights (value 10.0).
+    net_a = net_pb2.Net()
+    net_a.format.weights_encoding = net_pb2.Format.LINEAR16
+    net_a.weights.ip1_val_w.min_val = 10.0
+    net_a.weights.ip1_val_w.max_val = 10.0
+    net_a.weights.ip1_val_w.params = np.array(
+        [32767], dtype=np.uint16
+    ).tobytes()
+
+    wrapper_a = NetWrapper(net_a)
+
+    # Perform no-op operation: 0.3*A + 0.7*A should equal A.
+    result = 0.3 * wrapper_a + 0.7 * wrapper_a
+
+    # Verify in-memory: result should equal A (10.0).
+    result_value = result.weights.ip1_val_w.value
+    expected = 10.0
+    assert np.isclose(result_value[0], expected, rtol=1e-4), (
+        f"Expected {expected}, got {result_value[0]}"
+    )
+
+    # Verify persistence: save and reload.
+    with tempfile.NamedTemporaryFile(suffix=".pb.gz", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        save_weights(result, tmp_path)
+        reloaded = load_weights(tmp_path)
+        reloaded_value = reloaded.weights.ip1_val_w.value
+        assert np.isclose(reloaded_value[0], expected, rtol=1e-4), (
+            f"After save/load: Expected {expected}, got {reloaded_value[0]}"
+        )
+    finally:
+        os.unlink(tmp_path)

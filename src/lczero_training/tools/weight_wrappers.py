@@ -55,7 +55,7 @@ class LayerWrapper:
             self._proto.params = params
             self._proto.min_val = min_val
             self._proto.max_val = max_val
-            # Note: encoding field left unset - use global net.format.weights_encoding
+            self._proto.encoding = encoding  # type: ignore[assignment]
             del self._proto.dims[:]
             self._proto.dims.extend(self._cached_array.shape)
             object.__setattr__(self, "_modified", False)
