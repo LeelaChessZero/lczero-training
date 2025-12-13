@@ -108,6 +108,27 @@ class ListWrapper:
             self._item_cache[idx] = self._parent._wrap_field(item_proto)
         return self._item_cache[idx]
 
+    def __setitem__(self, idx: int, value: Any) -> None:
+        """Support item assignment for list elements."""
+        if isinstance(value, NetWrapper):
+            dest_proto = self._proto_list[idx]
+            dest_proto.CopyFrom(value._proto)
+            # Create new wrapper for destination proto to maintain cache consistency.
+            self._item_cache[idx] = NetWrapper(
+                dest_proto, self._parent._fallback_encoding
+            )
+        elif isinstance(value, LayerWrapper):
+            dest_proto = self._proto_list[idx]
+            dest_proto.CopyFrom(value._proto)
+            # Create new wrapper for destination proto to maintain cache consistency.
+            self._item_cache[idx] = LayerWrapper(
+                dest_proto, self._parent._fallback_encoding
+            )
+        else:
+            self._proto_list[idx] = value
+            if idx in self._item_cache:
+                del self._item_cache[idx]
+
     def __iter__(self) -> Iterator[Any]:
         for i in range(len(self)):
             yield self[i]

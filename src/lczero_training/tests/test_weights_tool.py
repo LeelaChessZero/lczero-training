@@ -190,3 +190,48 @@ def test_noop_arithmetic() -> None:
         )
     finally:
         os.unlink(tmp_path)
+
+
+def test_list_item_assignment() -> None:
+    """Test that list item assignment works for encoder blocks."""
+    # Create network A with encoder block containing value 10.0.
+    net_a = net_pb2.Net()
+    net_a.format.weights_encoding = net_pb2.Format.LINEAR16
+    encoder_a = net_a.weights.encoder.add()
+    encoder_a.mha.q_w.min_val = 10.0
+    encoder_a.mha.q_w.max_val = 10.0
+    encoder_a.mha.q_w.params = np.array([32767], dtype=np.uint16).tobytes()
+
+    # Create network B with encoder block containing value 20.0.
+    net_b = net_pb2.Net()
+    net_b.format.weights_encoding = net_pb2.Format.LINEAR16
+    encoder_b = net_b.weights.encoder.add()
+    encoder_b.mha.q_w.min_val = 20.0
+    encoder_b.mha.q_w.max_val = 20.0
+    encoder_b.mha.q_w.params = np.array([32767], dtype=np.uint16).tobytes()
+
+    # Wrap networks.
+    wrapper_a = NetWrapper(net_a)
+    wrapper_b = NetWrapper(net_b)
+
+    # Assign encoder[0] from B to A.
+    wrapper_a.weights.encoder[0] = wrapper_b.weights.encoder[0]
+
+    # Verify in-memory: A's encoder[0] should now have value 20.0.
+    result_value = wrapper_a.weights.encoder[0].mha.q_w.value
+    assert np.isclose(result_value[0], 20.0, rtol=1e-4), (
+        f"Expected 20.0 (B's value), got {result_value[0]}"
+    )
+
+    # Verify persistence.
+    with tempfile.NamedTemporaryFile(suffix=".pb.gz", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        save_weights(wrapper_a, tmp_path)
+        reloaded = load_weights(tmp_path)
+        reloaded_value = reloaded.weights.encoder[0].mha.q_w.value
+        assert np.isclose(reloaded_value[0], 20.0, rtol=1e-4), (
+            f"After save/load: Expected 20.0, got {reloaded_value[0]}"
+        )
+    finally:
+        os.unlink(tmp_path)
