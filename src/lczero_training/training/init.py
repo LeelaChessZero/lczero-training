@@ -72,17 +72,11 @@ def init(
         text_format.Parse(f.read(), config)
 
     checkpoint_path = config.training.checkpoint.path
-    checkpoint_exists = False
+    checkpoint_exists = os.path.exists(checkpoint_path)
 
-    if not dry_run:
-        if checkpoint_path is None:
-            logger.error("Checkpoint path must be set in the configuration.")
-            sys.exit(1)
-
-        checkpoint_exists = os.path.exists(checkpoint_path)
-        if checkpoint_exists and not override:
-            logger.error(f"Checkpoint path {checkpoint_path} already exists.")
-            sys.exit(1)
+    if not dry_run and checkpoint_exists and not override:
+        logger.error(f"Checkpoint path {checkpoint_path} already exists.")
+        sys.exit(1)
 
     logger.info("Creating initial training state from configuration")
     training_state = TrainingState.new_from_config(
