@@ -60,7 +60,6 @@ def init(
     swa_initial_nets: int = 0,
     override_training_steps: Optional[int] = None,
     override: bool = False,
-    from_checkpoint: Optional[str] = None,
     no_copy_swa: bool = False,
 ) -> None:
     """
@@ -72,15 +71,17 @@ def init(
     with open(config_filename, "r") as f:
         text_format.Parse(f.read(), config)
 
+    checkpoint_path = config.training.checkpoint.path
+    checkpoint_exists = False
+
     if not dry_run:
-        if config.training.checkpoint.path is None:
+        if checkpoint_path is None:
             logger.error("Checkpoint path must be set in the configuration.")
             sys.exit(1)
 
-        if os.path.exists(config.training.checkpoint.path) and not override:
-            logger.error(
-                f"Checkpoint path {config.training.checkpoint.path} already exists."
-            )
+        checkpoint_exists = os.path.exists(checkpoint_path)
+        if checkpoint_exists and not override:
+            logger.error(f"Checkpoint path {checkpoint_path} already exists.")
             sys.exit(1)
 
     logger.info("Creating initial training state from configuration")
@@ -89,10 +90,10 @@ def init(
         training_config=config.training,
     )
 
-    if from_checkpoint is not None:
-        logger.info(f"Loading from checkpoint: {from_checkpoint}")
+    if checkpoint_exists:
+        logger.info(f"Loading from existing checkpoint: {checkpoint_path}")
         source_mgr = ocp.CheckpointManager(
-            from_checkpoint,
+            checkpoint_path,
             options=ocp.CheckpointManagerOptions(create=False),
         )
         training_state = source_mgr.restore(
