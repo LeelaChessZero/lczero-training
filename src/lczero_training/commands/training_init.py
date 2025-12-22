@@ -31,6 +31,32 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip checkpoint creation.",
     )
+    parser.add_argument(
+        "--swa_initial_nets",
+        type=int,
+        default=0,
+        help="Initial value for num_averages in SWA state.",
+    )
+    parser.add_argument(
+        "--override_training_steps",
+        type=int,
+        help="Override training step number.",
+    )
+    parser.add_argument(
+        "--override",
+        action="store_true",
+        help="Allow overwriting existing checkpoint path.",
+    )
+    parser.add_argument(
+        "--from-checkpoint",
+        type=str,
+        help="Path to existing checkpoint to load state from.",
+    )
+    parser.add_argument(
+        "--no-copy-swa",
+        action="store_true",
+        help="Don't copy model weights to SWA state.",
+    )
     return parser
 
 
@@ -48,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         lczero_model=args.lczero_model,
         seed=args.seed,
         dry_run=args.dry_run,
+        swa_initial_nets=args.swa_initial_nets,
+        override_training_steps=args.override_training_steps,
+        override=args.override,
+        from_checkpoint=args.from_checkpoint,
+        no_copy_swa=args.no_copy_swa,
     )
     return 0
 
