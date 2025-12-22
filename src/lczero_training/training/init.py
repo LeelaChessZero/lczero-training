@@ -26,6 +26,7 @@ def _load_lc0_model_state(
     path: str,
     expected_config: ModelConfig,
     compute_dtype: hlo_pb2.XlaShapeProto.Type,
+    ignore_config_mismatch: bool = False,
 ) -> tuple[nnx.State, int]:
     """Load lc0 weights, validate config, return (model_state, training_steps)."""
     lc0_weights = net_pb2.Net()
@@ -37,13 +38,19 @@ def _load_lc0_model_state(
         lc0_weights, hlo_pb2.XlaShapeProto.F32, compute_dtype
     )
     if leela_config != expected_config:
-        logger.error(
-            "The provided lczero model configuration "
-            "differs from the one in the config file."
-        )
-        logger.error(f"Config file model config: {expected_config}")
-        logger.error(f"Leela model config: {leela_config}")
-        sys.exit(1)
+        if ignore_config_mismatch:
+            logger.warning(
+                "The provided lczero model configuration "
+                "differs from the one in the config file (ignored)."
+            )
+        else:
+            logger.error(
+                "The provided lczero model configuration "
+                "differs from the one in the config file."
+            )
+            logger.error(f"Config file model config: {expected_config}")
+            logger.error(f"Leela model config: {leela_config}")
+            sys.exit(1)
 
     import_options = LeelaImportOptions(
         weights_dtype=hlo_pb2.XlaShapeProto.F32, compute_dtype=compute_dtype
@@ -59,8 +66,9 @@ def init(
     dry_run: bool = False,
     swa_initial_nets: int = 0,
     override_training_steps: Optional[int] = None,
-    override: bool = False,
+    overwrite: bool = False,
     no_copy_swa: bool = False,
+    ignore_config_mismatch: bool = False,
 ) -> None:
     """
     Initializes a new training run.
@@ -72,9 +80,9 @@ def init(
         text_format.Parse(f.read(), config)
 
     checkpoint_path = config.training.checkpoint.path
-    checkpoint_exists = os.path.exists(checkpoint_path)
+    checkpoint_exists = checkpoint_path and os.path.exists(checkpoint_path)
 
-    if not dry_run and checkpoint_exists and not override:
+    if not dry_run and checkpoint_exists and not overwrite:
         logger.error(f"Checkpoint path {checkpoint_path} already exists.")
         sys.exit(1)
 
@@ -111,7 +119,10 @@ def init(
     else:
         logger.info(f"Loading lczero model: {lczero_model}")
         model_state, lc0_steps = _load_lc0_model_state(
-            lczero_model, config.model, config.model.defaults.compute_dtype
+            lczero_model,
+            config.model,
+            config.model.defaults.compute_dtype,
+            ignore_config_mismatch,
         )
         step = override_training_steps or lc0_steps
         new_swa_state = (
@@ -135,17 +146,18 @@ def init(
     else:
         checkpoint_mgr = ocp.CheckpointManager(
             config.training.checkpoint.path,
-            options=ocp.CheckpointManagerOptions(
-                create=True,
-            ),
+            options=ocp.CheckpointManagerOptions(create=True),
         )
 
+        step = training_state.jit_state.step
+        if step in checkpoint_mgr.all_steps():
+            logger.info(f"Deleting existing checkpoint at step {step}")
+            checkpoint_mgr.delete(step)
+            checkpoint_mgr.wait_until_finished()
+
         logger.info(
-            f"Saving initial checkpoint to {config.training.checkpoint.path}"
+            f"Saving checkpoint to {config.training.checkpoint.path} at step {step}"
         )
-        checkpoint_mgr.save(
-            step=training_state.jit_state.step,
-            args=ocp.args.PyTreeSave(training_state),
-        )
+        checkpoint_mgr.save(step=step, args=ocp.args.PyTreeSave(training_state))
         checkpoint_mgr.wait_until_finished()
     logger.info("Initialization complete.")

@@ -43,14 +43,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override training step number.",
     )
     parser.add_argument(
-        "--override",
+        "--overwrite",
         action="store_true",
-        help="Allow overwriting existing checkpoint path.",
+        help="Allow overwriting existing checkpoint.",
     )
     parser.add_argument(
         "--no-copy-swa",
         action="store_true",
         help="Don't copy model weights to SWA state.",
+    )
+    parser.add_argument(
+        "--ignore-config-mismatch",
+        action="store_true",
+        help="Ignore lczero model config mismatch.",
     )
     return parser
 
@@ -71,8 +76,9 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         swa_initial_nets=args.swa_initial_nets,
         override_training_steps=args.override_training_steps,
-        override=args.override,
+        overwrite=args.overwrite,
         no_copy_swa=args.no_copy_swa,
+        ignore_config_mismatch=args.ignore_config_mismatch,
     )
     return 0
 
