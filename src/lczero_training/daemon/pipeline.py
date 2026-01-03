@@ -251,7 +251,11 @@ class TrainingPipeline:
             else self._training_state.jit_state.model_state
         )
         assert isinstance(export_state, nnx.State)
-        net = jax_to_leela(jax_weights=export_state, export_options=options)
+        net = jax_to_leela(
+            jax_weights=export_state,
+            export_options=options,
+            model_config=self._config.model,
+        )
         logging.info(f"Writing model to {export_filename}")
         os.makedirs(self._config.export.path, exist_ok=True)
         with gzip.open(export_filename, "wb") as f:

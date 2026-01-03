@@ -10,6 +10,7 @@ from flax import nnx
 from lczero_training.convert.leela_pytree_visitor import (
     LeelaPytreeWeightsVisitor,
 )
+from proto import model_config_pb2
 from proto import net_pb2
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,9 @@ class LeelaExportOptions:
 
 
 def jax_to_leela(
-    jax_weights: nnx.State, export_options: LeelaExportOptions
+    jax_weights: nnx.State,
+    export_options: LeelaExportOptions,
+    model_config: model_config_pb2.ModelConfig,
 ) -> net_pb2.Net:
     lc0_weights = net_pb2.Net()
     lc0_weights.magic = 0x1C0
@@ -84,7 +87,7 @@ def jax_to_leela(
         lc0_weights.min_version.minor,
         lc0_weights.min_version.patch,
     ) = _split_version(export_options.min_version)
-    lc0_weights.format.CopyFrom(_make_format())
+    lc0_weights.format.CopyFrom(_make_format(model_config))
     if export_options.training_steps is not None:
         lc0_weights.training_params.training_steps = (
             export_options.training_steps
@@ -103,7 +106,7 @@ def _split_version(version_str: str) -> tuple[int, int, int]:
     return cast(tuple[int, int, int], tuple(map(int, parts)))
 
 
-def _make_format() -> net_pb2.Format:
+def _make_format(model_config: model_config_pb2.ModelConfig) -> net_pb2.Format:
     fmt = net_pb2.Format()
     fmt.weights_encoding = fmt.LINEAR16
     netfmt = fmt.network_format
@@ -113,9 +116,35 @@ def _make_format() -> net_pb2.Format:
     netfmt.policy = netfmt.POLICY_ATTENTION
     netfmt.value = netfmt.VALUE_WDL
     netfmt.moves_left = netfmt.MOVES_LEFT_V1
-    netfmt.default_activation = netfmt.DEFAULT_ACTIVATION_MISH
-    netfmt.smolgen_activation = netfmt.ACTIVATION_SWISH
-    netfmt.ffn_activation = netfmt.ACTIVATION_DEFAULT
     netfmt.input_embedding = netfmt.INPUT_EMBEDDING_PE_DENSE
+
+    if model_config.HasField("defaults") and model_config.defaults.HasField(
+        "activation"
+    ):
+        activation = model_config.defaults.activation
+        # The default_activation field uses the DefaultActivation enum in
+        # net.proto which only supports MISH and RELU.
+        if activation == netfmt.ACTIVATION_MISH:
+            netfmt.default_activation = netfmt.DEFAULT_ACTIVATION_MISH
+        elif activation == netfmt.ACTIVATION_RELU:
+            netfmt.default_activation = netfmt.DEFAULT_ACTIVATION_RELU
+    else:
+        netfmt.default_activation = netfmt.DEFAULT_ACTIVATION_MISH
+
+    if (
+        model_config.HasField("encoder")
+        and model_config.encoder.HasField("smolgen")
+        and model_config.encoder.smolgen.HasField("activation")
+    ):
+        netfmt.smolgen_activation = model_config.encoder.smolgen.activation
+    else:
+        netfmt.smolgen_activation = netfmt.ACTIVATION_SWISH
+
+    if model_config.HasField("defaults") and model_config.defaults.HasField(
+        "ffn_activation"
+    ):
+        netfmt.ffn_activation = model_config.defaults.ffn_activation
+    else:
+        netfmt.ffn_activation = netfmt.ACTIVATION_DEFAULT
 
     return fmt
