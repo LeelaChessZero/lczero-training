@@ -24,8 +24,9 @@ message ScheduleConfig {
 message OptimizerConfig {
   oneof optimizer_type {
     NadamwOptimizerConfig nadamw = 1;
+    NadamOptimizerConfig nadam = 2;
+    SgdOptimizerConfig sgd = 3;
   }
-  float momentum = 2;
 }
 
 message LrSchedule {
@@ -55,6 +56,17 @@ message NadamwOptimizerConfig {
   float weight_decay = 4;
   // Selector for weight decay. True = apply decay to this category.
   WeightsSelector decay_selector = 5;
+}
+
+message NadamOptimizerConfig {
+  float beta_1 = 1;
+  float beta_2 = 2;
+  float epsilon = 3;
+}
+
+message SgdOptimizerConfig {
+  float momentum = 1;
+  bool nesterov = 2;
 }
 
 // Selector for which weight categories to include.

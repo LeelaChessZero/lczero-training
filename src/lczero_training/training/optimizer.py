@@ -37,21 +37,36 @@ def make_gradient_transformation(
     lr_schedule: optax.Schedule,
 ) -> optax.GradientTransformation:
     if config.HasField("nadamw"):
-        conf = config.nadamw
+        nadamw = config.nadamw
         tx = optax.nadamw(
             lr_schedule,
-            b1=conf.beta_1,
-            b2=conf.beta_2,
-            eps=conf.epsilon,
-            weight_decay=conf.weight_decay,
-            mask=partial(make_weights_mask, conf.decay_selector),
+            b1=nadamw.beta_1,
+            b2=nadamw.beta_2,
+            eps=nadamw.epsilon,
+            weight_decay=nadamw.weight_decay,
+            mask=partial(make_weights_mask, nadamw.decay_selector),
         )
-        if max_grad_norm is not None and max_grad_norm > 0:
-            tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
-        return tx
+    elif config.HasField("nadam"):
+        nadam = config.nadam
+        tx = optax.nadam(
+            lr_schedule,
+            b1=nadam.beta_1,
+            b2=nadam.beta_2,
+            eps=nadam.epsilon,
+        )
+    elif config.HasField("sgd"):
+        sgd = config.sgd
+        tx = optax.sgd(
+            lr_schedule,
+            momentum=sgd.momentum if sgd.momentum else None,
+            nesterov=sgd.nesterov,
+        )
     else:
         raise ValueError(
             "Unsupported optimizer type: {}".format(
                 config.WhichOneof("optimizer_type")
             )
         )
+    if max_grad_norm is not None and max_grad_norm > 0:
+        tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
+    return tx
