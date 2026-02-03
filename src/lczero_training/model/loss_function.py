@@ -3,13 +3,16 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 import jax
 import jax.numpy as jnp
 import optax
+from flax import nnx
 from jax.scipy.special import xlogy
 
 from lczero_training.training.state import TrainingSample
+from lczero_training.training.utils import make_weights_mask
 from proto.training_config_pb2 import (
     LossConfig,
     MovesLeftLossConfig,
     PolicyLossConfig,
+    RegularizationLossConfig,
     ValueCategoricalLossConfig,
     ValueErrorLossConfig,
     ValueLossConfig,
@@ -48,12 +51,33 @@ class LossBase:
         raise NotImplementedError("Subclasses must implement __call__")
 
 
+class RegularizationLoss:
+    """Computes regularization loss on model parameters."""
+
+    def __init__(self, config: RegularizationLossConfig) -> None:
+        self.metric_name = config.metric_name or "l2"
+        self.weight = config.weight
+        self._selector = config.selector
+
+    def __call__(self, model: LczeroModel) -> jax.Array:
+        params = nnx.state(model, nnx.Param)
+        mask = make_weights_mask(self._selector, params)
+        masked_params = jax.tree.map(
+            lambda p, m: p.value if m else jnp.zeros_like(p.value), params, mask
+        )
+        leaves = jax.tree.leaves(masked_params)
+        return sum(
+            (jnp.sum(jnp.square(leaf)) for leaf in leaves), jnp.array(0.0)
+        )
+
+
 class LczeroLoss:
     policy_losses: List["PolicyLoss"]
     value_losses: List["ValueLoss"]
     movesleft_losses: List["MovesLeftLoss"]
     value_error_losses: List["ValueErrorLoss"]
     value_categorical_losses: List["ValueCategoricalLoss"]
+    regularization_losses: List["RegularizationLoss"]
 
     def __init__(self, config: LossConfig) -> None:
         self.config = config
@@ -73,9 +97,14 @@ class LczeroLoss:
             ValueCategoricalLoss(loss_config)
             for loss_config in config.value_categorical
         ]
+        self.regularization_losses = [
+            RegularizationLoss(loss_config)
+            for loss_config in config.regularization
+        ]
 
         def _validate_no_duplicate_metrics(
-            loss_type_name: str, losses: Sequence[LossBase]
+            loss_type_name: str,
+            losses: Sequence[Union[LossBase, RegularizationLoss]],
         ) -> None:
             seen = set()
             for name in (loss.metric_name for loss in losses):
@@ -91,6 +120,9 @@ class LczeroLoss:
         _validate_no_duplicate_metrics("value_error", self.value_error_losses)
         _validate_no_duplicate_metrics(
             "value_categorical", self.value_categorical_losses
+        )
+        _validate_no_duplicate_metrics(
+            "regularization", self.regularization_losses
         )
 
     def __call__(
@@ -132,6 +164,11 @@ class LczeroLoss:
                 f"value_categorical/{value_categorical_loss.metric_name}"
             ] = loss
             weighted_losses.append(loss * value_categorical_loss.weight)
+
+        for reg_loss in self.regularization_losses:
+            loss = reg_loss(model)
+            unweighted_losses[f"regularization/{reg_loss.metric_name}"] = loss
+            weighted_losses.append(loss * reg_loss.weight)
 
         data_loss = jnp.sum(jnp.array(weighted_losses))
 

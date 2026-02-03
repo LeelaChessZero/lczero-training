@@ -53,12 +53,18 @@ message NadamwOptimizerConfig {
   float beta_2 = 2;
   float epsilon = 3;
   float weight_decay = 4;
-  bool decay_embedding = 5;
-  bool decay_biases = 6;
-  bool decay_layer_norms = 7;
-  bool decay_policy_heads = 8;
-  bool decay_value_heads = 9;
-  bool decay_movesleft_heads = 10;
+  // Selector for weight decay. True = apply decay to this category.
+  WeightsSelector decay_selector = 5;
+}
+
+// Selector for which weight categories to include.
+message WeightsSelector {
+  bool embedding = 1;
+  bool biases = 2;
+  bool layer_norms = 3;
+  bool policy_heads = 4;
+  bool value_heads = 5;
+  bool movesleft_heads = 6;
 }
 
 message CheckpointConfig {
@@ -72,6 +78,18 @@ message LossConfig {
   repeated MovesLeftLossConfig movesleft = 3;
   repeated ValueErrorLossConfig value_error = 4;
   repeated ValueCategoricalLossConfig value_categorical = 5;
+  repeated RegularizationLossConfig regularization = 6;
+}
+
+message RegularizationLossConfig {
+  enum RegularizationType {
+    L2 = 0;
+  }
+  RegularizationType type = 1;
+  string metric_name = 2;
+  float weight = 3;
+  // Selector for which weights to regularize. True = include in regularization.
+  WeightsSelector selector = 4;
 }
 
 enum ValueType {

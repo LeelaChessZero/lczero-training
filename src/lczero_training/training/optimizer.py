@@ -3,57 +3,9 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
-from flax import nnx
 
-from proto.training_config_pb2 import (
-    NadamwOptimizerConfig,
-    OptimizerConfig,
-)
-
-
-def _make_nadamw_weight_decay_mask(
-    config: NadamwOptimizerConfig, params: nnx.State
-) -> nnx.State:
-    """Creates a mask that excludes bias and LayerNorm parameters from decay."""
-
-    def is_layer_norm(path: tuple[object, ...]) -> bool:
-        return any(str(s).startswith("ln") for s in path)
-
-    def is_embedding(path: tuple[object, ...]) -> bool:
-        return ("embedding", "embedding") in zip(path, path[1:])
-
-    def is_bias(path: tuple[object, ...]) -> bool:
-        return str(path[-1]).lower() == "bias"
-
-    def is_policy_head(path: tuple[object, ...]) -> bool:
-        return "policy_heads" in map(str, path)
-
-    def is_value_head(path: tuple[object, ...]) -> bool:
-        return "value_heads" in map(str, path)
-
-    def is_movesleft_head(path: tuple[object, ...]) -> bool:
-        return "movesleft_heads" in map(str, path)
-
-    def is_policy_embedding_shared(path: tuple[object, ...]) -> bool:
-        return "policy_embedding_shared" in map(str, path)
-
-    def mask_fn(path: tuple[object, ...], variable: nnx.Variable) -> bool:
-        if is_bias(path) and not config.decay_biases:
-            return False
-        if is_layer_norm(path) and not config.decay_layer_norms:
-            return False
-        if is_embedding(path) and not config.decay_embedding:
-            return False
-        if not config.decay_policy_heads:
-            if is_policy_head(path) or is_policy_embedding_shared(path):
-                return False
-        if is_value_head(path) and not config.decay_value_heads:
-            return False
-        if is_movesleft_head(path) and not config.decay_movesleft_heads:
-            return False
-        return True
-
-    return nnx.map_state(mask_fn, params)
+from lczero_training.training.utils import make_weights_mask
+from proto.training_config_pb2 import OptimizerConfig
 
 
 def update_optimizer_step(
@@ -92,7 +44,7 @@ def make_gradient_transformation(
             b2=conf.beta_2,
             eps=conf.epsilon,
             weight_decay=conf.weight_decay,
-            mask=partial(_make_nadamw_weight_decay_mask, conf),
+            mask=partial(make_weights_mask, conf.decay_selector),
         )
         if max_grad_norm is not None and max_grad_norm > 0:
             tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
