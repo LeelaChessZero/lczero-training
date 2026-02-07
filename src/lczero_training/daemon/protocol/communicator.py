@@ -7,7 +7,6 @@ from dataclasses import is_dataclass
 from enum import Enum
 from typing import Any, TextIO, Union, get_args, get_origin
 
-import anyio
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.message import Message
@@ -189,7 +188,7 @@ class AsyncCommunicator:
         message_line = json.dumps(message) + "\n"
         await self.output_stream.send(message_line)
 
-    def _dispatch(self, line: str, task_group: anyio.abc.TaskGroup) -> None:
+    async def _dispatch(self, line: str) -> None:
         line = line.strip()
         if not line:
             return
@@ -204,22 +203,21 @@ class AsyncCommunicator:
         handler_method_name = f"on_{event_type}"
         handler_method = getattr(self.handler, handler_method_name)
 
-        task_group.start_soon(handler_method, payload_instance)
+        await handler_method(payload_instance)
 
     async def run(self) -> None:
         """
         Starts the async listener loop.
         Reads from the input stream line-by-line, deserializes notifications,
-        and dispatches them to the appropriate async handler method as tasks.
+        and dispatches them to the appropriate async handler method.
 
         This method runs until the input stream is closed.
         """
-        async with anyio.create_task_group() as task_group:
-            async for chunk in self.input_stream:
-                self._buffer += chunk
-                while "\n" in self._buffer:
-                    line, self._buffer = self._buffer.split("\n", 1)
-                    self._dispatch(line, task_group)
+        async for chunk in self.input_stream:
+            self._buffer += chunk
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                await self._dispatch(line)
 
         if self._buffer:
-            self._dispatch(self._buffer, task_group)
+            await self._dispatch(self._buffer)
