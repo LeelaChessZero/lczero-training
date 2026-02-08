@@ -57,46 +57,54 @@ class LczeroModel(nnx.Module):
             rngs=rngs,
         )
 
-        self.value_heads = {
-            head_config.name: ValueHead(
-                in_features=config.embedding.embedding_size,
-                config=head_config,
-                defaults=config.defaults,
-                rngs=rngs,
-            )
-            for head_config in config.value_head
-        }
+        self.value_heads = nnx.Dict(
+            {
+                head_config.name: ValueHead(
+                    in_features=config.embedding.embedding_size,
+                    config=head_config,
+                    defaults=config.defaults,
+                    rngs=rngs,
+                )
+                for head_config in config.value_head
+            }
+        )
 
         # Named to appear before 'policy_heads' alphabetically in pytree state.
         # This ensures shared embedding appears at parent level during
         # serialization.
-        self.policy_embedding_shared = None
+        self.policy_embedding_shared: Optional[nnx.Linear]
         if config.HasField("shared_policy_embedding_size"):
             self.policy_embedding_shared = nnx.Linear(
                 in_features=config.embedding.embedding_size,
                 out_features=config.shared_policy_embedding_size,
                 rngs=rngs,
             )
+        else:
+            self.policy_embedding_shared = None
 
-        self.policy_heads = {
-            head_config.name: PolicyHead(
-                in_features=config.embedding.embedding_size,
-                config=head_config,
-                defaults=config.defaults,
-                shared_embedding=self.policy_embedding_shared,
-                rngs=rngs,
-            )
-            for head_config in config.policy_head
-        }
-        self.movesleft_heads = {
-            head_config.name: MovesLeftHead(
-                in_features=config.embedding.embedding_size,
-                config=head_config,
-                defaults=config.defaults,
-                rngs=rngs,
-            )
-            for head_config in config.movesleft_head
-        }
+        self.policy_heads = nnx.Dict(
+            {
+                head_config.name: PolicyHead(
+                    in_features=config.embedding.embedding_size,
+                    config=head_config,
+                    defaults=config.defaults,
+                    shared_embedding=self.policy_embedding_shared,
+                    rngs=rngs,
+                )
+                for head_config in config.policy_head
+            }
+        )
+        self.movesleft_heads = nnx.Dict(
+            {
+                head_config.name: MovesLeftHead(
+                    in_features=config.embedding.embedding_size,
+                    config=head_config,
+                    defaults=config.defaults,
+                    rngs=rngs,
+                )
+                for head_config in config.movesleft_head
+            }
+        )
 
     def __call__(self, x: jax.Array) -> ModelPrediction:
         x = jnp.astype(x, get_dtype(self.config.defaults.compute_dtype))

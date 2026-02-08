@@ -359,6 +359,7 @@ class ValueErrorLoss(LossBase):
         value_pred = predictions.value[self.head_name]
         wdl_logits = value_pred[0]
         error_pred = value_pred[1]
+        assert error_pred is not None
 
         # Convert WDL to Q value.
         predicted_q = _compute_q_from_wdl(wdl_logits)
