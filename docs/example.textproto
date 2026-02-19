@@ -136,7 +136,19 @@ training {
     max_to_keep: 5
   }
   optimizer {
-    nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
+    nadamw {
+      beta_1: 0.9  beta_2: 0.98  epsilon: 1e-7  weight_decay: 0.0001
+      # Rule order matters: first match wins.
+      decay_selector {
+        rule { match: "**/bias" include: false }
+        rule { match: "**/ln*/**" include: false }
+        rule { match: "**/embedding/embedding/**" include: false }
+        rule { match: "**/policy_heads/**" include: true }
+        rule { match: "**/value_heads/**" include: true }
+        rule { match: "**/movesleft_heads/**" include: true }
+        otherwise_include: false
+      }
+    }
     # Alternative optimizers:
     # nadam { beta_1: 0.9 beta_2: 0.999 epsilon: 1e-8 }
     # sgd { momentum: 0.9 nesterov: true }

@@ -69,14 +69,19 @@ message SgdOptimizerConfig {
   bool nesterov = 2;
 }
 
+message WeightsSelectorRule {
+  // Glob pattern matched against weight path.
+  string match = 1;
+  // True = include; false = exclude.
+  bool include = 2;
+}
+
 // Selector for which weight categories to include.
+// Rules are evaluated in order; the first matching rule applies.
+// If no rule matches, otherwise_include is used.
 message WeightsSelector {
-  bool embedding = 1;
-  bool biases = 2;
-  bool layer_norms = 3;
-  bool policy_heads = 4;
-  bool value_heads = 5;
-  bool movesleft_heads = 6;
+  repeated WeightsSelectorRule rule = 1;
+  bool otherwise_include = 2;
 }
 
 message CheckpointConfig {
