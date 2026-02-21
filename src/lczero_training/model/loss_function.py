@@ -63,7 +63,10 @@ class RegularizationLoss:
         params = nnx.state(model, nnx.Param)
         mask = make_weights_mask(self._selector, params)
         masked_params = jax.tree.map(
-            lambda p, m: p.value if m else jnp.zeros_like(p.value), params, mask
+            lambda p, m: p.value if m else jnp.zeros_like(p.value),
+            params,
+            mask,
+            is_leaf=lambda x: isinstance(x, nnx.Variable),
         )
         leaves = jax.tree.leaves(masked_params)
         return sum(
