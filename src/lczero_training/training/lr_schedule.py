@@ -1,6 +1,5 @@
 from typing import Callable, Sequence
 
-import jax
 import jax.numpy as jnp
 import optax
 
@@ -137,8 +136,8 @@ def make_lr_schedule(schedules: Sequence[LrSchedule]) -> optax.Schedule:
         effective_starts = jnp.where(eligible_mask, start_steps, -1.0)
         active_rule_idx = jnp.argmax(effective_starts)
 
-        # Evaluate the active rule using jax.lax.switch for efficient branching.
-        lr = jax.lax.switch(active_rule_idx, rule_fns, step)
+        all_lrs = jnp.stack([fn(step) for fn in rule_fns])
+        lr = all_lrs[active_rule_idx]
 
         # If the current step is before any rule starts, use the pre-start LR.
         return jnp.where(step < min_start_step, pre_start_lr, lr)
