@@ -2,6 +2,7 @@
 # ABOUTME: Uses Textual framework to create a full-screen interface with four panes.
 
 import argparse
+import logging
 import os
 import signal
 import subprocess
@@ -24,6 +25,8 @@ from ..daemon.protocol.messages import (
 from .data_pipeline_pane import DataPipelinePane
 from .log_pane import StreamingLogPane
 from .training_widgets import TrainingScheduleWidget
+
+logger = logging.getLogger(__name__)
 
 
 class HeaderBar(Static):
@@ -152,10 +155,26 @@ class TrainingTuiApp(App):
         )
         yield Footer()
 
+    async def _monitor_daemon_process(self) -> None:
+        """Notify and log when the daemon process exits unexpectedly."""
+        await self._daemon_process.wait()
+        rc = self._daemon_process.returncode
+        sig = -rc if rc is not None and rc < 0 else None
+        if sig is not None:
+            msg = f"Daemon killed by signal {sig} ({signal.Signals(sig).name})"
+        else:
+            msg = f"Daemon exited with code {rc}"
+        logger.warning(msg)
+        self.notify(msg, severity="warning", timeout=60)
+        if self._logfile:
+            with open(self._logfile, "a") as f:
+                f.write(f"{msg}\n")
+
     def on_mount(self) -> None:
         """Start the communicator when the app mounts."""
         self.run_worker(self._communicator.run(), exclusive=True)
         self.run_worker(self._send_start_training(), exclusive=False)
+        self.run_worker(self._monitor_daemon_process(), exclusive=False)
 
     async def _send_start_training(self) -> None:
         """Send StartTrainingPayload with the config file."""
