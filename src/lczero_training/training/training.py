@@ -283,6 +283,9 @@ class Training:
         step_hook: Optional[StepHook] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
+        if self._dp_sharding is not None:
+            replicated = jshard.NamedSharding(self._dp_sharding.mesh, P())
+            jit_state = jax.device_put(jit_state, replicated)
         for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
             batch = self._validate_and_prepare_batch(next(datagen))
