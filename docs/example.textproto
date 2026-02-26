@@ -19,6 +19,7 @@ data_loader {
     input: "file_path_provider"
     chunk_source_loader {
       threads: 1  # Threads for loading chunks
+      frame_format: V6TrainingData  # Training data format (V6TrainingData or V7TrainingData)
       output {
         queue_capacity: 16  # Output queue for chunk sources
       }
@@ -108,9 +109,9 @@ model {
       activation: ACTIVATION_SWISH
     }
   }
-  policy_head { embedding_size: 1024 d_model: 1024 }
-  value_head { num_channels: 128 }
-  movesleft_head { num_channels: 32 }
+  policy_head { name: "vanilla" embedding_size: 1024 d_model: 1024 }
+  value_head { name: "winner" num_channels: 128 }
+  movesleft_head { name: "main" num_channels: 32 }
 }
 training {
   schedule {
@@ -135,31 +136,48 @@ training {
     max_to_keep: 5
   }
   optimizer {
-    nadamw { beta_1: 0.9 beta_2: 0.98 epsilon: 1e-7 weight_decay: 0.0001 }
+    nadamw {
+      beta_1: 0.9  beta_2: 0.98  epsilon: 1e-7  weight_decay: 0.0001
+      # Rule order matters: first match wins.
+      decay_selector {
+        rule { match: "**/bias" include: false }
+        rule { match: "**/ln*/**" include: false }
+        rule { match: "**/embedding/embedding/**" include: false }
+        rule { match: "**/policy_heads/**" include: true }
+        rule { match: "**/value_heads/**" include: true }
+        rule { match: "**/movesleft_heads/**" include: true }
+        otherwise_include: false
+      }
+    }
+    # Alternative optimizers:
+    # nadam { beta_1: 0.9 beta_2: 0.999 epsilon: 1e-8 }
+    # sgd { momentum: 0.9 nesterov: true }
   }
   max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {
     policy {
-      name: "main"
+      head_name: "vanilla"
+      metric_name: "main_ce"
       weight: 1.0
       illegal_moves: MASK
       type: CROSS_ENTROPY
     }
     policy {
-      name: "main"
+      head_name: "vanilla"
+      metric_name: "main_kl"
       weight: 1.0
       illegal_moves: MASK
       type: KL
       temperature: 1.0  # Softmax temperature applied before KL evaluation
     }
-    value { name: "winner" weight: 1.0 }
-    movesleft { name: "main" weight: 1.0 }
+    value { head_name: "winner" weight: 1.0 }
+    movesleft { head_name: "main" weight: 1.0 }
   }
 }
 metrics {
   tensorboard_path: "/tmp/tensorboard/myrun"
 }
 export {
-  path: "/home/crem/tmp/2025-08/lc0_training/exported_models/"
+  destination_filename: "/home/crem/tmp/2025-08/lc0_training/exported_models/lc0-{datetime}-{step:08d}.pb.gz"
   upload_training_run: 3
 }

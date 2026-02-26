@@ -18,7 +18,11 @@ from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
 from lczero_training.training.lr_schedule import make_lr_schedule
 from lczero_training.training.optimizer import make_gradient_transformation
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import (
+    TrainingBatch,
+    TrainingSample,
+    TrainingState,
+)
 from lczero_training.training.training import Training
 from proto.root_config_pb2 import RootConfig
 
@@ -30,34 +34,31 @@ def _stop_loader(loader: DataLoader) -> None:
         loader.stop()
 
 
-def _prepare_batch(batch: tuple) -> dict:
-    inputs, policy, values, _, movesleft = batch
-    return {
-        "inputs": jnp.asarray(inputs),
-        "value_targets": jnp.asarray(values),
-        "policy_targets": jnp.asarray(policy),
-        "movesleft_targets": jnp.asarray(movesleft),
-    }
+def _prepare_batch(batch_tuple: tuple) -> TrainingBatch:
+    # DataLoader now returns tuple: (inputs, probabilities, values)
+    return TrainingBatch(
+        inputs=jnp.asarray(batch_tuple[0]),
+        probabilities=jnp.asarray(batch_tuple[1]),
+        values=jnp.asarray(batch_tuple[2]),
+    )
 
 
 def _make_eval_step(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> Any:
     @partial(nnx.jit, static_argnames=())
-    def eval_step(model_state: nnx.State, batch: dict) -> tuple[jax.Array, Any]:
+    def eval_step(
+        model_state: nnx.State, batch: TrainingBatch
+    ) -> tuple[jax.Array, Any]:
         model = nnx.merge(graphdef, model_state)
 
         def loss_for_batch(
-            model_arg: LczeroModel, batch_arg: dict
+            model_arg: LczeroModel, sample_arg: TrainingSample
         ) -> tuple[jax.Array, Any]:
-            return loss_fn(
-                model_arg,
-                inputs=batch_arg["inputs"],
-                value_targets=batch_arg["value_targets"],
-                policy_targets=batch_arg["policy_targets"],
-                movesleft_targets=batch_arg["movesleft_targets"],
-            )
+            return loss_fn(model_arg, sample_arg)
 
         loss_vfn = jax.vmap(loss_for_batch, in_axes=(None, 0), out_axes=0)
-        per_sample_loss, unweighted_losses = loss_vfn(model, batch)
+        # vmap automatically distributes TrainingBatch over batch dimension,
+        # calling loss_for_batch with TrainingSample (single samples).
+        per_sample_loss, unweighted_losses = loss_vfn(model, batch)  # type: ignore[arg-type]
         mean_loss = jnp.mean(per_sample_loss)
         mean_unweighted = tree_util.tree_map(jnp.mean, unweighted_losses)
         return mean_loss, mean_unweighted
@@ -206,9 +207,9 @@ def overfit(
             )
 
             def run_phase(
-                train_batch: dict,
+                train_batch: TrainingBatch,
                 train_name: str,
-                eval_batch: dict,
+                eval_batch: TrainingBatch,
                 eval_name: str,
             ) -> None:
                 nonlocal jit_state

@@ -13,14 +13,15 @@ namespace lczero {
 namespace training {
 
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
-    const std::filesystem::path& filepath) {
+    const std::filesystem::path& filepath,
+    ChunkSourceLoaderConfig::FrameFormat frame_format) {
   auto extension = filepath.extension();
   try {
     if (extension == ".gz") {
-      return std::make_unique<RawFileChunkSource>(filepath);
+      return std::make_unique<RawFileChunkSource>(filepath, frame_format);
     }
     if (extension == ".tar") {
-      return std::make_unique<TarChunkSource>(filepath);
+      return std::make_unique<TarChunkSource>(filepath, frame_format);
     }
   } catch (const std::exception& e) {
     LOG(ERROR) << "Failed to create chunk source for " << filepath << ": "
@@ -33,7 +34,8 @@ std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
 ChunkSourceLoader::ChunkSourceLoader(const ChunkSourceLoaderConfig& config)
     : SingleInputStage<ChunkSourceLoaderConfig, InputType>(config),
       SingleOutputStage<OutputType>(config.output()),
-      thread_pool_(config.threads(), ThreadPoolOptions{}) {
+      thread_pool_(config.threads(), ThreadPoolOptions{}),
+      frame_format_(config.frame_format()) {
   LOG(INFO) << "Initializing ChunkSourceLoader with " << config.threads()
             << " worker threads";
 
@@ -109,7 +111,7 @@ void ChunkSourceLoader::Worker(std::stop_token stop_token,
       // Create ChunkSource from the file.
       LOG_EVERY_N(INFO, 1000)
           << "ChunkSourceLoader preparing chunk source for " << file.filepath;
-      auto source = CreateChunkSourceFromFile(file.filepath);
+      auto source = CreateChunkSourceFromFile(file.filepath, frame_format_);
       if (source) {
         {
           absl::MutexLock lock(&last_chunk_key_mutex_);

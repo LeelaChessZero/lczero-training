@@ -1,5 +1,5 @@
 // ABOUTME: Stage that provides shuffled frames using reservoir sampling.
-// ABOUTME: Takes V6TrainingData frames and outputs them in randomized order.
+// ABOUTME: Takes FrameType frames and outputs them in randomized order.
 #pragma once
 
 #include <atomic>
@@ -10,8 +10,8 @@
 
 #include "absl/container/fixed_array.h"
 #include "absl/random/random.h"
-#include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/frame_type.h"
 #include "loader/stages/stage.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
@@ -21,10 +21,8 @@
 namespace lczero {
 namespace training {
 
-using FrameType = V6TrainingData;
-
 // Worker that implements reservoir sampling for training frames.
-// Takes V6TrainingData frames as input and outputs them in shuffled order
+// Takes FrameType frames as input and outputs them in shuffled order
 // using reservoir sampling algorithm.
 class ShufflingFrameSampler
     : public SingleInputStage<ShufflingFrameSamplerConfig, FrameType>,

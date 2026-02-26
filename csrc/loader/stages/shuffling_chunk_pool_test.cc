@@ -57,16 +57,14 @@ class MockChunkSource : public ChunkSource {
   std::string GetChunkSortKey() const override { return sort_key_; }
   size_t GetChunkCount() const override { return chunk_count_; }
 
-  std::optional<std::string> GetChunkData(size_t index) override {
+  std::optional<std::vector<FrameType>> GetChunkData(size_t index) override {
     if (index >= chunk_count_) {
       throw std::out_of_range("Chunk index out of range");
     }
     FrameType frame{};
     frame.version = static_cast<uint32_t>(index);
     frame.input_format = 3;
-    std::string chunk(sizeof(FrameType), '\0');
-    std::memcpy(chunk.data(), &frame, sizeof(FrameType));
-    return chunk;
+    return std::vector<FrameType>{frame};
   }
 
  private:
@@ -82,18 +80,16 @@ class InvalidChunkSource : public ChunkSource {
   std::string GetChunkSortKey() const override { return sort_key_; }
   size_t GetChunkCount() const override { return 2; }
 
-  std::optional<std::string> GetChunkData(size_t index) override {
+  std::optional<std::vector<FrameType>> GetChunkData(size_t index) override {
     if (index >= 2) {
       throw std::out_of_range("Chunk index out of range");
     }
     if (index == 0) {
-      return std::string(sizeof(FrameType) + 1, 'x');
+      return std::nullopt;
     }
     FrameType frame{};
     frame.version = 42;
-    std::string chunk(sizeof(FrameType), '\0');
-    std::memcpy(chunk.data(), &frame, sizeof(FrameType));
-    return chunk;
+    return std::vector<FrameType>{frame};
   }
 
  private:

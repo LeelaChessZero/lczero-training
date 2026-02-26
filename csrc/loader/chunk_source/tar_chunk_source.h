@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "loader/chunk_source/chunk_source.h"
+#include "proto/data_loader_config.pb.h"
 
 namespace lczero {
 namespace training {
@@ -13,11 +14,12 @@ namespace training {
 // chunks. Each file in the tar is treated as a separate chunk.
 class TarChunkSource : public ChunkSource {
  public:
-  TarChunkSource(const std::filesystem::path& filename);
+  TarChunkSource(const std::filesystem::path& filename,
+                 ChunkSourceLoaderConfig::FrameFormat frame_format);
   ~TarChunkSource() override;
   std::string GetChunkSortKey() const override;
   size_t GetChunkCount() const override;
-  std::optional<std::string> GetChunkData(size_t index) override;
+  std::optional<std::vector<FrameType>> GetChunkData(size_t index) override;
   std::optional<std::string> GetChunkPrefix(size_t index, size_t max_bytes);
 
  private:
@@ -32,6 +34,7 @@ class TarChunkSource : public ChunkSource {
   FILE* file_ = nullptr;
   std::vector<FileEntry> files_;
   std::string filename_;
+  ChunkSourceLoaderConfig::FrameFormat frame_format_;
 };
 
 }  // namespace training

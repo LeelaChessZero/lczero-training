@@ -20,6 +20,7 @@ from typing import (
     Sequence,
     TextIO,
     Tuple,
+    cast,
 )
 
 import jax
@@ -29,10 +30,13 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
 
-from lczero_training.dataloader import DataLoader, make_dataloader
+from lczero_training.dataloader import (
+    DataLoader,
+    make_dataloader,
+)
 from lczero_training.model.loss_function import LczeroLoss
-from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import TrainingState
+from lczero_training.model.model import LczeroModel, ModelPrediction
+from lczero_training.training.state import TrainingSample, TrainingState
 from proto import data_loader_config_pb2
 from proto.root_config_pb2 import RootConfig
 
@@ -395,7 +399,7 @@ class Evaluation:
     def run(
         self,
         model: LczeroModel,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[tuple[np.ndarray, ...], None, None],
         num_samples: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
@@ -423,49 +427,56 @@ class Evaluation:
     def _process_sample(
         self,
         model: LczeroModel,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[tuple[np.ndarray, ...], None, None],
         sample_idx: int,
         dumper: Dumper,
         onnx_comparator: Optional[OnnxComparator],
         loss_vfn: Callable[
-            [LczeroModel, Dict[str, jax.Array]],
+            [LczeroModel, TrainingSample],
             Tuple[jax.Array, Dict[str, jax.Array]],
         ],
         model_output_vfn: Callable[
-            [LczeroModel, jax.Array], Tuple[jax.Array, jax.Array, jax.Array]
+            [LczeroModel, jax.Array],
+            ModelPrediction,
         ],
         softmax_jax_wdl: bool,
     ) -> None:
-        inputs, policy, values, _, movesleft = next(datagen)
+        batch_tuple = next(datagen)
         logger.info("Fetched batch from dataloader")
 
+        # DataLoader now returns tuple: (inputs, probabilities, values)
         batch = {
-            "inputs": jax.device_put(inputs),
-            "value_targets": jax.device_put(values),
-            "policy_targets": jax.device_put(policy),
-            "movesleft_targets": jax.device_put(movesleft),
+            "inputs": cast(jax.Array, jnp.asarray(batch_tuple[0])),
+            "probabilities": cast(jax.Array, jnp.asarray(batch_tuple[1])),
+            "values": cast(jax.Array, jnp.asarray(batch_tuple[2])),
         }
         dumper.dump_tensors(batch, "INPUT")
 
-        value_pred, policy_pred, movesleft_pred = model_output_vfn(
-            model, batch["inputs"]
-        )
-        if softmax_jax_wdl:
-            value_pred = jax.nn.softmax(value_pred, axis=-1)
+        predictions = model_output_vfn(model, cast(jax.Array, batch["inputs"]))
+        value_preds = predictions.value
+        policy_preds = predictions.policy
+        movesleft_preds = predictions.movesleft
 
-        outputs = {
-            "value_pred": value_pred,
-            "policy_pred": policy_pred,
-            "movesleft_pred": movesleft_pred,
-        }
+        # Flatten all head outputs for dumping
+        outputs = {}
+        for name, pred_tuple in value_preds.items():
+            pred = pred_tuple[0]
+            if softmax_jax_wdl:
+                pred = jax.nn.softmax(pred, axis=-1)
+            outputs[f"value_pred/{name}"] = pred
+        for name, pred in policy_preds.items():
+            outputs[f"policy_pred/{name}"] = pred
+        for name, pred in movesleft_preds.items():
+            outputs[f"movesleft_pred/{name}"] = pred
 
         if onnx_comparator:
+            # Compare only legacy heads
             jax_outputs_for_onnx = {
-                "wdl": value_pred,
-                "policy": policy_pred,
-                "movesleft": movesleft_pred,
+                "wdl": value_preds["winner"][0],
+                "policy": policy_preds["vanilla"],
+                "movesleft": movesleft_preds["main"],
             }
-            onnx_inputs_np = np.asarray(inputs).copy()
+            onnx_inputs_np = np.asarray(batch["inputs"]).copy()
             onnx_inputs_np[:, 109, ...] *= 99
             onnx_comparator.compare(
                 jax_outputs_for_onnx, onnx_inputs_np, sample_idx
@@ -474,7 +485,13 @@ class Evaluation:
 
         dumper.dump_tensors(outputs, "OUTPUT")
 
-        per_sample_loss, unweighted_losses = loss_vfn(model, batch)
+        # Convert batch dict to TrainingSample for loss function
+        batch_sample = TrainingSample(
+            inputs=batch["inputs"],
+            probabilities=batch["probabilities"],
+            values=batch["values"],
+        )
+        per_sample_loss, unweighted_losses = loss_vfn(model, batch_sample)
         losses = {
             "per_sample_data_loss": per_sample_loss,
             "unweighted_losses": unweighted_losses,
@@ -483,26 +500,20 @@ class Evaluation:
         dumper.dump_structured(batch, outputs, losses)
 
     def _loss_for_grad(
-        self, model_arg: LczeroModel, batch_arg: dict
+        self, model_arg: LczeroModel, sample_arg: TrainingSample
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        return self.loss_fn(
-            model_arg,
-            inputs=batch_arg["inputs"],
-            value_targets=batch_arg["value_targets"],
-            policy_targets=batch_arg["policy_targets"],
-            movesleft_targets=batch_arg["movesleft_targets"],
-        )
+        return self.loss_fn(model_arg, sample_arg)
 
     @staticmethod
     def _model_for_output(
         model_arg: LczeroModel, inputs_arg: jax.Array
-    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    ) -> ModelPrediction:
         return model_arg(inputs_arg)
 
 
 def from_dataloader(
     loader: DataLoader,
-) -> Generator[Tuple[np.ndarray, ...], None, None]:
+) -> Generator[tuple[np.ndarray, ...], None, None]:
     """Infinetely yields batches from a DataLoader."""
     while True:
         yield loader.get_next()

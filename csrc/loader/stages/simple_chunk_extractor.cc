@@ -71,11 +71,7 @@ void SimpleChunkExtractor::ProcessSource(
 std::optional<TrainingChunk> SimpleChunkExtractor::LoadChunk(
     ChunkSource& source, const std::string& sort_key, size_t index) {
   auto data = source.GetChunkData(index);
-  if (!data || data->empty() || data->size() % sizeof(FrameType) != 0) {
-    if (data && !data->empty()) {
-      LOG(WARNING) << "Invalid chunk size " << data->size() << " from "
-                   << sort_key << " at index " << index;
-    }
+  if (!data || data->empty()) {
     ++chunks_dropped_;
     return std::nullopt;
   }
@@ -85,10 +81,7 @@ std::optional<TrainingChunk> SimpleChunkExtractor::LoadChunk(
   chunk.index_within_sort_key = index;
   chunk.global_index = chunks_processed_;
   chunk.use_count = 0;
-
-  const auto* frames_begin = reinterpret_cast<const FrameType*>(data->data());
-  const auto* frames_end = frames_begin + data->size() / sizeof(FrameType);
-  chunk.frames.assign(frames_begin, frames_end);
+  chunk.frames = std::move(*data);
 
   return chunk;
 }

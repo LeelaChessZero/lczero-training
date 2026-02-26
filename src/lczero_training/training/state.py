@@ -1,7 +1,11 @@
 import dataclasses
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
+import jax
+import jax.numpy as jnp
+import jax.sharding as jshard
+import numpy as np
 import optax
 from flax import nnx
 from flax.struct import dataclass
@@ -16,6 +20,67 @@ from proto.model_config_pb2 import ModelConfig
 from proto.training_config_pb2 import TrainingConfig
 
 logger = logging.getLogger(__name__)
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass
+class TrainingSample:
+    """Single training sample without batch dimension.
+
+    Used for vmap over individual samples in loss computation.
+
+    Fields:
+        inputs: Input planes tensor [112, 8, 8]
+        probabilities: Policy probabilities tensor [1858]
+        values: Combined values tensor [6, 3] where:
+            - Index 0: result [result_q, result_d, plies_left]
+            - Index 1: best [best_q, best_d, best_m]
+            - Index 2: played [played_q, played_d, played_m]
+            - Index 3: orig [orig_q, orig_d, orig_m] (may contain NaN)
+            - Index 4: root [root_q, root_d, root_m]
+            - Index 5: st [q_st, d_st, NaN]
+    """
+
+    inputs: jax.Array
+    probabilities: jax.Array
+    values: jax.Array
+
+
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass
+class TrainingBatch:
+    """Batch of training data with inputs, probabilities, and values tensors.
+
+    Fields:
+        inputs: Input planes tensor [batch, 112, 8, 8]
+        probabilities: Policy probabilities tensor [batch, 1858]
+        values: Combined values tensor [batch, 6, 3] where:
+            - Index 0: result [result_q, result_d, plies_left]
+            - Index 1: best [best_q, best_d, best_m]
+            - Index 2: played [played_q, played_d, played_m]
+            - Index 3: orig [orig_q, orig_d, orig_m] (may contain NaN)
+            - Index 4: root [root_q, root_d, root_m]
+            - Index 5: st [q_st, d_st, NaN]
+    """
+
+    inputs: Union[jax.Array, jshard.NamedSharding]
+    probabilities: Union[jax.Array, jshard.NamedSharding]
+    values: Union[jax.Array, jshard.NamedSharding]
+
+    @classmethod
+    def from_tuple(
+        cls, tensor_tuple: tuple[np.ndarray, ...]
+    ) -> "TrainingBatch":
+        """Create TrainingBatch from tuple returned by DataLoader."""
+        if len(tensor_tuple) != 3:
+            raise ValueError(
+                f"Expected tuple of 3 tensors, got {len(tensor_tuple)}"
+            )
+        return cls(
+            inputs=jnp.asarray(tensor_tuple[0]),
+            probabilities=jnp.asarray(tensor_tuple[1]),
+            values=jnp.asarray(tensor_tuple[2]),
+        )
 
 
 @dataclass

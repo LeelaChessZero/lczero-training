@@ -18,6 +18,9 @@
 namespace lczero {
 namespace training {
 
+using TensorDict =
+    std::vector<std::pair<std::string, std::unique_ptr<TensorBase>>>;
+
 class DataLoader {
  public:
   using MetricsAggregator = ExponentialAggregator<DataLoaderMetricsProto,

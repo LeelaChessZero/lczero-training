@@ -4,8 +4,10 @@ package lczero.training;
 
 // Configuration for model export settings.
 message ExportConfig {
-  // Directory path where exported models will be saved.
-  optional string path = 1;
+  // Destination filenames where exported models will be saved.
+  // Supports formatting with {datetime} (YYYYMMDD-HHMMSS) and {step} (int).
+  // Example: "/path/to/models/lc0-{datetime}-{step:08d}.pb.gz"
+  repeated string destination_filename = 1;
   // Training run ID for uploading to training website. Only uploads when set.
   optional int32 upload_training_run = 2;
   // Whether to export the SWA model instead of the main model.

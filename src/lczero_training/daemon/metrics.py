@@ -12,34 +12,38 @@ import numpy as np
 from flax import nnx
 
 from lczero_training._lczero_training import DataLoader
+from lczero_training.daemon.metrics_base import _Metric
+from lczero_training.daemon.rms_metrics import _RmsMetric
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import JitTrainingState
+from lczero_training.training.state import JitTrainingState, TrainingSample
 from lczero_training.training.tensorboard import TensorboardLogger
 from lczero_training.training.training import StepHookData
 from proto.metrics_config_pb2 import MetricConfig, MetricsConfig
 
 logger = logging.getLogger(__name__)
 
-Batch = Tuple[np.ndarray, ...]
+# Type alias for batch tuple returned by DataLoader
+# Using ... to allow variable length for compatibility with maybe_get_next
+BatchTuple = tuple[np.ndarray, ...]
 
 
 @dataclass
 class CachedBatch:
     """Cached batch data with the global step when it was last updated."""
 
-    batch: Batch
+    batch: BatchTuple
     global_step: int
 
 
-def load_batch_from_npz(npz_filename: str) -> Batch:
+def load_batch_from_npz(npz_filename: str) -> BatchTuple:
     """Load a batch from an NPZ file.
 
     Args:
         npz_filename: Path to the NPZ file.
 
     Returns:
-        Batch tuple of (inputs, policy, values, _, movesleft).
+        BatchTuple (tuple of inputs, probabilities, values arrays).
 
     Raises:
         ValueError: If the NPZ file doesn't contain exactly one batch.
@@ -51,27 +55,6 @@ def load_batch_from_npz(npz_filename: str) -> Batch:
                 f"Expected 1 batch in npz '{npz_filename}', got {batches.size}"
             )
         return batches[0]
-
-
-class _Metric(ABC):
-    """Base class for individual metric tracking."""
-
-    def __init__(self, config: MetricConfig, logger: TensorboardLogger):
-        self.config = config
-        self.logger = logger
-
-    def should_log(
-        self, global_step: int, local_step: int, steps_per_epoch: int
-    ) -> bool:
-        """Check if it's time to log this metric."""
-        if self.config.after_epoch and local_step + 1 == steps_per_epoch:
-            return True
-        step = global_step if self.config.use_global_steps else local_step
-        return (step + 1) % self.config.period == 0
-
-    @abstractmethod
-    def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
-        """Log the metric for the current step."""
 
 
 class _TrainingBatchMetric(_Metric):
@@ -104,7 +87,7 @@ class _EvaluatingMetric(_Metric, ABC):
         self.loss_fn = loss_fn
 
     @abstractmethod
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> BatchTuple:
         """Get the batch data to evaluate."""
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -113,7 +96,10 @@ class _EvaluatingMetric(_Metric, ABC):
         self.logger.log(hook_data.global_step, metrics)
 
     def _evaluate(
-        self, batch: Batch, jit_state: JitTrainingState, graphdef: nnx.GraphDef
+        self,
+        batch: BatchTuple,
+        jit_state: JitTrainingState,
+        graphdef: nnx.GraphDef,
     ) -> Dict[str, jax.Array]:
         """Evaluate loss function on a batch of data."""
         return evaluate_batch(
@@ -122,7 +108,7 @@ class _EvaluatingMetric(_Metric, ABC):
 
 
 def evaluate_batch(
-    batch: Batch,
+    batch: BatchTuple,
     jit_state: JitTrainingState,
     graphdef: nnx.GraphDef,
     loss_fn: LczeroLoss,
@@ -131,7 +117,7 @@ def evaluate_batch(
     """Evaluate loss function on a batch of data.
 
     Args:
-        batch: Tuple of (inputs, policy, values, _, movesleft).
+        batch: BatchTuple (inputs, probabilities, values).
         jit_state: JIT training state containing model and optimizer state.
         graphdef: Graph definition of the model.
         loss_fn: Loss function to evaluate.
@@ -140,8 +126,6 @@ def evaluate_batch(
     Returns:
         Dictionary of metrics with loss and unweighted losses.
     """
-    b_inputs, b_policy, b_values, _, b_movesleft = batch
-
     model_state = (
         jit_state.swa_state if use_swa_model else jit_state.model_state
     )
@@ -151,26 +135,20 @@ def evaluate_batch(
     model = nnx.merge(graphdef, model_state)
 
     def loss_fn_inner(
-        m: LczeroModel, b: dict
+        m: LczeroModel, sample: TrainingSample
     ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        return loss_fn(
-            m,
-            inputs=b["inputs"],
-            value_targets=b["value_targets"],
-            policy_targets=b["policy_targets"],
-            movesleft_targets=b["movesleft_targets"],
-        )
+        return loss_fn(m, sample)
 
     loss_vfn = jax.vmap(loss_fn_inner, in_axes=(None, 0), out_axes=0)
 
-    batch_dict = {
-        "inputs": jax.device_put(b_inputs),
-        "value_targets": jax.device_put(b_values),
-        "policy_targets": jax.device_put(b_policy),
-        "movesleft_targets": jax.device_put(b_movesleft),
-    }
+    # Convert tuple to TrainingSample structure for vmap.
+    batch_sample = TrainingSample(
+        inputs=jnp.asarray(batch[0]),
+        probabilities=jnp.asarray(batch[1]),
+        values=jnp.asarray(batch[2]),
+    )
 
-    per_sample_loss, unweighted = loss_vfn(model, batch_dict)
+    per_sample_loss, unweighted = loss_vfn(model, batch_sample)
     return {
         "loss": jnp.mean(per_sample_loss),
         "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
@@ -196,7 +174,7 @@ class _DataLoaderMetric(_EvaluatingMetric):
         self.dataloader_name = dataloader_name
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> BatchTuple:
         return self.cached_batches[self.dataloader_name].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -232,7 +210,7 @@ class _NpzMetric(_EvaluatingMetric):
         self.npz_filename = npz_filename
         self.cached_batches = cached_batches
 
-    def get_batch(self) -> Batch:
+    def get_batch(self) -> BatchTuple:
         return self.cached_batches[self.npz_filename].batch
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
@@ -283,6 +261,13 @@ class Metrics:
                     mc.npz_filename,
                     self._cached_batches,
                 )
+            elif mc.HasField("weights"):
+                if mc.weights.rms:
+                    metric = _RmsMetric(mc, tb_logger)
+                else:
+                    raise ValueError(
+                        f"Metric '{mc.name}': No weight metric type specified"
+                    )
             else:
                 raise ValueError(f"Metric '{mc.name}' has no sample source")
 

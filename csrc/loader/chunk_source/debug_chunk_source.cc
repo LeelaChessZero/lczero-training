@@ -33,7 +33,8 @@ size_t DebugChunkSource::GetChunkCount() const {
   return *cached_chunk_count_;
 }
 
-std::optional<std::string> DebugChunkSource::GetChunkData(size_t index) {
+std::optional<std::vector<FrameType>> DebugChunkSource::GetChunkData(
+    size_t index) {
   const auto seed_pair = std::make_pair(id_, index);
   const uint64_t seed = static_cast<uint64_t>(
       absl::Hash<std::pair<uint64_t, size_t>>{}(seed_pair));
@@ -41,20 +42,15 @@ std::optional<std::string> DebugChunkSource::GetChunkData(size_t index) {
   std::uniform_int_distribution<int> frame_count_distribution(1, 200);
   const int frame_count = frame_count_distribution(rng);
 
-  const size_t bytes_per_frame = sizeof(FrameType);
-  std::string chunk(static_cast<size_t>(frame_count) * bytes_per_frame, '\0');
-  char* chunk_data = chunk.data();
-  FrameType frame{};
-  frame.planes[0] = static_cast<uint64_t>(id_);
-  frame.planes[1] = static_cast<uint64_t>(index);
-
+  std::vector<FrameType> result(frame_count);
   for (int frame_index = 0; frame_index < frame_count; ++frame_index) {
-    frame.planes[2] = static_cast<uint64_t>(frame_index);
-    std::memcpy(chunk_data + static_cast<size_t>(frame_index) * bytes_per_frame,
-                &frame, bytes_per_frame);
+    result[frame_index] = FrameType{};
+    result[frame_index].planes[0] = static_cast<uint64_t>(id_);
+    result[frame_index].planes[1] = static_cast<uint64_t>(index);
+    result[frame_index].planes[2] = static_cast<uint64_t>(frame_index);
   }
 
-  return chunk;
+  return result;
 }
 
 }  // namespace training

@@ -22,7 +22,8 @@ namespace training {
 // Creates a ChunkSource based on file extension. Returns RawFileChunkSource for
 // .gz files, TarChunkSource for .tar files, or nullptr for unsupported types.
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
-    const std::filesystem::path& filepath);
+    const std::filesystem::path& filepath,
+    ChunkSourceLoaderConfig::FrameFormat frame_format);
 
 struct ChunkSourceWithPhase {
   std::unique_ptr<ChunkSource> source;
@@ -57,6 +58,7 @@ class ChunkSourceLoader
   std::atomic<uint64_t> skipped_files_count_{0};
   absl::Mutex last_chunk_key_mutex_;
   std::string last_chunk_key_;
+  ChunkSourceLoaderConfig::FrameFormat frame_format_;
 
   // Synchronization for sentinel barrier.
   absl::Mutex phase_mutex_;

@@ -34,7 +34,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using ::lczero::V6TrainingData;
+using ::lczero::training::ChunkSourceLoaderConfig;
+using ::lczero::training::FrameType;
 using ::lczero::training::TarChunkSource;
 
 enum class ChunkResult { kWin, kDraw, kLoss };
@@ -78,13 +79,13 @@ constexpr float kFloatTolerance = 1e-6f;
 std::optional<ChunkResult> DetermineChunkResult(absl::string_view chunk_payload,
                                                 size_t chunk_index,
                                                 const fs::path& tar_path) {
-  if (chunk_payload.size() < sizeof(V6TrainingData)) {
+  if (chunk_payload.size() < sizeof(FrameType)) {
     LOG(WARNING) << "Chunk " << chunk_index << " in " << tar_path.string()
                  << " is too small.";
     return std::nullopt;
   }
 
-  V6TrainingData frame;
+  FrameType frame;
   std::memcpy(&frame, chunk_payload.data(), sizeof(frame));
 
   if (std::fabs(frame.result_d - 1.0f) <= kFloatTolerance) {
@@ -112,12 +113,12 @@ std::optional<ChunkResult> DetermineChunkResult(absl::string_view chunk_payload,
 ResultCounts CountResultsInTar(const fs::path& tar_path) {
   ResultCounts counts;
 
-  TarChunkSource source(tar_path);
+  TarChunkSource source(tar_path, ChunkSourceLoaderConfig::V6TrainingData);
 
   const size_t chunk_count = source.GetChunkCount();
   for (size_t index = 0; index < chunk_count; ++index) {
     const std::optional<std::string> chunk =
-        source.GetChunkPrefix(index, sizeof(V6TrainingData));
+        source.GetChunkPrefix(index, sizeof(FrameType));
     if (!chunk) {
       LOG(WARNING) << "Skipping unreadable chunk " << index << " in "
                    << tar_path.string();

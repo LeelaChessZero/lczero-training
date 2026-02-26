@@ -8,7 +8,7 @@ message TrainingConfig {
   repeated LrSchedule lr_schedule = 2;
   CheckpointConfig checkpoint = 3;
   OptimizerConfig optimizer = 4;
-  LossWeightsConfig losses = 5;
+  LossConfig losses = 5;
   // Maximum gradient norm; set to 0 or omit to disable clipping.
   float max_grad_norm = 6;
   // Stochastic Weight Averaging (SWA) configuration. When absent, SWA is
@@ -24,8 +24,9 @@ message ScheduleConfig {
 message OptimizerConfig {
   oneof optimizer_type {
     NadamwOptimizerConfig nadamw = 1;
+    NadamOptimizerConfig nadam = 2;
+    SgdOptimizerConfig sgd = 3;
   }
-  float momentum = 2;
 }
 
 message LrSchedule {
@@ -53,9 +54,34 @@ message NadamwOptimizerConfig {
   float beta_2 = 2;
   float epsilon = 3;
   float weight_decay = 4;
-  bool decay_embedding = 5;
-  bool decay_biases = 6;
-  bool decay_layer_norms = 7;
+  // Selector for weight decay. True = apply decay to this category.
+  WeightsSelector decay_selector = 5;
+}
+
+message NadamOptimizerConfig {
+  float beta_1 = 1;
+  float beta_2 = 2;
+  float epsilon = 3;
+}
+
+message SgdOptimizerConfig {
+  float momentum = 1;
+  bool nesterov = 2;
+}
+
+message WeightsSelectorRule {
+  // Glob pattern matched against weight path.
+  string match = 1;
+  // True = include; false = exclude.
+  bool include = 2;
+}
+
+// Selector for which weight categories to include.
+// Rules are evaluated in order; the first matching rule applies.
+// If no rule matches, otherwise_include is used.
+message WeightsSelector {
+  repeated WeightsSelectorRule rule = 1;
+  bool otherwise_include = 2;
 }
 
 message CheckpointConfig {
@@ -63,40 +89,99 @@ message CheckpointConfig {
   int32 max_to_keep = 2;
 }
 
-message LossWeightsConfig {
-  repeated PolicyLossWeightsConfig policy = 1;
-  repeated ValueLossWeightsConfig value = 2;
-  repeated MovesLeftLossWeightsConfig movesleft = 3;
+message LossConfig {
+  repeated PolicyLossConfig policy = 1;
+  repeated ValueLossConfig value = 2;
+  repeated MovesLeftLossConfig movesleft = 3;
+  repeated ValueErrorLossConfig value_error = 4;
+  repeated ValueCategoricalLossConfig value_categorical = 5;
+  repeated RegularizationLossConfig regularization = 6;
 }
 
-message PolicyLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+message RegularizationLossConfig {
+  enum RegularizationType {
+    L2 = 0;
+  }
+  RegularizationType type = 1;
+  string metric_name = 2;
+  float weight = 3;
+  // Selector for which weights to regularize. True = include in regularization.
+  WeightsSelector selector = 4;
+}
+
+enum ValueType {
+  RESULT = 0;
+  BEST = 1;
+  PLAYED = 2;
+  ORIG = 3;
+  ROOT = 4;
+  ST = 5;
+}
+
+message OptimisticPolicyConfig {
+  // Name of the value head to use for optimism computation.
+  string value_head_name = 1;
+  // Which value type to use from the training sample.
+  ValueType value_type = 2;
+  // Z-score threshold for optimism (e.g. 2.0).
+  float strength = 3;
+  // Epsilon for numerical stability (e.g. 1e-5).
+  float eps = 4;
+  // Sigmoid scaling factor (e.g. 3.0).
+  float alpha = 5;
+  // If false, prevent gradients from flowing to value and error heads.
+  bool propagate_value_gradients = 6;
+}
+
+message PolicyLossConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
   enum IllegalMoveHandling {
     TRAIN_TO_ZERO = 0;
     MASK = 1;
   }
-  IllegalMoveHandling illegal_moves = 3;
+  IllegalMoveHandling illegal_moves = 4;
   enum LossType {
     LOSS_TYPE_UNSPECIFIED = 0;
     CROSS_ENTROPY = 1;
     KL = 2;
   }
   // Selects which policy loss implementation to use. Must be specified.
-  LossType type = 4;
+  LossType type = 5;
   // Soft policy temperature applied before normalizing targets for KL loss.
   // Values <= 0 disable the adjustment and keep raw targets.
-  float temperature = 5;
+  float temperature = 6;
+  OptimisticPolicyConfig optimistic = 7;
 }
 
-message ValueLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+message ValueLossConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
+  ValueType value_type = 4;
 }
 
-message MovesLeftLossWeightsConfig {
-  string name = 1;
-  float weight = 2;
+message MovesLeftLossConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
+  ValueType value_type = 4;
+}
+
+message ValueErrorLossConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
+  ValueType value_type = 4;
+  bool propagate_value_gradients = 5;
+}
+
+message ValueCategoricalLossConfig {
+  string head_name = 1;
+  string metric_name = 2;
+  float weight = 3;
+  ValueType value_type = 4;
 }
 
 // Stochastic Weight Averaging configuration.

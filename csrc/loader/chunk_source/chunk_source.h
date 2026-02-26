@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
+
+#include "loader/frame_type.h"
 
 namespace lczero {
 namespace training {
@@ -23,8 +26,9 @@ class ChunkSource {
   virtual size_t GetChunkCount() const = 0;
 
   // Returns the data for the chunk at the given index. Returns std::nullopt if
-  // the chunk could not be read.
-  virtual std::optional<std::string> GetChunkData(size_t index) = 0;
+  // the chunk could not be read or if the data size is not a multiple of the
+  // expected frame size.
+  virtual std::optional<std::vector<FrameType>> GetChunkData(size_t index) = 0;
 };
 
 }  // namespace training

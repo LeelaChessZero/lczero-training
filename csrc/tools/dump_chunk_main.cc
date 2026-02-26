@@ -30,7 +30,7 @@ namespace training {
 
 namespace {
 
-using ::lczero::V6TrainingData;
+using ::lczero::training::FrameType;
 using ::lczero::training::PrintTrainingDataEntry;
 
 void DumpChunk(const std::string& path, int64_t max_entries,
@@ -42,7 +42,7 @@ void DumpChunk(const std::string& path, int64_t max_entries,
 
   size_t index = 0;
   while (true) {
-    V6TrainingData entry;
+    FrameType entry;
     const int bytes_read = gzread(file, &entry, sizeof(entry));
     if (bytes_read == 0) {
       break;

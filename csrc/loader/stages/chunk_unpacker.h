@@ -1,5 +1,5 @@
-// ABOUTME: Stage that unpacks chunks into V6TrainingData frames.
-// ABOUTME: Converts stream of std::string chunks to V6TrainingData stream.
+// ABOUTME: Stage that unpacks chunks into FrameType frames.
+// ABOUTME: Converts stream of std::string chunks to FrameType stream.
 #pragma once
 
 #include <atomic>
@@ -10,8 +10,8 @@
 
 #include "absl/random/random.h"
 #include "absl/types/optional.h"
-#include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/frame_type.h"
 #include "loader/stages/stage.h"
 #include "loader/stages/training_chunk.h"
 #include "proto/data_loader_config.pb.h"
@@ -22,11 +22,9 @@
 namespace lczero {
 namespace training {
 
-using FrameType = V6TrainingData;
-
 // Worker pool that unpacks chunks into frames.
 // Takes parsed TrainingChunk objects as input and outputs individual
-// V6TrainingData frames.
+// FrameType frames.
 class ChunkUnpacker
     : public SingleInputStage<ChunkUnpackerConfig, TrainingChunk> {
  public:

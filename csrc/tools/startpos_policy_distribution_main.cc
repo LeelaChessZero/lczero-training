@@ -31,8 +31,9 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using ::lczero::V6TrainingData;
 using ::lczero::training::ChunkSource;
+using ::lczero::training::ChunkSourceLoaderConfig;
+using ::lczero::training::FrameType;
 using ::lczero::training::TarChunkSource;
 
 constexpr std::array<uint64_t, 16> kStartPositionPlanes = {
@@ -52,7 +53,7 @@ constexpr std::array<PolicyProbe, 20> kPolicyProbes = {
      {400, "h2h3"}, {230, "b2b3"}, {322, "e2e4"}, {317, "e2e3"},
      {374, "g2g3"}, {264, "c2c4"}, {159, "g1f3"}, {293, "d2d4"}}};
 
-bool MatchesStartPosition(const V6TrainingData& data) {
+bool MatchesStartPosition(const FrameType& data) {
   return absl::c_equal(
       kStartPositionPlanes,
       absl::Span<const uint64_t>(data.planes, kStartPositionPlanes.size()));
@@ -79,7 +80,7 @@ void WriteHeader(std::ostream& output) {
 }
 
 void WriteRow(std::ostream& output, absl::string_view sort_key, size_t index,
-              const V6TrainingData& data) {
+              const FrameType& data) {
   output << sort_key << ',' << index;
   for (const auto& probe : kPolicyProbes) {
     output << ',' << data.probabilities[probe.first];
@@ -88,16 +89,15 @@ void WriteRow(std::ostream& output, absl::string_view sort_key, size_t index,
 }
 
 void ProcessTarFile(const fs::path& tar_path, std::ostream& output) {
-  std::unique_ptr<ChunkSource> source =
-      std::make_unique<TarChunkSource>(tar_path);
+  std::unique_ptr<ChunkSource> source = std::make_unique<TarChunkSource>(
+      tar_path, ChunkSourceLoaderConfig::V6TrainingData);
   const std::string sort_key = source->GetChunkSortKey();
 
   for (size_t i = 0, count = source->GetChunkCount(); i < count; ++i) {
-    const std::optional<std::string> chunk = source->GetChunkData(i);
-    if (!chunk || chunk->size() < sizeof(V6TrainingData)) continue;
+    const std::optional<std::vector<FrameType>> chunk = source->GetChunkData(i);
+    if (!chunk || chunk->empty()) continue;
 
-    V6TrainingData entry;
-    std::memcpy(&entry, chunk->data(), sizeof(entry));
+    const FrameType& entry = chunk->front();
     if (!MatchesStartPosition(entry)) continue;
 
     WriteRow(output, sort_key, i, entry);

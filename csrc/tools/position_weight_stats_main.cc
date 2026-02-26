@@ -32,15 +32,16 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using ::lczero::V6TrainingData;
 using ::lczero::training::ChunkSource;
+using ::lczero::training::ChunkSourceLoaderConfig;
 using ::lczero::training::ComputePositionSamplingWeight;
+using ::lczero::training::FrameType;
 using ::lczero::training::PositionSamplingConfig;
 using ::lczero::training::PrintTrainingDataEntry;
 using ::lczero::training::TarChunkSource;
 
 struct WeightedPosition {
-  V6TrainingData data;
+  FrameType data;
   float weight;
 };
 
@@ -62,8 +63,8 @@ std::vector<float> CollectWeights(const fs::path& tar_path,
                                   const PositionSamplingConfig& config,
                                   WeightedPosition* max_weighted) {
   std::vector<float> weights;
-  std::unique_ptr<ChunkSource> source =
-      std::make_unique<TarChunkSource>(tar_path);
+  std::unique_ptr<ChunkSource> source = std::make_unique<TarChunkSource>(
+      tar_path, ChunkSourceLoaderConfig::V6TrainingData);
 
   const size_t total = source->GetChunkCount();
   for (size_t index = 0; index < total; ++index) {
@@ -72,23 +73,21 @@ std::vector<float> CollectWeights(const fs::path& tar_path,
                                       index, total, 100.0 * index / total);
     }
 
-    const std::optional<std::string> chunk = source->GetChunkData(index);
+    const std::optional<std::vector<FrameType>> chunk =
+        source->GetChunkData(index);
     if (!chunk) {
       LOG(WARNING) << "Skipping unreadable chunk " << index << " in "
                    << tar_path.string();
       continue;
     }
 
-    if (chunk->size() < sizeof(V6TrainingData)) continue;
-    const size_t frame_count = chunk->size() / sizeof(V6TrainingData);
+    if (chunk->empty()) continue;
 
-    for (size_t frame = 0; frame < frame_count; ++frame) {
-      const auto* entry = reinterpret_cast<const V6TrainingData*>(
-          chunk->data() + frame * sizeof(V6TrainingData));
-      const float weight = ComputePositionSamplingWeight(*entry, config);
+    for (const auto& entry : *chunk) {
+      const float weight = ComputePositionSamplingWeight(entry, config);
       weights.push_back(weight);
       if (max_weighted && weight > max_weighted->weight) {
-        max_weighted->data = *entry;
+        max_weighted->data = entry;
         max_weighted->weight = weight;
       }
     }

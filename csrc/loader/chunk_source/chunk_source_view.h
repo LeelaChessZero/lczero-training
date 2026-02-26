@@ -33,7 +33,7 @@ class ChunkSourceView : public ChunkSource {
 
   size_t GetChunkCount() const override { return indices_.size(); }
 
-  std::optional<std::string> GetChunkData(size_t index) override {
+  std::optional<std::vector<FrameType>> GetChunkData(size_t index) override {
     if (index >= indices_.size()) return std::nullopt;
     const size_t src_index = static_cast<size_t>(indices_[index]);
     return source_->GetChunkData(src_index);

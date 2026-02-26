@@ -90,14 +90,10 @@ def train(config_filename: str) -> None:
         config.training.schedule.steps_per_network,
     )
 
-    if config.export.HasField("path"):
+    if config.export.destination_filename:
         date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        export_filename = os.path.join(
-            config.export.path,
-            f"lc0-{date_str}-{new_state.step:08d}.pb.gz",
-        )
 
-        logging.info(f"Exporting model to {export_filename}")
+        logging.info("Exporting network")
 
         options = LeelaExportOptions(
             min_version="0.28",
@@ -111,11 +107,17 @@ def train(config_filename: str) -> None:
         )
         assert isinstance(export_state, nnx.State)
         net = jax_to_leela(jax_weights=export_state, export_options=options)
-        logging.info(f"Writing model to {export_filename}")
-        os.makedirs(config.export.path, exist_ok=True)
-        with gzip.open(export_filename, "wb") as f:
-            f.write(net.SerializeToString())
-        logging.info(f"Finished writing model to {export_filename}")
+        network_bytes = gzip.compress(net.SerializeToString())
+
+        for destination_template in config.export.destination_filename:
+            destination = destination_template.format(
+                datetime=date_str, step=new_state.step
+            )
+            logging.info(f"Writing network to {destination}")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            with open(destination, "wb") as f:
+                f.write(network_bytes)
+            logging.info(f"Finished writing network to {destination}")
 
 
 def main(argv: list[str] | None = None) -> int:

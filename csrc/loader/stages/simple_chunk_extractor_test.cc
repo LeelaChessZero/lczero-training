@@ -25,17 +25,14 @@ class MockChunkSource : public ChunkSource {
       : sort_key_(std::move(sort_key)), chunk_count_(chunk_count) {
     // Pre-generate chunk data.
     for (size_t i = 0; i < chunk_count; ++i) {
-      std::vector<FrameType> frames(10);  // 10 frames per chunk.
-      std::string data(reinterpret_cast<const char*>(frames.data()),
-                       frames.size() * sizeof(FrameType));
-      chunks_.push_back(std::move(data));
+      chunks_.emplace_back(10);  // 10 frames per chunk.
     }
   }
 
   std::string GetChunkSortKey() const override { return sort_key_; }
   size_t GetChunkCount() const override { return chunk_count_; }
 
-  std::optional<std::string> GetChunkData(size_t index) override {
+  std::optional<std::vector<FrameType>> GetChunkData(size_t index) override {
     if (index >= chunks_.size()) return std::nullopt;
     return chunks_[index];
   }
@@ -43,7 +40,7 @@ class MockChunkSource : public ChunkSource {
  private:
   std::string sort_key_;
   size_t chunk_count_;
-  std::vector<std::string> chunks_;
+  std::vector<std::vector<FrameType>> chunks_;
 };
 
 class SimpleChunkExtractorTest : public ::testing::Test {

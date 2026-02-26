@@ -4,23 +4,23 @@ version = "0.1.0"
 description = "Training scripts and data loading for Leela Chess Zero"
 authors = [{ name = "Leela Chess Zero Team" }]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pybind11>=2.10.0",
     "numpy>=1.24.0",
     "textual[dev]>=0.47.0",
-    "protobuf==6.32.1",
+    "protobuf==6.33.5",
     "mypy>=1.17.1",
     "pytest>=8.4.1",
     "anyio>=4.10.0",
-    "jax[cuda12]==0.7.1",
+    "jax[cuda12]==0.9.0.1",
     "flax>=0.11.1",
     "optax>=0.2.5",
     "orbax-checkpoint>=0.11.23",
     "python-dotenv>=1.1.1",
     "requests[socks]>=2.32.5",
     "matplotlib>=3.10.6",
-    "jaxlib==0.7.1",
+    "jaxlib==0.9.0.1",
     "onnxruntime>=1.23.1",
     "onnxruntime-gpu>=1.23.0",
     "tensorboardx>=2.6.4",
@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 lc0-leela2jax = "lczero_training.commands.leela2jax:main"
+lc0-jax2leela = "lczero_training.commands.jax2leela:main"
 lc0-describe = "lczero_training.commands.describe_training:main"
 lc0-test-dataloader = "lczero_training.commands.test_dataloader:main"
 lc0-dataloader-viz = "lczero_training.commands.dataloader_viz:main"
@@ -41,6 +42,7 @@ lc0-backfill-metrics = "lczero_training.commands.backfill_metrics:main"
 lc0-train = "lczero_training.commands.train:main"
 lc0-daemon = "lczero_training.commands.daemon:main"
 lc0-tui = "lczero_training.commands.tui:main"
+lc0-weights = "lczero_training.commands.weights_tool:main"
 
 [project.optional-dependencies]
 dev = [

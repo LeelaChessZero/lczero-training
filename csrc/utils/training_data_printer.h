@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 
+#include "loader/frame_type.h"
 #include "trainingdata/trainingdata_v6.h"
 
 namespace lczero {
@@ -27,7 +28,7 @@ std::string DecodeInvarianceInfo(uint8_t invariance_info);
 std::string TrainingDataToFen(const V6TrainingData& entry);
 
 // Prints a V6TrainingData entry with a custom header and formatting options.
-void PrintTrainingDataEntry(const V6TrainingData& entry,
+void PrintTrainingDataEntry(const FrameType& entry,
                             absl::string_view header_text,
                             int64_t float_per_line, int64_t plane_per_line);
 

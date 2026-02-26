@@ -142,7 +142,8 @@ PYBIND11_MODULE(_lczero_training, m) {
           "tuple of numpy arrays")
       .def(
           "maybe_get_next",
-          [](DataLoader& self, const std::string& alias) -> py::object {
+          [](DataLoader& self,
+             const std::string& alias) -> std::optional<py::tuple> {
             auto result = [&] {
               py::gil_scoped_release release;
               return self.MaybeGetNext(alias);
@@ -150,7 +151,7 @@ PYBIND11_MODULE(_lczero_training, m) {
             if (result.has_value()) {
               return tensor_tuple_to_numpy_tuple(std::move(*result));
             }
-            return py::none();
+            return std::nullopt;
           },
           py::arg("alias") = "",
           "Non-blocking get next batch for the given output alias (default "

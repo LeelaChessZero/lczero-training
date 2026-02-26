@@ -225,20 +225,19 @@ class TrainingPipeline:
             )
             self._train_one_network()
             self._save_checkpoint()
-            exported_filepath = self._export_model()
-            if exported_filepath:
-                self._upload_network(exported_filepath)
+            network_bytes = self._export_network()
+            if network_bytes:
+                self._save_network(network_bytes)
+                self._upload_network(network_bytes)
 
-    def _export_model(self) -> str | None:
-        if not self._config.export.HasField("path"):
+    def _export_network(self) -> bytes | None:
+        if (
+            not self._config.export.destination_filename
+            and not self._config.export.HasField("upload_training_run")
+        ):
             return None
-        date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        export_filename = os.path.join(
-            self._config.export.path,
-            f"lc0-{date_str}-{self._training_state.jit_state.step:08d}.pb.gz",
-        )
 
-        logging.info(f"Exporting model to {export_filename}")
+        logging.info("Exporting network")
 
         options = LeelaExportOptions(
             min_version="0.31",
@@ -252,14 +251,23 @@ class TrainingPipeline:
         )
         assert isinstance(export_state, nnx.State)
         net = jax_to_leela(jax_weights=export_state, export_options=options)
-        logging.info(f"Writing model to {export_filename}")
-        os.makedirs(self._config.export.path, exist_ok=True)
-        with gzip.open(export_filename, "wb") as f:
-            f.write(net.SerializeToString())
-        logging.info(f"Finished writing model to {export_filename}")
-        return export_filename
+        return gzip.compress(net.SerializeToString())
 
-    def _upload_network(self, filepath: str) -> None:
+    def _save_network(self, network_bytes: bytes) -> None:
+        date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        step = self._training_state.jit_state.step
+
+        for destination_template in self._config.export.destination_filename:
+            destination = destination_template.format(
+                datetime=date_str, step=step
+            )
+            logging.info(f"Writing network to {destination}")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            with open(destination, "wb") as f:
+                f.write(network_bytes)
+            logging.info(f"Finished writing network to {destination}")
+
+    def _upload_network(self, network_bytes: bytes) -> None:
         if not self._config.export.HasField("upload_training_run"):
             return
 
@@ -278,26 +286,25 @@ class TrainingPipeline:
             training_id = self._config.export.upload_training_run
 
             logging.info(
-                f"Uploading {filepath} to training website (ID: {training_id}, "
+                f"Uploading network to training website (ID: {training_id}, "
                 f"layers: {layers}, filters: {filters})"
             )
 
-            with open(filepath, "rb") as f:
-                data = {
-                    "pwd": upload_pwd,
-                    "training_id": training_id,
-                    "layers": layers,
-                    "filters": filters,
-                }
-                response = requests.post(
-                    "http://api.lczero.org/upload_network",
-                    files={"file": f},
-                    data=data,
-                )
-                response.raise_for_status()
+            data = {
+                "pwd": upload_pwd,
+                "training_id": training_id,
+                "layers": layers,
+                "filters": filters,
+            }
+            response = requests.post(
+                "http://api.lczero.org/upload_network",
+                files={"file": network_bytes},
+                data=data,
+            )
+            response.raise_for_status()
 
             logging.info(f"Successfully uploaded network: {response.text}")
-        except (IOError, requests.exceptions.RequestException) as e:
+        except requests.exceptions.RequestException as e:
             logging.error(f"Failed to upload network: {e}")
         except (KeyError, AttributeError, IndexError) as e:
             logging.error(f"Failed to extract model metadata for upload: {e}")

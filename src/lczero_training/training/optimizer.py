@@ -3,38 +3,9 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
-from flax import nnx
 
-from proto.training_config_pb2 import (
-    NadamwOptimizerConfig,
-    OptimizerConfig,
-)
-
-
-def _make_nadamw_weight_decay_mask(
-    config: NadamwOptimizerConfig, params: nnx.State
-) -> nnx.State:
-    """Creates a mask that excludes bias and LayerNorm parameters from decay."""
-
-    def is_layer_norm(path: tuple[object, ...]) -> bool:
-        return any(str(s).startswith("ln") for s in path)
-
-    def is_embedding(path: tuple[object, ...]) -> bool:
-        return ("embedding", "embedding") in zip(path, path[1:])
-
-    def is_bias(path: tuple[object, ...]) -> bool:
-        return str(path[-1]).lower() == "bias"
-
-    def mask_fn(path: tuple[object, ...], variable: nnx.Variable) -> bool:
-        if is_bias(path) and not config.decay_biases:
-            return False
-        if is_layer_norm(path) and not config.decay_layer_norms:
-            return False
-        if is_embedding(path) and not config.decay_embedding:
-            return False
-        return True
-
-    return nnx.map_state(mask_fn, params)
+from lczero_training.training.utils import make_weights_mask
+from proto.training_config_pb2 import OptimizerConfig
 
 
 def update_optimizer_step(
@@ -66,21 +37,36 @@ def make_gradient_transformation(
     lr_schedule: optax.Schedule,
 ) -> optax.GradientTransformation:
     if config.HasField("nadamw"):
-        conf = config.nadamw
+        nadamw = config.nadamw
         tx = optax.nadamw(
             lr_schedule,
-            b1=conf.beta_1,
-            b2=conf.beta_2,
-            eps=conf.epsilon,
-            weight_decay=conf.weight_decay,
-            mask=partial(_make_nadamw_weight_decay_mask, conf),
+            b1=nadamw.beta_1,
+            b2=nadamw.beta_2,
+            eps=nadamw.epsilon,
+            weight_decay=nadamw.weight_decay,
+            mask=partial(make_weights_mask, nadamw.decay_selector),
         )
-        if max_grad_norm is not None and max_grad_norm > 0:
-            tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
-        return tx
+    elif config.HasField("nadam"):
+        nadam = config.nadam
+        tx = optax.nadam(
+            lr_schedule,
+            b1=nadam.beta_1,
+            b2=nadam.beta_2,
+            eps=nadam.epsilon,
+        )
+    elif config.HasField("sgd"):
+        sgd = config.sgd
+        tx = optax.sgd(
+            lr_schedule,
+            momentum=sgd.momentum if sgd.momentum else None,
+            nesterov=sgd.nesterov,
+        )
     else:
         raise ValueError(
             "Unsupported optimizer type: {}".format(
                 config.WhichOneof("optimizer_type")
             )
         )
+    if max_grad_norm is not None and max_grad_norm > 0:
+        tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
+    return tx

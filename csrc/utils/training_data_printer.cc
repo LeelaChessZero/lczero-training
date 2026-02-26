@@ -56,7 +56,7 @@ std::string DecodeInvarianceInfo(uint8_t invariance_info) {
       (invariance_info >> 6) & 0x1, (invariance_info >> 7) & 0x1);
 }
 
-std::string TrainingDataToFen(const V6TrainingData& entry) {
+std::string TrainingDataToFen(const FrameType& entry) {
   InputPlanes planes = PlanesFromTrainingData(entry);
   ChessBoard board;
   int rule50 = 0;
@@ -70,7 +70,7 @@ std::string TrainingDataToFen(const V6TrainingData& entry) {
   return fen;
 }
 
-void PrintTrainingDataEntry(const V6TrainingData& entry,
+void PrintTrainingDataEntry(const FrameType& entry,
                             absl::string_view header_text,
                             int64_t float_per_line, int64_t plane_per_line) {
   std::cout << header_text << "\n";
@@ -111,7 +111,6 @@ void PrintTrainingDataEntry(const V6TrainingData& entry,
   std::cout << "  played_idx: " << entry.played_idx << "\n";
   std::cout << "  best_idx: " << entry.best_idx << "\n";
   std::cout << "  policy_kld: " << entry.policy_kld << "\n";
-  std::cout << "  reserved: " << entry.reserved << "\n";
   PrintFloatArray(entry.probabilities, std::size(entry.probabilities),
                   "probabilities", float_per_line);
   PrintUint64Array(entry.planes, std::size(entry.planes), "planes",

@@ -39,20 +39,20 @@ class PassthroughStage : public Stage {
 class ShufflingFrameSamplerTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    input_queue_ = std::make_unique<Queue<V6TrainingData>>(100);
+    input_queue_ = std::make_unique<Queue<FrameType>>(100);
     config_.set_reservoir_size_per_thread(10);  // Small size for testing
     config_.mutable_output()->set_queue_capacity(20);
   }
 
-  V6TrainingData CreateTestFrame(uint32_t version) {
-    V6TrainingData frame{};
+  FrameType CreateTestFrame(uint32_t version) {
+    FrameType frame{};
     frame.version = version;
     frame.input_format = 3;
     frame.root_q = 0.5f;
     return frame;
   }
 
-  std::unique_ptr<Queue<V6TrainingData>> input_queue_;
+  std::unique_ptr<Queue<FrameType>> input_queue_;
   ShufflingFrameSamplerConfig config_;
 };
 
@@ -172,15 +172,15 @@ TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   auto producer = input_queue_->CreateProducer();
 
   // Create frames with specific data - need more than reservoir size
-  V6TrainingData frame1 = CreateTestFrame(100);
+  FrameType frame1 = CreateTestFrame(100);
   frame1.root_q = 0.1f;
   frame1.input_format = 1;
 
-  V6TrainingData frame2 = CreateTestFrame(200);
+  FrameType frame2 = CreateTestFrame(200);
   frame2.root_q = 0.2f;
   frame2.input_format = 2;
 
-  V6TrainingData frame3 = CreateTestFrame(300);
+  FrameType frame3 = CreateTestFrame(300);
   frame3.root_q = 0.3f;
   frame3.input_format = 3;
 
@@ -190,7 +190,7 @@ TEST_F(ShufflingFrameSamplerTest, PreservesFrameData) {
   producer.Close();
 
   // Verify frame data is preserved
-  std::vector<V6TrainingData> output_frames;
+  std::vector<FrameType> output_frames;
   try {
     while (true) {
       output_frames.push_back(sampler.output_queue()->Get());

@@ -15,7 +15,11 @@ from jax.sharding import PartitionSpec as P
 from lczero_training.dataloader import DataLoader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import JitTrainingState
+from lczero_training.training.state import (
+    JitTrainingState,
+    TrainingBatch,
+    TrainingSample,
+)
 from proto import training_config_pb2 as training_config_pb2
 
 MetricsDict = Dict[str, Any]
@@ -39,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 def from_dataloader(
     loader: DataLoader,
-) -> Generator[Tuple[np.ndarray, ...], None, None]:
+) -> Generator[tuple[np.ndarray, ...], None, None]:
     while True:
         yield loader.get_next()
 
@@ -47,7 +51,7 @@ def from_dataloader(
 class Training:
     optimizer_tx: optax.GradientTransformation
     train_step: Callable[
-        [optax.GradientTransformation, JitTrainingState, dict],
+        [optax.GradientTransformation, JitTrainingState, TrainingBatch],
         Tuple[JitTrainingState, MetricsDict],
     ]
     _swa_config: Optional[training_config_pb2.SWAConfig]
@@ -75,12 +79,11 @@ class Training:
             dp_sharding = jshard.NamedSharding(mesh, P("batch"))
             self._dp_sharding = dp_sharding
 
-            batch_sharding = {
-                "inputs": dp_sharding,
-                "value_targets": dp_sharding,
-                "policy_targets": dp_sharding,
-                "movesleft_targets": dp_sharding,
-            }
+            batch_sharding = TrainingBatch(
+                inputs=dp_sharding,
+                probabilities=dp_sharding,
+                values=dp_sharding,
+            )
             in_shardings = (replicated, batch_sharding)
             out_shardings = replicated
 
@@ -91,32 +94,29 @@ class Training:
         def _step(
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
-            batch: dict,
+            batch: TrainingBatch,
         ) -> Tuple[JitTrainingState, MetricsDict]:
             model = nnx.merge(graphdef, jit_state.model_state)
 
             def loss_for_grad(
-                model_arg: LczeroModel, batch_arg: dict
+                model_arg: LczeroModel, sample_arg: TrainingSample
             ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-                return loss_fn(
-                    model_arg,
-                    inputs=batch_arg["inputs"],
-                    value_targets=batch_arg["value_targets"],
-                    policy_targets=batch_arg["policy_targets"],
-                    movesleft_targets=batch_arg["movesleft_targets"],
-                )
+                return loss_fn(model_arg, sample_arg)
 
             loss_vfn = jax.vmap(
                 loss_for_grad,
-                in_axes=(None, 0),  # (model_arg, batch_arg)
+                in_axes=(None, 0),  # (model_arg, sample_arg)
                 out_axes=0,
             )
 
             def mean_loss_for_grad(
-                model_arg: LczeroModel, batch_arg: dict
+                model_arg: LczeroModel, batch_arg: TrainingBatch
             ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
+                # vmap automatically distributes TrainingBatch over batch dimension,
+                # calling loss_for_grad with TrainingSample (single samples).
                 per_sample_data_loss, unweighted_losses = loss_vfn(
-                    model_arg, batch_arg
+                    model_arg,
+                    batch_arg,  # type: ignore[arg-type]
                 )
                 mean_loss = jnp.mean(per_sample_data_loss)
                 return mean_loss, unweighted_losses
@@ -149,7 +149,7 @@ class Training:
 
         self.train_step = cast(
             Callable[
-                [optax.GradientTransformation, JitTrainingState, dict],
+                [optax.GradientTransformation, JitTrainingState, TrainingBatch],
                 Tuple[JitTrainingState, MetricsDict],
             ],
             _step,
@@ -208,12 +208,16 @@ class Training:
         return jit_state
 
     def _validate_and_prepare_batch(
-        self, batch: Tuple[np.ndarray, ...]
-    ) -> dict:
-        b_inputs, b_policy, b_values, _, b_movesleft = batch
+        self, tensor_tuple: tuple[np.ndarray, ...]
+    ) -> TrainingBatch:
         logger.info("Fetched batch from dataloader")
 
-        batch_size = b_inputs.shape[0]
+        # Convert tuple to TrainingBatch
+        batch = TrainingBatch.from_tuple(tensor_tuple)
+
+        # Ensure batch.inputs is jax.Array for shape access
+        assert isinstance(batch.inputs, jax.Array)
+        batch_size = batch.inputs.shape[0]
         if self._dp_sharding is not None:
             num_devices = jax.device_count()
             if batch_size % num_devices != 0:
@@ -229,17 +233,10 @@ class Training:
                 f"({per_device_batch_size} per device)"
             )
 
-        batch_dict = {
-            "inputs": b_inputs,
-            "value_targets": b_values,
-            "policy_targets": b_policy,
-            "movesleft_targets": b_movesleft,
-        }
-
         if self._dp_sharding is not None:
-            batch_dict = jax.device_put(batch_dict, self._dp_sharding)
+            batch = jax.device_put(batch, self._dp_sharding)
 
-        return batch_dict
+        return batch
 
     def _log_step_metrics(
         self,
@@ -281,16 +278,19 @@ class Training:
     def run(
         self,
         jit_state: JitTrainingState,
-        datagen: Generator[Tuple[np.ndarray, ...], None, None],
+        datagen: Generator[tuple[np.ndarray, ...], None, None],
         num_steps: int,
         step_hook: Optional[StepHook] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
+        if self._dp_sharding is not None:
+            replicated = jshard.NamedSharding(self._dp_sharding.mesh, P())
+            jit_state = jax.device_put(jit_state, replicated)
         for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
-            batch_dict = self._validate_and_prepare_batch(next(datagen))
+            batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
-                self.optimizer_tx, jit_state, batch_dict
+                self.optimizer_tx, jit_state, batch
             )
             step_value = int(
                 np.asarray(jax.device_get(jit_state.step)).reshape(())

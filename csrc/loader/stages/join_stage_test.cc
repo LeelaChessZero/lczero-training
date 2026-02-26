@@ -16,8 +16,8 @@ class JoinStageTest : public ::testing::Test {
  protected:
   void SetUp() override { config_.mutable_output()->set_queue_capacity(100); }
 
-  V6TrainingData CreateTestFrame(uint32_t version) {
-    V6TrainingData frame{};
+  FrameType CreateTestFrame(uint32_t version) {
+    FrameType frame{};
     frame.version = version;
     frame.input_format = 3;
     frame.root_q = 0.5f;

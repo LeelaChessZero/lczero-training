@@ -7,8 +7,8 @@
 #include <stop_token>
 #include <vector>
 
-#include "libs/lc0/src/trainingdata/trainingdata_v6.h"
 #include "loader/data_loader_metrics.h"
+#include "loader/frame_type.h"
 #include "loader/stages/stage.h"
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
@@ -48,7 +48,6 @@ class JoinStage : public SingleOutputStage<T> {
   std::unique_ptr<ThreadPool> thread_pool_;
 };
 
-using FrameType = V6TrainingData;
 using JoinPositions = JoinStage<FrameType>;
 
 }  // namespace training

@@ -53,15 +53,15 @@ class ChunkUnpackerTest : public ::testing::Test {
     config_.set_position_sampling_rate(1.0f);
   }
 
-  V6TrainingData CreateTestFrame(uint32_t version) {
-    V6TrainingData frame{};
+  FrameType CreateTestFrame(uint32_t version) {
+    FrameType frame{};
     frame.version = version;
     frame.input_format = 3;
     frame.root_q = 0.5f;
     return frame;
   }
 
-  TrainingChunk MakeChunk(std::vector<V6TrainingData> frames,
+  TrainingChunk MakeChunk(std::vector<FrameType> frames,
                           std::string sort_key = "source", size_t index = 0,
                           uint32_t use = 0) {
     TrainingChunk chunk;
@@ -81,7 +81,7 @@ TEST_F(ChunkUnpackerTest, UnpacksSingleFrame) {
   unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
-  V6TrainingData test_frame = CreateTestFrame(6);
+  FrameType test_frame = CreateTestFrame(6);
   auto producer = input_queue_->CreateProducer();
   producer.Put(MakeChunk({test_frame}));
   producer.Close();
@@ -97,8 +97,8 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleFrames) {
   unpacker.SetInputs({input_queue_.get()});
   unpacker.Start();
 
-  std::vector<V6TrainingData> test_frames = {
-      CreateTestFrame(6), CreateTestFrame(7), CreateTestFrame(8)};
+  std::vector<FrameType> test_frames = {CreateTestFrame(6), CreateTestFrame(7),
+                                        CreateTestFrame(8)};
   auto producer = input_queue_->CreateProducer();
   producer.Put(MakeChunk(test_frames));
   producer.Close();
@@ -131,12 +131,12 @@ TEST_F(ChunkUnpackerTest, UnpacksMultipleChunks) {
   auto producer = input_queue_->CreateProducer();
 
   // Send first chunk with 2 frames
-  std::vector<V6TrainingData> chunk1_frames = {CreateTestFrame(10),
-                                               CreateTestFrame(11)};
+  std::vector<FrameType> chunk1_frames = {CreateTestFrame(10),
+                                          CreateTestFrame(11)};
   producer.Put(MakeChunk(chunk1_frames, "source", 0));
 
   // Send second chunk with 1 frame
-  std::vector<V6TrainingData> chunk2_frames = {CreateTestFrame(12)};
+  std::vector<FrameType> chunk2_frames = {CreateTestFrame(12)};
   producer.Put(MakeChunk(chunk2_frames, "source", 1));
 
   producer.Close();

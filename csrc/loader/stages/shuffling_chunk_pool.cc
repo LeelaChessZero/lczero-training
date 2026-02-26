@@ -469,7 +469,7 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
 }
 
 struct ShufflingChunkPool::ChunkData {
-  std::string data;
+  std::vector<FrameType> data;
   std::string sort_key;
   size_t local_index = 0;
   size_t global_index = 0;
@@ -521,29 +521,17 @@ ShufflingChunkPool::GetNextChunkData() {
     chunk.index_within_sort_key = chunk_data.local_index;
     chunk.use_count = chunk_data.use_count;
     chunk.global_index = chunk_data.global_index;
-
-    const auto* frames_begin =
-        reinterpret_cast<const FrameType*>(chunk_data.data.data());
-    const auto* frames_end =
-        frames_begin + chunk_data.data.size() / sizeof(FrameType);
-    chunk.frames.assign(frames_begin, frames_end);
+    chunk.frames = std::move(chunk_data.data);
 
     return chunk;
   }
 }
 
 bool ShufflingChunkPool::LoadChunkData(ChunkData& chunk_data) {
-  std::optional<std::string> data =
+  std::optional<std::vector<FrameType>> data =
       chunk_data.source_item->source->GetChunkData(chunk_data.local_index);
 
-  if (!data || data->empty() || (data->size() % sizeof(FrameType) != 0)) {
-    if (data) {
-      LOG(WARNING) << "Chunk size " << data->size()
-                   << " is not a multiple of V6TrainingData size "
-                   << sizeof(FrameType) << ", skipping chunk from sort key "
-                   << chunk_data.source_item->source->GetChunkSortKey()
-                   << " at index " << chunk_data.local_index;
-    }
+  if (!data || data->empty()) {
     chunk_data.source_item->dropped_chunks.insert(chunk_data.local_index);
     dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
     return false;
@@ -617,11 +605,7 @@ bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
   if (chunk_data.source_item->weight[chunk_data.local_index] < 0.0f) {
     hanse_cache_misses_.fetch_add(1, std::memory_order_acq_rel);
     if (!LoadChunkData(chunk_data)) return false;
-    const auto* frames =
-        reinterpret_cast<const FrameType*>(chunk_data.data.data());
-    const size_t frame_count = chunk_data.data.size() / sizeof(FrameType);
-    const float weight =
-        ComputeChunkWeight(absl::MakeConstSpan(frames, frame_count));
+    const float weight = ComputeChunkWeight(chunk_data.data);
     chunk_data.source_item->weight[chunk_data.local_index] = weight;
     max_weight_ = std::max(max_weight_, weight);
     AddSample(chunk_weight_stats_, static_cast<double>(weight));

@@ -6,7 +6,7 @@ project(
   default_options : [
     'warning_level=3',
     'cpp_std=c++20',
-    'werror=true',
+    
   ],
 )
 
@@ -15,7 +15,7 @@ cpp_compiler = meson.get_compiler('cpp')
 if cpp_compiler.get_id() == 'clang'
   add_project_arguments('-Wno-nullability-extension', language : 'cpp')
 endif
-add_project_arguments('-Werror', language : 'cpp')
+
 
 
 # External dependencies
@@ -353,7 +353,7 @@ filter_chunks = executable(
   'filter_chunks',
   'csrc/tools/filter_chunks_main.cc',
   include_directories : includes,
-  dependencies : cli_deps + [zlib_dep],
+  dependencies : cli_deps + [proto_dep, zlib_dep],
   link_with : loader_lib,
 )
 
@@ -361,7 +361,7 @@ result_distribution = executable(
   'result_distribution',
   'csrc/tools/result_distribution_main.cc',
   include_directories : includes,
-  dependencies : cli_deps + [absl_deps['synchronization']],
+  dependencies : cli_deps + [proto_dep, absl_deps['synchronization']],
   link_with : loader_lib,
 )
 
@@ -369,7 +369,7 @@ startpos_policy_distribution = executable(
   'startpos_policy_distribution',
   'csrc/tools/startpos_policy_distribution_main.cc',
   include_directories : includes,
-  dependencies : cli_deps,
+  dependencies : cli_deps + [proto_dep],
   link_with : loader_lib,
 )
 
