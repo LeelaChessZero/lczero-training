@@ -5,7 +5,7 @@ import json
 import types
 from dataclasses import is_dataclass
 from enum import Enum
-from typing import Any, TextIO, Union, get_args, get_origin
+from typing import Any, Optional, TextIO, Union, get_args, get_origin
 
 from anyio.streams.text import TextReceiveStream, TextSendStream
 from google.protobuf.json_format import MessageToDict, ParseDict
@@ -155,6 +155,7 @@ class AsyncCommunicator:
         handler: Any,
         input_stream: TextReceiveStream,
         output_stream: TextSendStream,
+        io_dump: Optional[TextIO] = None,
     ) -> None:
         """
         Initializes the AsyncCommunicator.
@@ -163,10 +164,12 @@ class AsyncCommunicator:
             handler: An object with async `on_<event_type>` methods.
             input_stream: A TextReceiveStream to read incoming messages from.
             output_stream: A TextSendStream to write outgoing messages to.
+            io_dump: Optional file to dump raw IO for debugging.
         """
         self.handler = handler
         self.input_stream = input_stream
         self.output_stream = output_stream
+        self._io_dump = io_dump
         self._buffer = ""
 
     async def send(self, payload_instance: Any) -> None:
@@ -186,6 +189,8 @@ class AsyncCommunicator:
         message = {"type": event_type, "payload": payload_dict}
 
         message_line = json.dumps(message) + "\n"
+        if self._io_dump:
+            self._io_dump.write(f"> {message_line}")
         await self.output_stream.send(message_line)
 
     async def _dispatch(self, line: str) -> None:
@@ -217,6 +222,8 @@ class AsyncCommunicator:
             self._buffer += chunk
             while "\n" in self._buffer:
                 line, self._buffer = self._buffer.split("\n", 1)
+                if self._io_dump and line:
+                    self._io_dump.write(f"< {line}\n")
                 await self._dispatch(line)
 
         if self._buffer:
