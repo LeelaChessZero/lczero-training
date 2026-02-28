@@ -807,8 +807,10 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
 
   {
     absl::MutexLock lock(&chunk_sources_mutex_);
-    chunk_weight_stats_.set_name("chunk_weight");
-    UpdateFrom(*stage_metric.add_statistics_metrics(), chunk_weight_stats_);
+    if (chunk_weight_stats_.count() > 0) {
+      chunk_weight_stats_.set_name("chunk_weight");
+      UpdateFrom(*stage_metric.add_statistics_metrics(), chunk_weight_stats_);
+    }
     chunk_weight_stats_.Clear();
   }
 
