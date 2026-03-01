@@ -1,10 +1,11 @@
 """Metrics collection and logging for training daemon."""
 
+import functools
 import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +16,6 @@ from lczero_training._lczero_training import DataLoader
 from lczero_training.daemon.metrics_base import _Metric
 from lczero_training.daemon.rms_metrics import _RmsMetric
 from lczero_training.model.loss_function import LczeroLoss
-from lczero_training.model.model import LczeroModel
 from lczero_training.training.state import JitTrainingState, TrainingSample
 from lczero_training.training.tensorboard import TensorboardLogger
 from lczero_training.training.training import StepHookData
@@ -107,6 +107,23 @@ class _EvaluatingMetric(_Metric, ABC):
         )
 
 
+@functools.lru_cache(maxsize=None)
+def _make_eval_jit(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> ...:
+    @jax.jit
+    def _eval(
+        model_state: nnx.State, batch_sample: TrainingSample
+    ) -> Dict[str, jax.Array]:
+        model = nnx.merge(graphdef, model_state)
+        loss_vfn = jax.vmap(loss_fn, in_axes=(None, 0), out_axes=0)
+        per_sample_loss, unweighted = loss_vfn(model, batch_sample)
+        return {
+            "loss": jnp.mean(per_sample_loss),
+            "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
+        }
+
+    return _eval
+
+
 def evaluate_batch(
     batch: BatchTuple,
     jit_state: JitTrainingState,
@@ -131,28 +148,12 @@ def evaluate_batch(
     )
     if use_swa_model and model_state is None:
         raise RuntimeError("SWA state not available")
-
-    model = nnx.merge(graphdef, model_state)
-
-    def loss_fn_inner(
-        m: LczeroModel, sample: TrainingSample
-    ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-        return loss_fn(m, sample)
-
-    loss_vfn = jax.vmap(loss_fn_inner, in_axes=(None, 0), out_axes=0)
-
-    # Convert tuple to TrainingSample structure for vmap.
     batch_sample = TrainingSample(
         inputs=jnp.asarray(batch[0]),
         probabilities=jnp.asarray(batch[1]),
         values=jnp.asarray(batch[2]),
     )
-
-    per_sample_loss, unweighted = loss_vfn(model, batch_sample)
-    return {
-        "loss": jnp.mean(per_sample_loss),
-        "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
-    }
+    return _make_eval_jit(graphdef, loss_fn)(model_state, batch_sample)
 
 
 class _DataLoaderMetric(_EvaluatingMetric):
