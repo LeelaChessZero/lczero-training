@@ -78,6 +78,13 @@ class TrainingTuiApp(App):
             "--io-dump",
             help="Path to file for dumping raw daemon IO for debugging",
         )
+        parser.add_argument(
+            "--daemon-flag",
+            action="append",
+            default=[],
+            dest="daemon_flags",
+            help="Extra argument to pass to the daemon (repeatable)",
+        )
 
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
@@ -110,6 +117,7 @@ class TrainingTuiApp(App):
         self._config_file: str = args.config
         self._logfile: Optional[str] = args.logfile
         self._io_dump_file: Optional[str] = args.io_dump
+        self._daemon_flags: list[str] = args.daemon_flags
 
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""
@@ -119,7 +127,12 @@ class TrainingTuiApp(App):
             env = {**os.environ, "TF_CPP_MIN_LOG_LEVEL": "0"}
 
         self._daemon_process = await anyio.open_process(
-            [sys.executable, "-m", "lczero_training.commands.daemon"],
+            [
+                sys.executable,
+                "-m",
+                "lczero_training.commands.daemon",
+                *self._daemon_flags,
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
