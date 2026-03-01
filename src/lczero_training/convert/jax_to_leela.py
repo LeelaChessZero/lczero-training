@@ -2,8 +2,6 @@ import dataclasses
 import logging
 from typing import Optional, cast
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 
@@ -24,10 +22,9 @@ class JaxToLeela(LeelaPytreeWeightsVisitor):
     ) -> None:
         embedding_kernel = cast(nnx.Param, nnx_dict["embedding"]["kernel"])
         original_values = embedding_kernel.value
-        scaled_values = original_values.at[_EMBEDDING_PLANE_TO_SCALE].set(
-            original_values[_EMBEDDING_PLANE_TO_SCALE] / _EMBEDDING_SCALE
-        )
-        embedding_kernel.value = scaled_values
+        arr = np.asarray(original_values).copy()
+        arr[_EMBEDDING_PLANE_TO_SCALE] /= _EMBEDDING_SCALE
+        embedding_kernel.value = arr
         try:
             super().embedding_block(nnx_dict=nnx_dict, weights=weights)
         finally:
@@ -38,19 +35,18 @@ class JaxToLeela(LeelaPytreeWeightsVisitor):
         param: nnx.Param,
         leela: net_pb2.Weights.Layer,
     ) -> None:
-        weights = param.value.T.flatten().astype(jnp.float32)
-        min_val, max_val = jnp.min(weights), jnp.max(weights)
+        weights = np.asarray(param.value, dtype=np.float32).T.flatten()
+        min_val, max_val = np.min(weights), np.max(weights)
         range_val = max_val - min_val
 
         # Normalize to [0, 1], handling the case where all weights are equal.
-        normalized = cast(
-            jax.Array,
-            jnp.where(range_val > 1e-8, (weights - min_val) / range_val, 0.5),
+        normalized = np.where(
+            range_val > 1e-8, (weights - min_val) / range_val, 0.5
         )
 
         # Scale to uint16 and convert to bytes.
-        quantized = jnp.round(normalized * 65535.0).astype(jnp.uint16)
-        leela.params = np.asarray(quantized).tobytes()
+        quantized = np.round(normalized * 65535.0).astype(np.uint16)
+        leela.params = quantized.tobytes()
         leela.min_val = float(min_val)
         leela.max_val = float(max_val)
 
