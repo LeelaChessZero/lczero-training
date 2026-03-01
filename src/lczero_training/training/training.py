@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+from datetime import datetime
 from functools import partial
 from typing import Any, Callable, Dict, Generator, Optional, Tuple, cast
 
@@ -304,7 +305,7 @@ class Training:
             logger.info(f"Starting step {jit_state.step}")
             if memory_profile_dir is not None:
                 jax.profiler.save_device_memory_profile(
-                    f"{memory_profile_dir}/before_{int(jit_state.step)}.prof"
+                    f"{memory_profile_dir}/{datetime.now().strftime('%Y%m%d-%H%M%S')}_before_{int(jit_state.step)}.prof"
                 )
             batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
