@@ -155,6 +155,18 @@ class Training:
             _step,
         )
 
+    @staticmethod
+    @jax.jit
+    def _swa_tree_map(
+        alpha: jax.Array,
+        beta: jax.Array,
+        swa_state: nnx.State,
+        model_state: nnx.State,
+    ) -> nnx.State:
+        return tree_util.tree_map(
+            lambda a, b: alpha * a + beta * b, swa_state, model_state
+        )
+
     def update_swa(
         self, jit_state: JitTrainingState, weight: float
     ) -> JitTrainingState:
@@ -174,8 +186,9 @@ class Training:
         denom = jit_state.num_averages + weight
         alpha = jit_state.num_averages / denom
         beta = weight / denom
-        new_swa_state = tree_util.tree_map(
-            lambda a, b: alpha * a + beta * b,
+        new_swa_state = self._swa_tree_map(
+            jnp.array(alpha),
+            jnp.array(beta),
             jit_state.swa_state,
             jit_state.model_state,
         )
