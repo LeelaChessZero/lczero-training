@@ -131,6 +131,7 @@ class TrainingPipeline:
         self._metrics = None
         logger.info("Creating empty model")
         self._model = LczeroModel(self._config.model, rngs=nnx.Rngs(params=42))
+        self._graphdef = nnx.graphdef(self._model)
         logger.info(
             f"Creating checkpoint manager at {self._config.training.checkpoint.path}"
         )
@@ -318,7 +319,7 @@ class TrainingPipeline:
         # Append current learning rate from schedule to metrics.
         hook_data.metrics["lr"] = self._lr_schedule(hook_data.global_step)
         if self._metrics is not None:
-            self._metrics.on_step(hook_data, nnx.graphdef(self._model))
+            self._metrics.on_step(hook_data, self._graphdef)
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
