@@ -294,6 +294,7 @@ class Training:
         datagen: Generator[tuple[np.ndarray, ...], None, None],
         num_steps: int,
         step_hook: Optional[StepHook] = None,
+        memory_profile_dir: Optional[str] = None,
     ) -> JitTrainingState:
         assert jit_state.opt_state is not None
         if self._dp_sharding is not None:
@@ -301,6 +302,10 @@ class Training:
             jit_state = jax.device_put(jit_state, replicated)
         for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
+            if memory_profile_dir is not None:
+                jax.profiler.save_device_memory_profile(
+                    f"{memory_profile_dir}/before_{int(jit_state.step)}.prof"
+                )
             batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
                 self.optimizer_tx, jit_state, batch

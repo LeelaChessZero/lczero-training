@@ -7,17 +7,18 @@ from lczero_training.daemon.daemon import TrainingDaemon
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    # Placeholder for future flags; keeps parity with other commands.
-    return argparse.ArgumentParser(description="Run the training daemon.")
+    parser = argparse.ArgumentParser(description="Run the training daemon.")
+    parser.add_argument("--memory-profile-dir", default=None)
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
 
     parser = _build_parser()
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
 
-    daemon = TrainingDaemon()
+    daemon = TrainingDaemon(memory_profile_dir=args.memory_profile_dir)
     daemon.run()
     return 0
 
