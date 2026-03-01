@@ -1,11 +1,10 @@
 """Metrics collection and logging for training daemon."""
 
-import functools
 import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import jax
 import jax.numpy as jnp
@@ -85,6 +84,7 @@ class _EvaluatingMetric(_Metric, ABC):
         if not loss_fn:
             raise ValueError(f"Metric '{config.name}': Loss function required")
         self.loss_fn = loss_fn
+        self._eval_jit: Any = None
 
     @abstractmethod
     def get_batch(self) -> BatchTuple:
@@ -101,27 +101,46 @@ class _EvaluatingMetric(_Metric, ABC):
         jit_state: JitTrainingState,
         graphdef: nnx.GraphDef,
     ) -> Dict[str, jax.Array]:
-        """Evaluate loss function on a batch of data."""
-        return evaluate_batch(
-            batch, jit_state, graphdef, self.loss_fn, self.config.use_swa_model
+        if self._eval_jit is None:
+            self._eval_jit = _make_eval_jit(graphdef, self.loss_fn)
+        model_state = (
+            jit_state.swa_state
+            if self.config.use_swa_model
+            else jit_state.model_state
         )
+        if self.config.use_swa_model and model_state is None:
+            raise RuntimeError("SWA state not available")
+        batch_sample = TrainingSample(
+            inputs=jnp.asarray(batch[0]),
+            probabilities=jnp.asarray(batch[1]),
+            values=jnp.asarray(batch[2]),
+        )
+        return self._eval_jit(model_state, batch_sample)
 
 
-@functools.lru_cache(maxsize=None)
+_eval_jit_cache: dict[tuple[int, int], Any] = {}
+
+
 def _make_eval_jit(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> ...:
-    @jax.jit
-    def _eval(
-        model_state: nnx.State, batch_sample: TrainingSample
-    ) -> Dict[str, jax.Array]:
-        model = nnx.merge(graphdef, model_state)
-        loss_vfn = jax.vmap(loss_fn, in_axes=(None, 0), out_axes=0)
-        per_sample_loss, unweighted = loss_vfn(model, batch_sample)
-        return {
-            "loss": jnp.mean(per_sample_loss),
-            "unweighted_losses": jax.tree_util.tree_map(jnp.mean, unweighted),
-        }
+    key = (id(graphdef), id(loss_fn))
+    if key not in _eval_jit_cache:
 
-    return _eval
+        @jax.jit
+        def _eval(
+            model_state: nnx.State, batch_sample: TrainingSample
+        ) -> Dict[str, jax.Array]:
+            model = nnx.merge(graphdef, model_state)
+            loss_vfn = jax.vmap(loss_fn, in_axes=(None, 0), out_axes=0)
+            per_sample_loss, unweighted = loss_vfn(model, batch_sample)
+            return {
+                "loss": jnp.mean(per_sample_loss),
+                "unweighted_losses": jax.tree_util.tree_map(
+                    jnp.mean, unweighted
+                ),
+            }
+
+        _eval_jit_cache[key] = _eval
+    return _eval_jit_cache[key]
 
 
 def evaluate_batch(
