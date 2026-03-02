@@ -69,7 +69,10 @@ class Training:
         self._swa_config = swa_config
         self._dp_sharding = None
 
-        jit_kwargs: Dict[str, Any] = {"static_argnames": ("optimizer_tx",)}
+        jit_kwargs: Dict[str, Any] = {
+            "static_argnames": ("optimizer_tx",),
+            "donate_argnames": ("jit_state",),
+        }
         if jax.device_count() > 1:
             num_devices = jax.device_count()
             logger.info(
