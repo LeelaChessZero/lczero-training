@@ -4,7 +4,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Callable, Dict, Optional
 
 import jax
 import jax.numpy as jnp
@@ -84,7 +84,6 @@ class _EvaluatingMetric(_Metric, ABC):
         if not loss_fn:
             raise ValueError(f"Metric '{config.name}': Loss function required")
         self.loss_fn = loss_fn
-        self._eval_jit: Any = None
 
     @abstractmethod
     def get_batch(self) -> BatchTuple:
@@ -113,15 +112,14 @@ class _EvaluatingMetric(_Metric, ABC):
             probabilities=jnp.asarray(batch[1]),
             values=jnp.asarray(batch[2]),
         )
-        if self._eval_jit is None:
-            self._eval_jit = _make_eval_jit(graphdef, self.loss_fn)
-        return self._eval_jit(model_state, batch_sample)
+        return _make_eval_jit(graphdef, self.loss_fn)(model_state, batch_sample)
 
 
-_eval_jit_cache: dict[tuple[int, int], Any] = {}
+_EvalJit = Callable[[nnx.State, TrainingSample], Dict[str, jax.Array]]
+_eval_jit_cache: dict[tuple[int, int], _EvalJit] = {}
 
 
-def _make_eval_jit(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> Any:
+def _make_eval_jit(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> _EvalJit:
     key = (id(graphdef), id(loss_fn))
     if key not in _eval_jit_cache:
 
