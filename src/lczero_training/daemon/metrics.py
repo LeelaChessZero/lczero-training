@@ -106,7 +106,7 @@ class _EvaluatingMetric(_Metric, ABC):
             if self.config.use_swa_model
             else jit_state.model_state
         )
-        if self.config.use_swa_model and model_state is None:
+        if model_state is None:
             raise RuntimeError("SWA state not available")
         batch_sample = TrainingSample(
             inputs=jnp.asarray(batch[0]),
@@ -154,7 +154,7 @@ def evaluate_batch(
     model_state = (
         jit_state.swa_state if use_swa_model else jit_state.model_state
     )
-    if use_swa_model and model_state is None:
+    if model_state is None:
         raise RuntimeError("SWA state not available")
     batch_sample = TrainingSample(
         inputs=jnp.asarray(batch[0]),
