@@ -113,7 +113,12 @@ class TrainingPipeline:
     _cycle_state: _TrainingCycleState
     _metrics: Metrics | None
 
-    def __init__(self, config_filepath: str) -> None:
+    def __init__(
+        self,
+        config_filepath: str,
+        memory_profile_dir: str | None = None,
+    ) -> None:
+        self._memory_profile_dir = memory_profile_dir
         logger.info(f"Loading config from {config_filepath}")
         self._config = self._load_config(config_filepath)
         _configure_file_logging(self._config)
@@ -126,6 +131,7 @@ class TrainingPipeline:
         self._metrics = None
         logger.info("Creating empty model")
         self._model = LczeroModel(self._config.model, rngs=nnx.Rngs(params=42))
+        self._graphdef = nnx.graphdef(self._model)
         logger.info(
             f"Creating checkpoint manager at {self._config.training.checkpoint.path}"
         )
@@ -313,7 +319,7 @@ class TrainingPipeline:
         # Append current learning rate from schedule to metrics.
         hook_data.metrics["lr"] = self._lr_schedule(hook_data.global_step)
         if self._metrics is not None:
-            self._metrics.on_step(hook_data, nnx.graphdef(self._model))
+            self._metrics.on_step(hook_data, self._graphdef)
 
     def _train_one_network(self) -> None:
         logging.info("Training one network!")
@@ -328,6 +334,7 @@ class TrainingPipeline:
             datagen=from_dataloader(self._data_loader),
             num_steps=self._schedule.steps_per_network,
             step_hook=self._step_hook,
+            memory_profile_dir=self._memory_profile_dir,
         )
         self._training_state = self._training_state.replace(
             jit_state=new_jit_state

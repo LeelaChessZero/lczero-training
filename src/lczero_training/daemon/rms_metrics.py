@@ -14,11 +14,13 @@ from lczero_training.training.training import StepHookData
 from proto.metrics_config_pb2 import MetricConfig
 
 
-def compute_rms(state_subtree: nnx.State) -> float:
+@jax.jit
+def compute_rms(state_subtree: nnx.State) -> jax.Array:
     """Compute RMS of all parameters in a state subtree."""
     leaves = jax.tree_util.tree_leaves(state_subtree)
-    flat = jnp.concatenate([jnp.asarray(p).ravel() for p in leaves])
-    return float(jnp.sqrt(jnp.mean(jnp.square(flat))))
+    total_sq = sum(jnp.sum(jnp.square(p)) for p in leaves)
+    total_n = sum(p.size for p in leaves)
+    return jnp.sqrt(total_sq / total_n)
 
 
 def extract_attention_components(model: LczeroModel) -> dict[str, Any]:

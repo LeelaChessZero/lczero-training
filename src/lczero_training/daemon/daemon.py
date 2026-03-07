@@ -22,7 +22,8 @@ class TrainingDaemon:
     _config_filepath: str | None = None
     _daemon_start_time: float
 
-    def __init__(self) -> None:
+    def __init__(self, memory_profile_dir: str | None = None) -> None:
+        self._memory_profile_dir = memory_profile_dir
         self._daemon_start_time = time.time()
         self._setup_logging()
         self._setup_signal_handling()
@@ -118,7 +119,10 @@ class TrainingDaemon:
             time.sleep(1)
 
         logging.info("Config received. Starting training pipeline.")
-        self._training_pipeline = TrainingPipeline(self._config_filepath)
+        self._training_pipeline = TrainingPipeline(
+            self._config_filepath,
+            memory_profile_dir=self._memory_profile_dir,
+        )
         self._training_pipeline.run()
 
     def on_start_training(self, payload: StartTrainingPayload) -> None:

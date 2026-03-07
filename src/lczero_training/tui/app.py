@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+from datetime import datetime
 from typing import Iterable, Optional
 
 import anyio
@@ -73,6 +74,17 @@ class TrainingTuiApp(App):
             "--logfile",
             help="Path to the log file for saving TUI output",
         )
+        parser.add_argument(
+            "--io-dump",
+            help="Path to file for dumping raw daemon IO for debugging",
+        )
+        parser.add_argument(
+            "--daemon-flag",
+            action="append",
+            default=[],
+            dest="daemon_flags",
+            help="Extra argument to pass to the daemon (repeatable)",
+        )
 
     _log_stream: TextReceiveStream
     _daemon_process: anyio.abc.Process
@@ -104,6 +116,8 @@ class TrainingTuiApp(App):
         # Consume configuration from the args object
         self._config_file: str = args.config
         self._logfile: Optional[str] = args.logfile
+        self._io_dump_file: Optional[str] = args.io_dump
+        self._daemon_flags: list[str] = args.daemon_flags
 
     async def on_load(self) -> None:
         """Start the daemon process and communicator when the app loads."""
@@ -113,7 +127,12 @@ class TrainingTuiApp(App):
             env = {**os.environ, "TF_CPP_MIN_LOG_LEVEL": "0"}
 
         self._daemon_process = await anyio.open_process(
-            [sys.executable, "-m", "lczero_training.commands.daemon"],
+            [
+                sys.executable,
+                "-m",
+                "lczero_training.commands.daemon",
+                *self._daemon_flags,
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -126,10 +145,16 @@ class TrainingTuiApp(App):
 
         # Set up streams and communicator
         self._log_stream = TextReceiveStream(self._daemon_process.stderr)
+        io_dump = None
+        if self._io_dump_file:
+            io_dump = open(self._io_dump_file, "a", buffering=1)
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            io_dump.write(f"======= {ts} =======\n")
         self._communicator = AsyncCommunicator(
             handler=self,
             input_stream=TextReceiveStream(self._daemon_process.stdout),
             output_stream=TextSendStream(self._daemon_process.stdin),
+            io_dump=io_dump,
         )
 
     def compose(self) -> ComposeResult:
