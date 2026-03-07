@@ -66,8 +66,11 @@ mksymlink:
     cd src/lczero_training && ln -sfT ../../build/release/_lczero_training.cpython-*-x86_64-linux-gnu.so _lczero_training.so
 
 # Delete build/release, re-setup, rebuild, and re-link
-rebuild: && setup-build build mksymlink
+rebuild:
     rm -rf build/release
+    just setup-build
+    just build
+    just mksymlink
 
 # Run tests
 test-cpp:
