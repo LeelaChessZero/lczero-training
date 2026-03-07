@@ -4,7 +4,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import jax
 import jax.numpy as jnp
@@ -108,7 +108,7 @@ class _EvaluatingMetric(_Metric, ABC):
             if self.config.use_swa_model
             else jit_state.model_state
         )
-        if self.config.use_swa_model and model_state is None:
+        if model_state is None:
             raise RuntimeError("SWA state not available")
         batch_sample = TrainingSample(
             inputs=jnp.asarray(batch[0]),
@@ -121,7 +121,9 @@ class _EvaluatingMetric(_Metric, ABC):
 _eval_jit_cache: dict[tuple[int, int], Any] = {}
 
 
-def _make_eval_jit(graphdef: nnx.GraphDef, loss_fn: LczeroLoss) -> ...:
+def _make_eval_jit(
+    graphdef: nnx.GraphDef, loss_fn: LczeroLoss
+) -> Callable[[nnx.State, TrainingSample], Dict[str, jax.Array]]:
     key = (id(graphdef), id(loss_fn))
     if key not in _eval_jit_cache:
 
@@ -165,7 +167,7 @@ def evaluate_batch(
     model_state = (
         jit_state.swa_state if use_swa_model else jit_state.model_state
     )
-    if use_swa_model and model_state is None:
+    if model_state is None:
         raise RuntimeError("SWA state not available")
     batch_sample = TrainingSample(
         inputs=jnp.asarray(batch[0]),
