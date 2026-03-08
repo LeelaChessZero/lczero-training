@@ -23,6 +23,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Dump model values.",
     )
+    parser.add_argument(
+        "--weight_paths",
+        action="store_true",
+        help="List all weight paths.",
+    )
     return parser
 
 
@@ -39,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         config_filename=args.config,
         shapes=args.shapes,
         values=args.values,
+        weight_paths=args.weight_paths,
     )
     return 0
 
