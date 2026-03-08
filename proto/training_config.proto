@@ -27,6 +27,9 @@ message OptimizerConfig {
     NadamOptimizerConfig nadam = 2;
     SgdOptimizerConfig sgd = 3;
   }
+  // When set, weights selected by this selector are frozen (no gradient
+  // updates).
+  WeightsSelector freeze_selector = 4;
 }
 
 message LrSchedule {

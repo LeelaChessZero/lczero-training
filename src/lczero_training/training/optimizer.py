@@ -69,4 +69,11 @@ def make_gradient_transformation(
         )
     if max_grad_norm is not None and max_grad_norm > 0:
         tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
+    if config.HasField("freeze_selector"):
+        tx = optax.masked(
+            tx,
+            mask=lambda p: jax.tree.map(
+                lambda x: not x, make_weights_mask(config.freeze_selector, p)
+            ),
+        )
     return tx
