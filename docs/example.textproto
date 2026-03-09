@@ -152,6 +152,12 @@ training {
     # Alternative optimizers:
     # nadam { beta_1: 0.9 beta_2: 0.999 epsilon: 1e-8 }
     # sgd { momentum: 0.9 nesterov: true }
+    # freeze_selector freezes matching weights (they receive no gradient
+    # updates).
+    # freeze_selector {
+    #   rule { match: "**/embedding/**" include: true }
+    #   otherwise_include: false
+    # }
   }
   max_grad_norm: 10.0  # Global gradient-norm clip; omit or set to 0 to disable.
   losses {
