@@ -400,7 +400,7 @@ class ChunkParserInner:
         assert -1.0 <= best_q <= 1.0 and 0.0 <= best_d <= 1.0
         best_q = struct.pack('fff', best_q_w, best_d, best_q_l)
 
-        return (planes, probs, winner, best_q, plies_left)
+        return (planes, probs, winner, best_q, plies_left, hash(planes).to_bytes(8, 'little', signed=True))
 
     def sample_record(self, chunkdata):
         """
@@ -553,7 +553,7 @@ class ChunkParserInner:
                 return
             yield (b''.join([x[0] for x in s]), b''.join([x[1] for x in s]),
                    b''.join([x[2] for x in s]), b''.join([x[3] for x in s]),
-                   b''.join([x[4] for x in s]))
+                   b''.join([x[4] for x in s]), b''.join([x[5] for x in s]))
 
     def parse(self):
         """
