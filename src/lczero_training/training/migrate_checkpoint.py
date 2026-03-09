@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 import jax
 import numpy as np
@@ -288,6 +288,14 @@ def _save_checkpoint(
     )
 
 
+def _dump_paths(paths: Iterable[Tuple[str, ...]], field: str) -> None:
+    def key(p: Tuple[str, ...]) -> tuple:
+        return tuple(int(c) if c.isdigit() else c for c in p)
+
+    for path in sorted(paths, key=key):
+        print(f'rule {{ {field}: "{".".join(path)}" }}')
+
+
 def migrate_checkpoint(
     config: str,
     new_checkpoint: str | None,
@@ -296,6 +304,8 @@ def migrate_checkpoint(
     serialized_model: bool,
     checkpoint_step: int | None,
     new_checkpoint_step: int | None,
+    dump_source_paths: bool = False,
+    dump_destination_paths: bool = False,
 ) -> None:
     """Migrates a checkpoint to a new training state."""
     root_config = root_config_pb2.RootConfig()
@@ -309,6 +319,14 @@ def migrate_checkpoint(
     rules = load_migration_rules(rules_file)
 
     migration = Migration(old_state, new_state)
+
+    if dump_source_paths:
+        _dump_paths(migration.old_paths.keys(), "from_path")
+    if dump_destination_paths:
+        _dump_paths(migration.new_paths.keys(), "to_path")
+    if dump_source_paths or dump_destination_paths:
+        return
+
     migrated_state = migration.run(rules)
 
     if new_checkpoint:

@@ -56,6 +56,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "copying the old step."
         ),
     )
+    parser.add_argument("--dump_source_paths", action="store_true")
+    parser.add_argument("--dump_destination_paths", action="store_true")
     return parser
 
 
@@ -78,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
         serialized_model=args.serialized_model,
         checkpoint_step=args.checkpoint_step,
         new_checkpoint_step=args.new_checkpoint_step,
+        dump_source_paths=args.dump_source_paths,
+        dump_destination_paths=args.dump_destination_paths,
     )
     return 0
 

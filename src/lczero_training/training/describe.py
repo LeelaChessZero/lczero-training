@@ -1,9 +1,11 @@
 import logging
 import sys
+from pathlib import PurePosixPath
 
 import jax
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
+from flax import nnx
 from google.protobuf import text_format
 
 from lczero_training.training.state import TrainingState
@@ -16,6 +18,7 @@ def describe(
     config_filename: str,
     shapes: bool = False,
     values: bool = False,
+    weight_paths: bool = False,
 ) -> None:
     config = RootConfig()
     logger.info("Reading configuration from proto file")
@@ -56,3 +59,19 @@ def describe(
         shapes = jax.tree.map(jnp.shape, training_state)
         print("Training state shapes:")
         print(shapes)
+
+    if weight_paths:
+        paths = []
+
+        def _collect(path: tuple[object, ...], _: nnx.Variable) -> bool:
+            paths.append(str(PurePosixPath(*map(str, path))))
+            return False
+
+        nnx.map_state(_collect, training_state.jit_state.model_state)
+        for p in sorted(
+            paths,
+            key=lambda p: tuple(
+                int(c) if c.isdigit() else c for c in p.split("/")
+            ),
+        ):
+            print(p)
