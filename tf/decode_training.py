@@ -293,10 +293,11 @@ class Board:
 
 
 class TrainingStep:
-    def __init__(self, version):
+    def __init__(self, version, input_format=1):
         self.version = version
         # Construct a fake parser just to get access to it's variables
         self.parser = chunkparser.ChunkParser(chunkparser.ChunkDataSrc([]),
+                                              expected_input_format=input_format,
                                               workers=1)
         self.NUM_HIST = 8
         self.NUM_PIECE_TYPES = 6

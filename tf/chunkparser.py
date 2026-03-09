@@ -125,7 +125,6 @@ class ChunkParser:
                  expected_input_format,
                  shuffle_size=1,
                  sample=1,
-                 buffer_size=1,
                  batch_size=256,
                  diff_focus_min=1,
                  diff_focus_slope=0,
@@ -167,6 +166,7 @@ class ChunkParserInner:
 
         'parent' the outer chunk parser to store processes. Must not be stored by self directly or indirectly.
         'chunks' list of chunk filenames.
+        'expected_input_format' is an int, one of [1, 2, 3]. Determines the middle planes in convert_v5_to_tuple
         'shuffle_size' is the size of the shuffle buffer.
         'sample' is the rate to down-sample.
         'diff_focus_min', 'diff_focus_slope', 'diff_focus_q_weight' and 'diff_focus_pol_scale' control diff focus
@@ -180,7 +180,7 @@ class ChunkParserInner:
         chunkdata: type Bytes. Multiple records of v6 format where each record
         consists of (state, policy, result, q)
 
-        raw: A byte string holding raw tensors contenated together. This is
+        raw: A byte string holding raw tensors concatenated together. This is
         used to pass data from the workers to the parent. Exists because
         TensorFlow doesn't have a fast way to unpack bit vectors. 7950 bytes
         long.
