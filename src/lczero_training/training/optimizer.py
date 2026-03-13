@@ -31,14 +31,14 @@ def update_optimizer_step(
     )
 
     # Verify no count fields were missed due to unknown wrapper types.
-    def find_unexpected_counts(x: object) -> bool:
+    def has_unexpected_count(x: object) -> bool:
         return (
-            hasattr(x, "count")
-            and hasattr(x, "_replace")
+            hasattr(x, "_fields")
+            and "count" in x._fields
             and not isinstance(x, _STATES_WITH_COUNT)
         )
 
-    unexpected = jax.tree.leaves(result, is_leaf=find_unexpected_counts)
+    unexpected = jax.tree.leaves(result, is_leaf=has_unexpected_count)
     assert not unexpected, (
         f"Unexpected state type(s) with 'count' field: "
         f"{[type(x).__name__ for x in unexpected]}"
