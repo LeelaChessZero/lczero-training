@@ -8,6 +8,11 @@ from flax import nnx
 from lczero_training.training.utils import make_weights_mask
 from proto.training_config_pb2 import OptimizerConfig
 
+_STATES_WITH_COUNT = (
+    optax.ScaleByAdamState,
+    optax.ScaleByScheduleState,
+)
+
 
 def update_optimizer_step(
     opt_state: optax.OptState, step: int
@@ -15,20 +20,31 @@ def update_optimizer_step(
     """Updates all step counters in the optimizer state tree."""
     step_array = jnp.array(step, dtype=jnp.int32)
 
-    def update_count(x: optax.OptState) -> optax.OptState:
-        if isinstance(
-            x,
-            (
-                optax.ScaleByAdamState,
-                optax.ScaleByScheduleState,
-            ),
-        ):
-            return x._replace(count=step_array)
-        return x
+    def is_known_state(x: object) -> bool:
+        return isinstance(x, _STATES_WITH_COUNT)
 
-    return jax.tree_util.tree_map(
-        update_count, opt_state, is_leaf=lambda x: hasattr(x, "_replace")
+    def update_count(x: optax.OptState) -> optax.OptState:
+        return x._replace(count=step_array)
+
+    result = jax.tree_util.tree_map(
+        update_count, opt_state, is_leaf=is_known_state
     )
+
+    # Verify no count fields were missed due to unknown wrapper types.
+    def find_unexpected_counts(x: object) -> bool:
+        return (
+            hasattr(x, "count")
+            and hasattr(x, "_replace")
+            and not isinstance(x, _STATES_WITH_COUNT)
+        )
+
+    unexpected = jax.tree.leaves(result, is_leaf=find_unexpected_counts)
+    assert not unexpected, (
+        f"Unexpected state type(s) with 'count' field: "
+        f"{[type(x).__name__ for x in unexpected]}"
+    )
+
+    return result
 
 
 def make_gradient_transformation(
