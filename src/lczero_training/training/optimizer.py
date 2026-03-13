@@ -20,31 +20,18 @@ def update_optimizer_step(
     """Updates all step counters in the optimizer state tree."""
     step_array = jnp.array(step, dtype=jnp.int32)
 
-    def is_known_state(x: object) -> bool:
-        return isinstance(x, _STATES_WITH_COUNT)
+    def has_count(x: object) -> bool:
+        return hasattr(x, "_fields") and "count" in x._fields
 
     def update_count(x: optax.OptState) -> optax.OptState:
+        if not has_count(x):
+            return x
+        assert isinstance(x, _STATES_WITH_COUNT), (
+            f"Unexpected state type with 'count' field: {type(x).__name__}"
+        )
         return x._replace(count=step_array)
 
-    result = jax.tree_util.tree_map(
-        update_count, opt_state, is_leaf=is_known_state
-    )
-
-    # Verify no count fields were missed due to unknown wrapper types.
-    def has_unexpected_count(x: object) -> bool:
-        return (
-            hasattr(x, "_fields")
-            and "count" in x._fields
-            and not isinstance(x, _STATES_WITH_COUNT)
-        )
-
-    unexpected = jax.tree.leaves(result, is_leaf=has_unexpected_count)
-    assert not unexpected, (
-        f"Unexpected state type(s) with 'count' field: "
-        f"{[type(x).__name__ for x in unexpected]}"
-    )
-
-    return result
+    return jax.tree_util.tree_map(update_count, opt_state, is_leaf=has_count)
 
 
 def make_gradient_transformation(
