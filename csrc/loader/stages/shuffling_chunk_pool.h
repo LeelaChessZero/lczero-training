@@ -62,13 +62,14 @@ class ShufflingChunkPool : public Stage {
   };
 
   struct ChunkSourceItem {
+    mutable absl::Mutex mutex;
     size_t start_chunk_index;
     std::unique_ptr<ChunkSource> source;
-    absl::flat_hash_set<size_t> dropped_chunks;
+    absl::flat_hash_set<size_t> dropped_chunks ABSL_GUARDED_BY(mutex);
     // Per-chunk counters and cached weights.
-    std::vector<uint16_t> use_counts;
-    std::vector<float> weight;
-    std::vector<std::unique_ptr<CacheNode>> cache;
+    std::vector<uint16_t> use_counts ABSL_GUARDED_BY(mutex);
+    std::vector<float> weight ABSL_GUARDED_BY(mutex);
+    std::vector<std::unique_ptr<CacheNode>> cache ABSL_GUARDED_BY(mutex);
   };
 
   struct SourceIngestionThreadContext {
@@ -93,20 +94,16 @@ class ShufflingChunkPool : public Stage {
   void CachingWorker(std::stop_token stop_token, CachingThreadContext* context);
   void AddNewChunkSource(std::unique_ptr<ChunkSource> source)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  std::optional<std::variant<TrainingChunk, FrameType>> GetNextChunkData()
-      ABSL_LOCKS_EXCLUDED(chunk_sources_mutex_);
+  std::optional<std::variant<TrainingChunk, FrameType>> GetNextChunkData();
 
   enum class ChunkStatus { kOk, kRetry, kEnd };
   struct ChunkData;
 
-  ChunkStatus GetChunkInfo(ChunkData& out_chunk_data)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  bool LoadChunkData(ChunkData& chunk_data)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  bool HanseAccept(ChunkData& chunk_data)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_);
-  float ComputeChunkWeight(absl::Span<const FrameType> frames);
-  double ComputeHanseProbability(float weight);
+  ChunkStatus GetChunkInfo(ChunkData& out_chunk_data);
+  bool LoadChunkData(ChunkData& chunk_data);
+  bool HanseAccept(ChunkData& chunk_data);
+  float ComputeChunkWeight(absl::Span<const FrameType> frames) const;
+  double ComputeHanseProbability(float weight, float max_weight) const;
 
   Queue<ChunkSourceWithPhase>* primary_input_queue_ = nullptr;
   Queue<CacheRequest>* cache_request_queue_ = nullptr;
@@ -126,7 +123,7 @@ class ShufflingChunkPool : public Stage {
   std::atomic<int64_t> dropped_chunks_metric_{0};
 
   absl::Mutex chunk_sources_mutex_;
-  std::deque<ChunkSourceItem> chunk_sources_
+  std::deque<std::shared_ptr<ChunkSourceItem>> chunk_sources_
       ABSL_GUARDED_BY(chunk_sources_mutex_);
   StreamShuffler stream_shuffler_ ABSL_GUARDED_BY(chunk_sources_mutex_);
   float max_weight_ ABSL_GUARDED_BY(chunk_sources_mutex_) = 0.0f;

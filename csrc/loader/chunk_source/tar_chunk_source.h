@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sys/types.h>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -26,13 +28,16 @@ class TarChunkSource : public ChunkSource {
   // Performs one-time indexing during construction. Not part of the interface.
   void Index();
   struct FileEntry {
-    long int offset;
-    long int size;
+    off_t offset;
+    size_t size;
     bool is_gzip;
   };
 
-  FILE* file_ = nullptr;
+  void Close();
+
+  int fd_ = -1;
   std::vector<FileEntry> files_;
+  std::filesystem::path path_;
   std::string filename_;
   ChunkSourceLoaderConfig::FrameFormat frame_format_;
 };

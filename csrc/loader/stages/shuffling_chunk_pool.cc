@@ -265,22 +265,22 @@ void ShufflingChunkPool::ProcessInputFiles(
     std::for_each(uninitialized_sources.rbegin(), uninitialized_sources.rend(),
                   [this, &start_chunk_index](auto& source) {
                     const size_t count = source->GetChunkCount();
-                    chunk_sources_.push_back(
-                        {.start_chunk_index = start_chunk_index,
-                         .source = std::move(source),
-                         .dropped_chunks = {},
-                         .use_counts = std::vector<uint16_t>(count, 0),
-                         .weight = std::vector<float>(count, -1.0f),
-                         .cache = std::vector<std::unique_ptr<CacheNode>>(
-                             cachehit_output_queue_.has_value() ? count : 0)});
+                    auto item = std::make_shared<ChunkSourceItem>();
+                    item->start_chunk_index = start_chunk_index;
+                    item->source = std::move(source);
+                    item->use_counts = std::vector<uint16_t>(count, 0);
+                    item->weight = std::vector<float>(count, -1.0f);
+                    item->cache = std::vector<std::unique_ptr<CacheNode>>(
+                        cachehit_output_queue_.has_value() ? count : 0);
+                    chunk_sources_.push_back(std::move(item));
                     start_chunk_index +=
-                        chunk_sources_.back().source->GetChunkCount();
+                        chunk_sources_.back()->source->GetChunkCount();
                   });
 
     // Initialize stream shuffler with the initial bounds.
     if (!chunk_sources_.empty()) {
-      size_t total_chunks = chunk_sources_.back().start_chunk_index +
-                            chunk_sources_.back().source->GetChunkCount();
+      size_t total_chunks = chunk_sources_.back()->start_chunk_index +
+                            chunk_sources_.back()->source->GetChunkCount();
       // Set bounds to provide the last chunk_pool_size_ chunks.
       size_t lower_bound =
           total_chunks > chunk_pool_size_ ? total_chunks - chunk_pool_size_ : 0;
@@ -301,10 +301,10 @@ void ShufflingChunkPool::ProcessInputFiles(
     LOG(INFO) << "Current anchor: '" << anchor_ << "'";
 
     absl::MutexLock sources_lock(&chunk_sources_mutex_);
-    std::vector<const ChunkSourceItem*> sources_after_anchor;
+    std::vector<std::shared_ptr<ChunkSourceItem>> sources_after_anchor;
     for (const auto& item : chunk_sources_) {
-      if (item.source->GetChunkSortKey() > anchor_) {
-        sources_after_anchor.push_back(&item);
+      if (item->source->GetChunkSortKey() > anchor_) {
+        sources_after_anchor.push_back(item);
       }
     }
 
@@ -401,37 +401,44 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
         return cache_request_queue_->Get(stop_token);
       }();
 
-      absl::MutexLock lock(&chunk_sources_mutex_);
+      std::shared_ptr<ChunkSourceItem> source_item;
+      float max_weight = 0.0f;
+      size_t local_index = 0;
+      {
+        absl::MutexLock lock(&chunk_sources_mutex_);
 
-      // Find the chunk source containing this global index.
-      auto it = absl::c_lower_bound(
-          chunk_sources_, cache_request.global_index,
-          [](const auto& source_item, size_t chunk_idx) {
-            return source_item.start_chunk_index +
-                       source_item.source->GetChunkCount() <=
-                   chunk_idx;
-          });
+        // Find the chunk source containing this global index.
+        auto it = absl::c_lower_bound(
+            chunk_sources_, cache_request.global_index,
+            [](const auto& item, size_t chunk_idx) {
+              return item->start_chunk_index + item->source->GetChunkCount() <=
+                     chunk_idx;
+            });
 
-      if (it == chunk_sources_.end() ||
-          cache_request.global_index < it->start_chunk_index) {
-        chunk_source_not_found_.fetch_add(1, std::memory_order_acq_rel);
-        continue;
+        if (it == chunk_sources_.end() ||
+            cache_request.global_index < (*it)->start_chunk_index) {
+          chunk_source_not_found_.fetch_add(1, std::memory_order_acq_rel);
+          continue;
+        }
+
+        source_item = *it;
+        max_weight = max_weight_;
+        local_index = cache_request.global_index - source_item->start_chunk_index;
       }
 
-      const size_t local_index =
-          cache_request.global_index - it->start_chunk_index;
-      assert(local_index < it->use_counts.size());
+      absl::MutexLock item_lock(&source_item->mutex);
+      assert(local_index < source_item->use_counts.size());
 
       // Check use_count match.
-      if (it->use_counts[local_index] != cache_request.next_use) {
+      if (source_item->use_counts[local_index] != cache_request.next_use) {
         mismatched_use_counts_.fetch_add(1, std::memory_order_acq_rel);
         continue;
       }
 
       // Compute how many positions to cache.
-      const float weight = it->weight[local_index];
+      const float weight = source_item->weight[local_index];
       assert(weight >= 0.0f);
-      const double probability = ComputeHanseProbability(weight);
+      const double probability = ComputeHanseProbability(weight, max_weight);
       exponential_avg_probability =
           exponential_avg_probability * (1.0 - kTheta) + probability * kTheta;
       const double n = (probability * config_.position_cache_size() /
@@ -440,7 +447,7 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
       reminder = n - std::floor(n);
       const size_t positions_to_cache = static_cast<size_t>(std::floor(n));
       // Traverse and extend the cache chain.
-      std::unique_ptr<CacheNode>* current = &it->cache[local_index];
+      std::unique_ptr<CacheNode>* current = &source_item->cache[local_index];
       for (size_t i = 0; i < positions_to_cache; ++i) {
         if (*current) {
           current = &(*current)->next;
@@ -474,33 +481,29 @@ struct ShufflingChunkPool::ChunkData {
   size_t local_index = 0;
   size_t global_index = 0;
   uint32_t use_count = 0;
-  ChunkSourceItem* source_item = nullptr;
+  std::shared_ptr<ChunkSourceItem> source_item;
 };
 
 std::optional<std::variant<TrainingChunk, FrameType>>
 ShufflingChunkPool::GetNextChunkData() {
   while (true) {
     ChunkData chunk_data;
-    ChunkStatus status;
+    const ChunkStatus status = GetChunkInfo(chunk_data);
+    if (status == ChunkStatus::kEnd) return std::nullopt;
+    if (status == ChunkStatus::kRetry) continue;
+
+    const bool hanse_enabled = config_.hanse_sampling_threshold() > 0;
+    if (hanse_enabled && !HanseAccept(chunk_data)) continue;
+
     {
-      absl::MutexLock lock(&chunk_sources_mutex_);
-      status = GetChunkInfo(chunk_data);
-      if (status == ChunkStatus::kEnd) return std::nullopt;
-      if (status == ChunkStatus::kRetry) continue;
+      absl::MutexLock lock(&chunk_data.source_item->mutex);
 
-      const bool hanse_enabled = config_.hanse_sampling_threshold() > 0;
-      if (hanse_enabled && !HanseAccept(chunk_data)) continue;
-
-      // Increment use_count for this chunk.
-      assert(chunk_data.source_item->use_counts.size() >
-             chunk_data.local_index);
+      assert(chunk_data.source_item->use_counts.size() > chunk_data.local_index);
       chunk_data.use_count =
           chunk_data.source_item->use_counts[chunk_data.local_index]++;
 
-      // Check cache if configured.
       if (cachehit_output_queue_.has_value()) {
-        auto& cache_chain =
-            chunk_data.source_item->cache[chunk_data.local_index];
+        auto& cache_chain = chunk_data.source_item->cache[chunk_data.local_index];
         if (cache_chain) {
           cache_hits_.fetch_add(1, std::memory_order_acq_rel);
           cached_positions_.fetch_sub(1, std::memory_order_acq_rel);
@@ -510,11 +513,9 @@ ShufflingChunkPool::GetNextChunkData() {
         }
         cache_misses_.fetch_add(1, std::memory_order_acq_rel);
       }
-
-      if (chunk_data.data.empty()) {
-        if (!LoadChunkData(chunk_data)) continue;
-      }
     }
+
+    if (chunk_data.data.empty() && !LoadChunkData(chunk_data)) continue;
 
     TrainingChunk chunk;
     chunk.sort_key = std::move(chunk_data.sort_key);
@@ -532,6 +533,7 @@ bool ShufflingChunkPool::LoadChunkData(ChunkData& chunk_data) {
       chunk_data.source_item->source->GetChunkData(chunk_data.local_index);
 
   if (!data || data->empty()) {
+    absl::MutexLock lock(&chunk_data.source_item->mutex);
     chunk_data.source_item->dropped_chunks.insert(chunk_data.local_index);
     dropped_chunks_metric_.fetch_add(1, std::memory_order_acq_rel);
     return false;
@@ -543,55 +545,64 @@ bool ShufflingChunkPool::LoadChunkData(ChunkData& chunk_data) {
 
 ShufflingChunkPool::ChunkStatus ShufflingChunkPool::GetChunkInfo(
     ChunkData& out_chunk_data) {
-  std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
+  std::shared_ptr<ChunkSourceItem> source_item;
+  {
+    absl::MutexLock lock(&chunk_sources_mutex_);
+    std::optional<size_t> chunk_index = stream_shuffler_.GetNextItem();
 
-  if (!chunk_index && !chunk_sources_.empty()) {
-    size_t total_chunks = chunk_sources_.back().start_chunk_index +
-                          chunk_sources_.back().source->GetChunkCount();
-    size_t lower_bound = total_chunks > chunk_pool_size_
-                             ? total_chunks - chunk_pool_size_
-                             : chunk_sources_.front().start_chunk_index;
-    stream_shuffler_.Reset(lower_bound, total_chunks);
-    reshuffles_.fetch_add(1, std::memory_order_acq_rel);
-    chunk_index = stream_shuffler_.GetNextItem();
+    if (!chunk_index && !chunk_sources_.empty()) {
+      size_t total_chunks = chunk_sources_.back()->start_chunk_index +
+                            chunk_sources_.back()->source->GetChunkCount();
+      size_t lower_bound = total_chunks > chunk_pool_size_
+                               ? total_chunks - chunk_pool_size_
+                               : chunk_sources_.front()->start_chunk_index;
+      stream_shuffler_.Reset(lower_bound, total_chunks);
+      reshuffles_.fetch_add(1, std::memory_order_acq_rel);
+      chunk_index = stream_shuffler_.GetNextItem();
+    }
+
+    if (!chunk_index) return ChunkStatus::kEnd;
+
+    auto it =
+        absl::c_lower_bound(chunk_sources_, *chunk_index,
+                            [](const auto& item, size_t chunk_idx) {
+                              return item->start_chunk_index +
+                                         item->source->GetChunkCount() <=
+                                     chunk_idx;
+                            });
+
+    if (ABSL_PREDICT_FALSE(it == chunk_sources_.end() ||
+                           *chunk_index < (*it)->start_chunk_index)) {
+      LOG(WARNING) << "Chunk index " << *chunk_index
+                   << " out of range for available chunk sources.";
+      return ChunkStatus::kRetry;
+    }
+
+    source_item = *it;
+    out_chunk_data.local_index = *chunk_index - source_item->start_chunk_index;
+    out_chunk_data.sort_key = source_item->source->GetChunkSortKey();
+    out_chunk_data.global_index = *chunk_index;
   }
 
-  if (!chunk_index) return ChunkStatus::kEnd;
-
-  auto it =
-      absl::c_lower_bound(chunk_sources_, *chunk_index,
-                          [](const auto& source_item, size_t chunk_idx) {
-                            return source_item.start_chunk_index +
-                                       source_item.source->GetChunkCount() <=
-                                   chunk_idx;
-                          });
-
-  if (ABSL_PREDICT_FALSE(it == chunk_sources_.end() ||
-                         *chunk_index < it->start_chunk_index)) {
-    LOG(WARNING) << "Chunk index " << *chunk_index
-                 << " out of range for available chunk sources.";
-    return ChunkStatus::kRetry;
+  {
+    absl::MutexLock lock(&source_item->mutex);
+    if (source_item->dropped_chunks.contains(out_chunk_data.local_index)) {
+      return ChunkStatus::kRetry;
+    }
   }
 
-  out_chunk_data.local_index = *chunk_index - it->start_chunk_index;
-  if (it->dropped_chunks.contains(out_chunk_data.local_index)) {
-    return ChunkStatus::kRetry;
-  }
-
-  out_chunk_data.source_item = &(*it);
-  out_chunk_data.sort_key = it->source->GetChunkSortKey();
-  out_chunk_data.global_index = *chunk_index;
-
+  out_chunk_data.source_item = std::move(source_item);
   return ChunkStatus::kOk;
 }
 
-double ShufflingChunkPool::ComputeHanseProbability(float weight) {
-  if (max_weight_ <= 0.0f) return 1.0;
-  return std::pow(weight / max_weight_, config_.hanse_sampling_gamma());
+double ShufflingChunkPool::ComputeHanseProbability(float weight,
+                                                   float max_weight) const {
+  if (max_weight <= 0.0f) return 1.0;
+  return std::pow(weight / max_weight, config_.hanse_sampling_gamma());
 }
 
 float ShufflingChunkPool::ComputeChunkWeight(
-    absl::Span<const FrameType> frames) {
+    absl::Span<const FrameType> frames) const {
   return absl::c_accumulate(frames, 0.0f, [this](float sum, const auto& frame) {
     return sum +
            ComputePositionSamplingWeight(frame, config_.position_sampling());
@@ -600,21 +611,42 @@ float ShufflingChunkPool::ComputeChunkWeight(
 
 bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
   assert(chunk_data.source_item);
-  assert(chunk_data.source_item->weight.size() > chunk_data.local_index);
+  float weight = -1.0f;
+  {
+    absl::MutexLock lock(&chunk_data.source_item->mutex);
+    assert(chunk_data.source_item->weight.size() > chunk_data.local_index);
+    weight = chunk_data.source_item->weight[chunk_data.local_index];
+  }
 
-  if (chunk_data.source_item->weight[chunk_data.local_index] < 0.0f) {
+  if (weight < 0.0f) {
+    if (chunk_data.data.empty() && !LoadChunkData(chunk_data)) return false;
+    weight = ComputeChunkWeight(chunk_data.data);
+    {
+      absl::MutexLock pool_lock(&chunk_sources_mutex_);
+      max_weight_ = std::max(max_weight_, weight);
+      AddSample(chunk_weight_stats_, static_cast<double>(weight));
+    }
+    {
+      absl::MutexLock lock(&chunk_data.source_item->mutex);
+      const float cached_weight =
+          chunk_data.source_item->weight[chunk_data.local_index];
+      if (cached_weight < 0.0f) {
+        chunk_data.source_item->weight[chunk_data.local_index] = weight;
+      } else {
+        weight = cached_weight;
+      }
+    }
     hanse_cache_misses_.fetch_add(1, std::memory_order_acq_rel);
-    if (!LoadChunkData(chunk_data)) return false;
-    const float weight = ComputeChunkWeight(chunk_data.data);
-    chunk_data.source_item->weight[chunk_data.local_index] = weight;
-    max_weight_ = std::max(max_weight_, weight);
-    AddSample(chunk_weight_stats_, static_cast<double>(weight));
   } else {
     hanse_cache_hits_.fetch_add(1, std::memory_order_acq_rel);
   }
 
-  const double p = ComputeHanseProbability(
-      chunk_data.source_item->weight[chunk_data.local_index]);
+  float max_weight = 0.0f;
+  {
+    absl::MutexLock lock(&chunk_sources_mutex_);
+    max_weight = max_weight_;
+  }
+  const double p = ComputeHanseProbability(weight, max_weight);
   const double u = absl::Uniform<double>(bitgen_, 0.0, 1.0);
   if (u >= p) {
     hanse_rejected_.fetch_add(1, std::memory_order_acq_rel);
@@ -630,27 +662,29 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
   if (!chunk_sources_.empty()) {
     const auto& last_source = chunk_sources_.back();
     old_upper_bound =
-        last_source.start_chunk_index + last_source.source->GetChunkCount();
+        last_source->start_chunk_index + last_source->source->GetChunkCount();
   }
 
   size_t count = source->GetChunkCount();
-  chunk_sources_.push_back(
-      {.start_chunk_index = old_upper_bound,
-       .source = std::move(source),
-       .dropped_chunks = {},
-       .use_counts = std::vector<uint16_t>(count, 0),
-       .weight = std::vector<float>(count, -1.0f),
-       .cache = std::vector<std::unique_ptr<CacheNode>>(
-           cachehit_output_queue_.has_value() ? count : 0)});
+  auto item = std::make_shared<ChunkSourceItem>();
+  item->start_chunk_index = old_upper_bound;
+  item->source = std::move(source);
+  item->use_counts = std::vector<uint16_t>(count, 0);
+  item->weight = std::vector<float>(count, -1.0f);
+  item->cache =
+      std::vector<std::unique_ptr<CacheNode>>(cachehit_output_queue_.has_value()
+                                                  ? count
+                                                  : 0);
+  chunk_sources_.push_back(std::move(item));
 
   // Calculate current window bounds.
-  size_t new_upper_bound = chunk_sources_.back().start_chunk_index +
-                           chunk_sources_.back().source->GetChunkCount();
+  size_t new_upper_bound = chunk_sources_.back()->start_chunk_index +
+                           chunk_sources_.back()->source->GetChunkCount();
 
   // Remove old chunks if window exceeds chunk_pool_size_.
   while (!chunk_sources_.empty() && chunk_sources_.size() > 1) {
-    size_t window_start = chunk_sources_.front().start_chunk_index +
-                          chunk_sources_.front().source->GetChunkCount();
+    size_t window_start = chunk_sources_.front()->start_chunk_index +
+                          chunk_sources_.front()->source->GetChunkCount();
     size_t window_size = new_upper_bound - window_start;
 
     if (window_size < chunk_pool_size_) break;
@@ -658,7 +692,8 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
     // Count cached positions in the evicted source.
     if (cachehit_output_queue_.has_value()) {
       size_t evicted_cached = 0;
-      for (const auto& cache_chain : chunk_sources_.front().cache) {
+      absl::MutexLock item_lock(&chunk_sources_.front()->mutex);
+      for (const auto& cache_chain : chunk_sources_.front()->cache) {
         const CacheNode* node = cache_chain.get();
         while (node) {
           ++evicted_cached;
@@ -673,7 +708,7 @@ void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
   }
 
   // Update stream shuffler bounds with the sliding window.
-  size_t window_start = chunk_sources_.front().start_chunk_index;
+  size_t window_start = chunk_sources_.front()->start_chunk_index;
   size_t new_lower_bound = new_upper_bound > chunk_pool_size_
                                ? new_upper_bound - chunk_pool_size_
                                : window_start;
@@ -712,8 +747,8 @@ StageMetricProto ShufflingChunkPool::FlushMetrics() {
     if (!chunk_sources_.empty()) {
       const auto& first = chunk_sources_.front();
       const auto& last = chunk_sources_.back();
-      upper = last.start_chunk_index + last.source->GetChunkCount();
-      current = upper - first.start_chunk_index;
+      upper = last->start_chunk_index + last->source->GetChunkCount();
+      current = upper - first->start_chunk_index;
     }
 
     auto* current_chunks_metric = stage_metric.add_gauge_metrics();
@@ -832,7 +867,7 @@ std::pair<std::string, int> ShufflingChunkPool::ResetAnchor() {
     return {anchor_, previous_count};
   }
 
-  anchor_ = chunk_sources_.back().source->GetChunkSortKey();
+  anchor_ = chunk_sources_.back()->source->GetChunkSortKey();
   int previous_count = chunks_since_anchor_.exchange(0);
   return {anchor_, previous_count};
 }
