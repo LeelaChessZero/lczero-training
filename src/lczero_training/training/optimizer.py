@@ -3,9 +3,15 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
+from flax import nnx
 
 from lczero_training.training.utils import make_weights_mask
 from proto.training_config_pb2 import OptimizerConfig
+
+_STATES_WITH_COUNT = (
+    optax.ScaleByAdamState,
+    optax.ScaleByScheduleState,
+)
 
 
 def update_optimizer_step(
@@ -14,20 +20,18 @@ def update_optimizer_step(
     """Updates all step counters in the optimizer state tree."""
     step_array = jnp.array(step, dtype=jnp.int32)
 
-    def update_count(x: optax.OptState) -> optax.OptState:
-        if isinstance(
-            x,
-            (
-                optax.ScaleByAdamState,
-                optax.ScaleByScheduleState,
-            ),
-        ):
-            return x._replace(count=step_array)
-        return x
+    def has_count(x: object) -> bool:
+        return hasattr(x, "_fields") and "count" in x._fields
 
-    return jax.tree_util.tree_map(
-        update_count, opt_state, is_leaf=lambda x: hasattr(x, "_replace")
-    )
+    def update_count(x: optax.OptState) -> optax.OptState:
+        if not has_count(x):
+            return x
+        assert isinstance(x, _STATES_WITH_COUNT), (
+            f"Unexpected state type with 'count' field: {type(x).__name__}"
+        )
+        return x._replace(count=step_array)
+
+    return jax.tree_util.tree_map(update_count, opt_state, is_leaf=has_count)
 
 
 def make_gradient_transformation(
@@ -70,10 +74,13 @@ def make_gradient_transformation(
     if max_grad_norm is not None and max_grad_norm > 0:
         tx = optax.chain(optax.clip_by_global_norm(max_grad_norm), tx)
     if config.HasField("freeze_selector"):
-        tx = optax.masked(
-            tx,
-            mask=lambda p: jax.tree.map(
-                lambda x: not x, make_weights_mask(config.freeze_selector, p)
-            ),
+        freeze_mask = partial(make_weights_mask, config.freeze_selector)
+
+        def trainable_mask(p: nnx.State) -> nnx.State:
+            return jax.tree.map(lambda x: not x, freeze_mask(p))
+
+        tx = optax.chain(
+            optax.masked(tx, trainable_mask),
+            optax.masked(optax.set_to_zero(), freeze_mask),
         )
     return tx
