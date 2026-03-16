@@ -304,6 +304,7 @@ class Training:
         if self._dp_sharding is not None:
             replicated = jshard.NamedSharding(self._dp_sharding.mesh, P())
             jit_state = jax.device_put(jit_state, replicated)
+        batch = self._validate_and_prepare_batch(next(datagen))
         for local_step in range(num_steps):
             logger.info(f"Starting step {jit_state.step}")
             if memory_profile_dir is not None:
@@ -312,10 +313,12 @@ class Training:
                     f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                     f"_before_{int(jit_state.step)}.prof"
                 )
-            batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
                 self.optimizer_tx, jit_state, batch
             )
+            next_batch = None
+            if local_step + 1 < num_steps:
+                next_batch = self._validate_and_prepare_batch(next(datagen))
             step_value = int(
                 np.asarray(jax.device_get(jit_state.step)).reshape(())
             )
@@ -326,4 +329,6 @@ class Training:
                 step_hook, step_value, local_step, num_steps, metrics, jit_state
             )
             self._log_step_metrics(step_value, local_step, num_steps, metrics)
+            if next_batch is not None:
+                batch = next_batch
         return jit_state
