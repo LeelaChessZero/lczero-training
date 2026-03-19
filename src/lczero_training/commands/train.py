@@ -99,6 +99,7 @@ def train(config_filename: str) -> None:
             min_version="0.28",
             num_heads=training_state.num_heads,
             license=None,
+            training_steps=new_state.step,
         )
         export_state = (
             new_state.swa_state
