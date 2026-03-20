@@ -7,11 +7,9 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
-#include <limits>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -52,24 +50,12 @@ uint64_t ParseOctal(const std::array<uint8_t, 12>& octal) {
 }
 
 bool ReadExact(int fd, off_t offset, void* buffer, size_t size) {
-  if (offset < 0) return false;
-  if (size > static_cast<size_t>(std::numeric_limits<ssize_t>::max())) {
-    return false;
-  }
   char* out = static_cast<char*>(buffer);
   size_t read_total = 0;
   while (read_total < size) {
-    if (offset > std::numeric_limits<off_t>::max() -
-                     static_cast<off_t>(read_total)) {
-      return false;
-    }
     const ssize_t read_now =
         pread(fd, out + read_total, size - read_total, offset + read_total);
-    if (read_now < 0) {
-      if (errno == EINTR) continue;
-      return false;
-    }
-    if (read_now == 0) return false;
+    if (read_now <= 0) return false;
     read_total += static_cast<size_t>(read_now);
   }
   return true;
@@ -154,12 +140,10 @@ TarChunkSource::TarChunkSource(
 TarChunkSource::~TarChunkSource() { Close(); }
 
 void TarChunkSource::Close() {
-  if (fd_ >= 0) {
-    if (close(fd_) != 0) {
-      PLOG(WARNING) << "Failed to close tar file descriptor for " << path_;
-    }
-    fd_ = -1;
+  if (fd_ >= 0 && close(fd_) != 0) {
+    PLOG(WARNING) << "Failed to close tar file descriptor for " << path_;
   }
+  fd_ = -1;
 }
 
 std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
@@ -193,18 +177,8 @@ void TarChunkSource::Index() {
     const std::filesystem::path filepath = std::filesystem::path(fname);
     const off_t file_offset = offset;
     const size_t size = ParseOctal(header.size);
-    const uint64_t padded_size =
-        ((static_cast<uint64_t>(size) + 511) / 512) * 512;
-    if (padded_size > static_cast<uint64_t>(std::numeric_limits<off_t>::max()) ||
-        file_offset > std::numeric_limits<off_t>::max() -
-                          static_cast<off_t>(padded_size)) {
-      LOG(WARNING) << "Truncated tar file at " << fname
-                   << ", expected size: " << size
-                   << ", actual size: 0";
-      break;
-    }
-    const off_t new_offset = file_offset + static_cast<off_t>(padded_size);
-    offset = new_offset;
+    const size_t padded_size = ((size + 511) / 512) * 512;
+    offset = file_offset + static_cast<off_t>(padded_size);
 
     if (filepath.filename() == "LICENSE") continue;
     files_.push_back({file_offset, size, filepath.extension() == ".gz"});
