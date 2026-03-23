@@ -8,7 +8,10 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
+#include <fcntl.h>
 #include <stdexcept>
+#include <unistd.h>
 
 #include "trainingdata/trainingdata_v6.h"
 #include "utils/gz.h"
@@ -46,13 +49,21 @@ uint64_t ParseOctal(const std::array<uint8_t, 12>& octal) {
   return value;
 }
 
-std::optional<std::string> ReadGzipPrefix(FILE* file, long int offset,
-                                          long int size, size_t max_bytes) {
-  if (max_bytes == 0) return std::string();
-
-  if (fseek(file, offset, SEEK_SET) != 0) {
-    return std::nullopt;
+bool ReadExact(int fd, off_t offset, void* buffer, size_t size) {
+  char* out = static_cast<char*>(buffer);
+  size_t read_total = 0;
+  while (read_total < size) {
+    const ssize_t read_now =
+        pread(fd, out + read_total, size - read_total, offset + read_total);
+    if (read_now <= 0) return false;
+    read_total += static_cast<size_t>(read_now);
   }
+  return true;
+}
+
+std::optional<std::string> ReadGzipPrefix(int fd, off_t offset, size_t size,
+                                          size_t max_bytes) {
+  if (max_bytes == 0) return std::string();
 
   z_stream strm = {};
   if (inflateInit2(&strm, 16 + MAX_WBITS) != Z_OK) {
@@ -66,21 +77,21 @@ std::optional<std::string> ReadGzipPrefix(FILE* file, long int offset,
   std::string output;
   output.reserve(std::min<size_t>(max_bytes, kChunkSize));
 
-  long int remaining = size;
+  size_t remaining = size;
+  off_t current_offset = offset;
   bool finished = false;
 
   while (remaining > 0 && !finished && output.size() < max_bytes) {
-    const size_t to_read = static_cast<size_t>(
-        std::min<long int>(remaining, static_cast<long int>(kChunkSize)));
-    const size_t read = fread(input_buffer.data(), 1, to_read, file);
-    if (read != to_read) {
+    const size_t to_read = std::min(remaining, kChunkSize);
+    if (!ReadExact(fd, current_offset, input_buffer.data(), to_read)) {
       inflateEnd(&strm);
       return std::nullopt;
     }
-    remaining -= static_cast<long int>(read);
+    remaining -= to_read;
+    current_offset += static_cast<off_t>(to_read);
 
     strm.next_in = reinterpret_cast<Bytef*>(input_buffer.data());
-    strm.avail_in = static_cast<uInt>(read);
+    strm.avail_in = static_cast<uInt>(to_read);
 
     while (strm.avail_in > 0 && output.size() < max_bytes) {
       strm.next_out = reinterpret_cast<Bytef*>(output_buffer.data());
@@ -113,16 +124,26 @@ std::optional<std::string> ReadGzipPrefix(FILE* file, long int offset,
 TarChunkSource::TarChunkSource(
     const std::filesystem::path& filename,
     ChunkSourceLoaderConfig::FrameFormat frame_format)
-    : file_(fopen(filename.string().c_str(), "rb")),
+    : path_(filename),
       filename_(filename.filename().string()),
       frame_format_(frame_format) {
-  if (!file_) throw std::runtime_error("Failed to open tar file");
+  fd_ = open(path_.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd_ < 0) {
+    throw std::runtime_error(
+        absl::StrCat("Failed to open tar file: ", path_.string(), ": ",
+                     std::strerror(errno)));
+  }
   // Perform indexing during construction.
   Index();
 }
 
-TarChunkSource::~TarChunkSource() {
-  if (file_) fclose(file_);
+TarChunkSource::~TarChunkSource() { Close(); }
+
+void TarChunkSource::Close() {
+  if (fd_ >= 0 && close(fd_) != 0) {
+    PLOG(WARNING) << "Failed to close tar file descriptor for " << path_;
+  }
+  fd_ = -1;
 }
 
 std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
@@ -130,12 +151,15 @@ std::string TarChunkSource::GetChunkSortKey() const { return filename_; }
 void TarChunkSource::Index() {
   assert(files_.empty());
 
+  off_t offset = 0;
+
   while (true) {
     TarHeader header;
-    if (fread(&header, sizeof(header), 1, file_) != 1) {
+    if (!ReadExact(fd_, offset, &header, sizeof(header))) {
       LOG(WARNING) << "Truncated tar file: " << filename_;
       break;
     }
+    offset += sizeof(header);
 
     if (header.name[0] == '\0') break;  // End of file.
 
@@ -151,19 +175,13 @@ void TarChunkSource::Index() {
 
     std::string_view fname(const_cast<const char*>(header.name.data()));
     const std::filesystem::path filepath = std::filesystem::path(fname);
-    const long int offset = ftell(file_);
-    const long int size = ParseOctal(header.size);
-    const long int new_offset = offset + (size + 511) / 512 * 512;
-    fseek(file_, new_offset, SEEK_SET);
-    if (new_offset != ftell(file_)) {
-      LOG(WARNING) << "Truncated tar file at " << fname
-                   << ", expected size: " << size
-                   << ", actual size: " << (new_offset - offset);
-      break;
-    }
+    const off_t file_offset = offset;
+    const size_t size = ParseOctal(header.size);
+    const size_t padded_size = ((size + 511) / 512) * 512;
+    offset = file_offset + static_cast<off_t>(padded_size);
 
     if (filepath.filename() == "LICENSE") continue;
-    files_.push_back({offset, size, filepath.extension() == ".gz"});
+    files_.push_back({file_offset, size, filepath.extension() == ".gz"});
   }
 
   LOG(INFO) << "Read " << files_.size() << " entries from " << filename_;
@@ -178,8 +196,9 @@ std::optional<std::vector<FrameType>> TarChunkSource::GetChunkData(
   }
   const auto& file_entry = files_[index];
   std::string content(file_entry.size, '\0');
-  fseek(file_, file_entry.offset, SEEK_SET);
-  fread(content.data(), 1, file_entry.size, file_);
+  if (!ReadExact(fd_, file_entry.offset, content.data(), file_entry.size)) {
+    return std::nullopt;
+  }
   if (file_entry.is_gzip) {
     try {
       content = GunzipBuffer(content);
@@ -222,17 +241,12 @@ std::optional<std::string> TarChunkSource::GetChunkPrefix(size_t index,
   }
   const auto& file_entry = files_[index];
   if (file_entry.is_gzip) {
-    return ReadGzipPrefix(file_, file_entry.offset, file_entry.size, max_bytes);
+    return ReadGzipPrefix(fd_, file_entry.offset, file_entry.size, max_bytes);
   }
 
-  const size_t to_read =
-      std::min(static_cast<size_t>(file_entry.size), max_bytes);
+  const size_t to_read = std::min(file_entry.size, max_bytes);
   std::string content(to_read, '\0');
-  if (fseek(file_, file_entry.offset, SEEK_SET) != 0) {
-    return std::nullopt;
-  }
-  const size_t read = fread(content.data(), 1, to_read, file_);
-  if (read != to_read) {
+  if (!ReadExact(fd_, file_entry.offset, content.data(), to_read)) {
     return std::nullopt;
   }
   return content;
