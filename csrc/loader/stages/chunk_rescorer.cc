@@ -1,7 +1,10 @@
 #include "loader/stages/chunk_rescorer.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "absl/base/call_once.h"
 #include "absl/log/log.h"
@@ -12,7 +15,10 @@ namespace lczero {
 namespace training {
 namespace {
 
-void V6ToV7(std::span<FrameType> data, float theta = 5.0f / 6.0f) {
+// invariance_info bit 5 = game adjudicated (see trainingdata_v6.h).
+constexpr uint8_t kAdjudicationBitMask = 1u << 5;
+
+void V6ToV7(std::span<V7TrainingData> data, float theta = 5.0f / 6.0f) {
   if (data.empty()) return;
 
   const float beta = 1.0f - theta;
@@ -22,7 +28,7 @@ void V6ToV7(std::span<FrameType> data, float theta = 5.0f / 6.0f) {
 
   // Iterate backwards to calculate EMA and lookaheads in one go.
   for (size_t i = data.size(); i-- > 0;) {
-    FrameType& item = data[i];
+    V7TrainingData& item = data[i];
 
     // For Q, we operate in an alternating sign domain.
     const float sign = (i % 2 != 0) ? -1.0f : 1.0f;
@@ -50,6 +56,39 @@ void V6ToV7(std::span<FrameType> data, float theta = 5.0f / 6.0f) {
 }
 
 }  // namespace
+
+// Fills `ply_until_progress` with the number of plies until the next frame
+// (strictly after the current one) whose `rule50_count` is 0. If the chunk
+// ends without another such frame and the trailing frame is adjudicated, the
+// remaining entries are left at 0xff. If not adjudicated, the tail is filled
+// as if a virtual progress frame sat one past the end (last -> 1, ...).
+void FillPlyUntilProgress(std::span<FrameType> data) {
+  if (data.empty()) return;
+
+  const bool adjudicated =
+      (data.back().invariance_info & kAdjudicationBitMask) != 0;
+
+  const auto clamp = [](size_t plies) {
+    return static_cast<uint8_t>(std::min<size_t>(plies, 0xff));
+  };
+
+  // Plies until the next progress frame strictly to the right; 0 means none
+  // seen yet, in which case we fall back to the adjudication-based tail rule.
+  const auto ply_value = [&](size_t i, size_t distance) -> uint8_t {
+    if (distance > 0) return clamp(distance);
+    if (adjudicated) return 0xff;
+    return clamp(data.size() - i);  // Virtual progress frame past the end.
+  };
+
+  size_t distance = 0;
+  for (size_t i = data.size(); i-- > 0;) {
+    data[i].ply_until_progress = ply_value(i, distance);
+    if (data[i].rule50_count == 0)
+      distance = 1;
+    else if (distance > 0)
+      ++distance;
+  }
+}
 
 ChunkRescorer::ChunkRescorer(const ChunkRescorerConfig& config)
     : SingleInputStage<ChunkRescorerConfig, InputType>(config),
@@ -131,10 +170,18 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
       }();
 
       try {
-        chunk.frames = RescoreTrainingData<FrameType>(
-            chunk.frames, &tablebase_, dist_temp_, dist_offset_, dtz_boost_,
-            new_input_format_);
-        if (chunk.frames.at(0).version == 6) V6ToV7(chunk.frames, st_q_theta_);
+        // RescoreTrainingData is explicit-instantiated only for V6/V7 in
+        // libs/lc0. Slice-copy chunk.frames down to V7TrainingData, rescore,
+        // then reconstruct the FrameType vector (ply_until_progress defaults
+        // to 0xff and is then filled by FillPlyUntilProgress below).
+        std::vector<V7TrainingData> v7(chunk.frames.begin(),
+                                       chunk.frames.end());
+        v7 = RescoreTrainingData<V7TrainingData>(std::move(v7), &tablebase_,
+                                                 dist_temp_, dist_offset_,
+                                                 dtz_boost_, new_input_format_);
+        if (!v7.empty() && v7.front().version == 6) V6ToV7(v7, st_q_theta_);
+        chunk.frames.assign(v7.begin(), v7.end());
+        FillPlyUntilProgress(chunk.frames);
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(chunk), stop_token);
       } catch (const std::exception& exception) {
