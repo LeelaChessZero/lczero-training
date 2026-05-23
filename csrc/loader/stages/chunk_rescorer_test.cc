@@ -15,12 +15,12 @@ namespace training {
 
 // Declared here rather than in chunk_rescorer.h because it is exposed only for
 // testing; the definition lives in chunk_rescorer.cc with external linkage.
-// Fills `ply_until_progress` on each frame with the number of plies until the
+// Fills `plies_until_progress` on each frame with the number of plies until the
 // next frame (strictly after the current one) whose `rule50_count` is 0. The
 // tail is filled based on the adjudication bit (invariance_info bit 5) of the
 // last frame: adjudicated -> 0xff sentinel; otherwise behaves as if a virtual
 // progress frame sat one past the end (last -> 1, second-to-last -> 2, ...).
-void FillPlyUntilProgress(std::span<FrameType> data);
+void FillPliesUntilProgress(std::span<FrameType> data);
 
 namespace {
 
@@ -108,57 +108,57 @@ std::vector<FrameType> MakeFrames(std::vector<uint8_t> rule50_counts,
 std::vector<uint8_t> ExtractPpp(const std::vector<FrameType>& frames) {
   std::vector<uint8_t> out;
   out.reserve(frames.size());
-  for (const auto& f : frames) out.push_back(f.ply_until_progress);
+  for (const auto& f : frames) out.push_back(f.plies_until_progress);
   return out;
 }
 
 }  // namespace
 
-TEST(FillPlyUntilProgressTest, MixedSequenceNotAdjudicated) {
+TEST(FillPliesUntilProgressTest, MixedSequenceNotAdjudicated) {
   // Zeros at indices 1 and 3. Last frame has no zero strictly to its right,
   // and is not adjudicated, so it falls back to the "virtual zero" rule.
   auto frames = MakeFrames({3, 0, 2, 0}, /*adjudicated=*/false);
-  FillPlyUntilProgress(frames);
+  FillPliesUntilProgress(frames);
   EXPECT_EQ(ExtractPpp(frames), (std::vector<uint8_t>{1, 2, 1, 1}));
 }
 
-TEST(FillPlyUntilProgressTest, MixedSequenceAdjudicated) {
+TEST(FillPliesUntilProgressTest, MixedSequenceAdjudicated) {
   // Same sequence but adjudicated on the last frame; tail (no zero to the
   // right of index 3) stays at the 0xff sentinel.
   auto frames = MakeFrames({3, 0, 2, 0}, /*adjudicated=*/true);
-  FillPlyUntilProgress(frames);
+  FillPliesUntilProgress(frames);
   EXPECT_EQ(ExtractPpp(frames), (std::vector<uint8_t>{1, 2, 1, 0xff}));
 }
 
-TEST(FillPlyUntilProgressTest, AllNonZeroNotAdjudicated) {
+TEST(FillPliesUntilProgressTest, AllNonZeroNotAdjudicated) {
   auto frames = MakeFrames({5, 5, 5, 5, 5}, /*adjudicated=*/false);
-  FillPlyUntilProgress(frames);
+  FillPliesUntilProgress(frames);
   EXPECT_EQ(ExtractPpp(frames), (std::vector<uint8_t>{5, 4, 3, 2, 1}));
 }
 
-TEST(FillPlyUntilProgressTest, AllNonZeroAdjudicated) {
+TEST(FillPliesUntilProgressTest, AllNonZeroAdjudicated) {
   auto frames = MakeFrames({5, 5, 5, 5, 5}, /*adjudicated=*/true);
-  FillPlyUntilProgress(frames);
+  FillPliesUntilProgress(frames);
   EXPECT_EQ(ExtractPpp(frames),
             (std::vector<uint8_t>{0xff, 0xff, 0xff, 0xff, 0xff}));
 }
 
-TEST(FillPlyUntilProgressTest, AllNonZeroLongClampsAtFf) {
+TEST(FillPliesUntilProgressTest, AllNonZeroLongClampsAtFf) {
   // Length 300, no zeros, not adjudicated. Distance from index i is N-i,
   // clamped at 0xff.
   auto frames = MakeFrames(std::vector<uint8_t>(300, 7),
                            /*adjudicated=*/false);
-  FillPlyUntilProgress(frames);
+  FillPliesUntilProgress(frames);
   for (size_t i = 0; i < frames.size(); ++i) {
     const uint8_t expected =
         static_cast<uint8_t>(std::min<size_t>(frames.size() - i, 0xff));
-    EXPECT_EQ(frames[i].ply_until_progress, expected) << "i=" << i;
+    EXPECT_EQ(frames[i].plies_until_progress, expected) << "i=" << i;
   }
 }
 
-TEST(FillPlyUntilProgressTest, EmptyChunk) {
+TEST(FillPliesUntilProgressTest, EmptyChunk) {
   std::vector<FrameType> frames;
-  FillPlyUntilProgress(frames);  // should not crash
+  FillPliesUntilProgress(frames);  // should not crash
   EXPECT_TRUE(frames.empty());
 }
 

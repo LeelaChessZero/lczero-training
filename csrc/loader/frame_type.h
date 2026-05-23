@@ -35,7 +35,7 @@ namespace lczero {
 namespace training {
 
 struct FrameType : V7TrainingData {
-  uint8_t ply_until_progress = 0xff;
+  uint8_t plies_until_progress = 0xff;
 
   FrameType() = default;
   FrameType(const V7TrainingData& v7) : V7TrainingData(v7) {}

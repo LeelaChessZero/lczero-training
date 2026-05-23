@@ -112,6 +112,7 @@ model {
   policy_head { name: "vanilla" embedding_size: 1024 d_model: 1024 }
   value_head { name: "winner" num_channels: 128 }
   movesleft_head { name: "main" num_channels: 32 }
+  movesleft_head { name: "progress" num_channels: 32 }
 }
 training {
   schedule {
@@ -177,7 +178,26 @@ training {
       temperature: 1.0  # Softmax temperature applied before KL evaluation
     }
     value { head_name: "winner" weight: 1.0 }
-    movesleft { head_name: "main" weight: 1.0 }
+    # MOVES_LEFT reads values[RESULT, 2] = plies_left. component, scale and
+    # huber_delta are all required (no defaults).
+    movesleft {
+      head_name: "main"
+      value_type: RESULT
+      component: MOVES_LEFT
+      weight: 1.0
+      scale: 0.05
+      huber_delta: 10.0
+    }
+    # Plies until the next progress move (values[RESULT, 3]). NaN targets
+    # (unknown positions) are masked out by the loss.
+    movesleft {
+      head_name: "progress"
+      value_type: RESULT
+      component: PLIES_UNTIL_PROGRESS
+      weight: 0.5
+      scale: 0.1
+      huber_delta: 5.0
+    }
   }
 }
 metrics {

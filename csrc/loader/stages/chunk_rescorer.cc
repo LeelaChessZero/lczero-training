@@ -57,12 +57,12 @@ void V6ToV7(std::span<V7TrainingData> data, float theta = 5.0f / 6.0f) {
 
 }  // namespace
 
-// Fills `ply_until_progress` with the number of plies until the next frame
+// Fills `plies_until_progress` with the number of plies until the next frame
 // (strictly after the current one) whose `rule50_count` is 0. If the chunk
 // ends without another such frame and the trailing frame is adjudicated, the
 // remaining entries are left at 0xff. If not adjudicated, the tail is filled
 // as if a virtual progress frame sat one past the end (last -> 1, ...).
-void FillPlyUntilProgress(std::span<FrameType> data) {
+void FillPliesUntilProgress(std::span<FrameType> data) {
   if (data.empty()) return;
 
   const bool adjudicated =
@@ -82,7 +82,7 @@ void FillPlyUntilProgress(std::span<FrameType> data) {
 
   size_t distance = 0;
   for (size_t i = data.size(); i-- > 0;) {
-    data[i].ply_until_progress = ply_value(i, distance);
+    data[i].plies_until_progress = ply_value(i, distance);
     if (data[i].rule50_count == 0)
       distance = 1;
     else if (distance > 0)
@@ -172,8 +172,8 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
       try {
         // RescoreTrainingData is explicit-instantiated only for V6/V7 in
         // libs/lc0. Slice-copy chunk.frames down to V7TrainingData, rescore,
-        // then reconstruct the FrameType vector (ply_until_progress defaults
-        // to 0xff and is then filled by FillPlyUntilProgress below).
+        // then reconstruct the FrameType vector (plies_until_progress defaults
+        // to 0xff and is then filled by FillPliesUntilProgress below).
         std::vector<V7TrainingData> v7(chunk.frames.begin(),
                                        chunk.frames.end());
         v7 = RescoreTrainingData<V7TrainingData>(std::move(v7), &tablebase_,
@@ -181,7 +181,7 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
                                                  dtz_boost_, new_input_format_);
         if (!v7.empty() && v7.front().version == 6) V6ToV7(v7, st_q_theta_);
         chunk.frames.assign(v7.begin(), v7.end());
-        FillPlyUntilProgress(chunk.frames);
+        FillPliesUntilProgress(chunk.frames);
         LoadMetricPauser pauser(context->load_metric_updater);
         producer.Put(std::move(chunk), stop_token);
       } catch (const std::exception& exception) {
