@@ -15,6 +15,7 @@
 #include <string>
 
 #include "trainingdata/trainingdata_v6.h"
+#include "trainingdata/trainingdata_v7.h"
 #include "utils/training_data_printer.h"
 
 ABSL_FLAG(std::string, chunk_path, "", "Path to the chunk file (.gz) to dump.");
@@ -30,9 +31,6 @@ namespace training {
 
 namespace {
 
-using ::lczero::training::FrameType;
-using ::lczero::training::PrintTrainingDataEntry;
-
 void DumpChunk(const std::string& path, int64_t max_entries,
                int64_t float_per_line, int64_t plane_per_line) {
   gzFile file = gzopen(path.c_str(), "rb");
@@ -42,7 +40,7 @@ void DumpChunk(const std::string& path, int64_t max_entries,
 
   size_t index = 0;
   while (true) {
-    FrameType entry;
+    V7TrainingData entry;
     const int bytes_read = gzread(file, &entry, sizeof(entry));
     if (bytes_read == 0) {
       break;
