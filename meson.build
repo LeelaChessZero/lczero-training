@@ -120,7 +120,7 @@ trace_config = configuration_data()
 if trace_lib == 'perfetto'
   perfetto_dep = dependency('perfetto', required: true,
                            fallback: ['perfetto', 'dep_perfetto'])
-  deps += perfetto_dep
+  loader_deps += perfetto_dep
   trace_config.set('USE_PERFETTO_TRACE', 1)
 endif
 
@@ -132,7 +132,7 @@ if trace_lib == 'nvtx'
   nvtx_header_found = false
   foreach d : nvtx_includes
     if fs.is_dir(d)
-      if cpp_compiler.has_header('nvtx3/nvtx3.hpp', args: '-I' + d)
+      if cpp_compiler.has_header('nvtx3/nvtx3.hpp', args: ['-I' + d])
         includes += include_directories(d)
         nvtx_header_found = true
         break
