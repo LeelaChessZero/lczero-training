@@ -1,0 +1,11 @@
+
+option('cudnn_include',
+       type: 'array',
+       value: ['/opt/cuda/include/', '/usr/local/cuda/include/', '/usr/lib/cuda/include/'],
+       description: 'Paths to cudnn include directory')
+
+option('trace_library',
+       type: 'combo',
+       choices: ['off', 'perfetto', 'nvtx'],
+       value: 'off',
+       description: 'Enable trace library support')
