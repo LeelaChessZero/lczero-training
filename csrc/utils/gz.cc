@@ -6,10 +6,13 @@
 #include <array>
 #include <stdexcept>
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
 std::string GunzipBuffer(std::string_view buffer) {
+  LCTRACE_FUNCTION_SCOPE;
   z_stream strm = {};
   int ret = inflateInit2(&strm, 16 + MAX_WBITS);
   if (ret != Z_OK) {

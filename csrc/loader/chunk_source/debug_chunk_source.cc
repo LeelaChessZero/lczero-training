@@ -10,6 +10,8 @@
 #include "absl/hash/hash.h"
 #include "absl/strings/str_format.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -35,6 +37,7 @@ size_t DebugChunkSource::GetChunkCount() const {
 
 std::optional<std::vector<FrameType>> DebugChunkSource::GetChunkData(
     size_t index) {
+  LCTRACE_FUNCTION_SCOPE;
   const auto seed_pair = std::make_pair(id_, index);
   const uint64_t seed = static_cast<uint64_t>(
       absl::Hash<std::pair<uint64_t, size_t>>{}(seed_pair));

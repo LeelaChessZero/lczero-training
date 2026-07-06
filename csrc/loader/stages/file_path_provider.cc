@@ -21,6 +21,8 @@
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -300,6 +302,7 @@ void FilePathProvider::Worker(std::stop_token stop_token) {
 
 void FilePathProvider::ProcessInotifyEvents(Queue<File>::Producer& producer,
                                             std::stop_token stop_token) {
+  LCTRACE_FUNCTION_SCOPE;
   constexpr size_t kNotifyBatchSize = 10000;
   std::vector<File> files;
   std::array<char, 4096> buffer;

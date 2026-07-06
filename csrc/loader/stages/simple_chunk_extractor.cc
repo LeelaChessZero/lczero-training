@@ -7,6 +7,8 @@
 
 #include "loader/data_loader_metrics.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -51,6 +53,7 @@ void SimpleChunkExtractor::Worker(std::stop_token stop_token) {
 void SimpleChunkExtractor::ProcessSource(
     Queue<TrainingChunk>::Producer& producer,
     std::unique_ptr<ChunkSource> source, std::stop_token stop_token) {
+  LCTRACE_FUNCTION_SCOPE;
   const size_t chunk_count = source->GetChunkCount();
   if (chunk_count == 0) return;
 

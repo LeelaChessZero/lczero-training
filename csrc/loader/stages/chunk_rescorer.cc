@@ -8,12 +8,15 @@
 #include "chess/board.h"
 #include "loader/data_loader_metrics.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 namespace {
 
 void V6ToV7(std::span<FrameType> data, float theta = 5.0f / 6.0f) {
   if (data.empty()) return;
+  LCTRACE_FUNCTION_SCOPE;
 
   const float beta = 1.0f - theta;
 
@@ -131,6 +134,7 @@ void ChunkRescorer::Worker(std::stop_token stop_token, ThreadContext* context) {
       }();
 
       try {
+        LCTRACE_FUNCTION_SCOPE;
         chunk.frames = RescoreTrainingData<FrameType>(
             chunk.frames, &tablebase_, dist_temp_, dist_offset_, dtz_boost_,
             new_input_format_);

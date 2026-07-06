@@ -10,6 +10,8 @@ project(
   ],
 )
 
+fs = import('fs')
+
 # Allow Clang nullability extensions when using Clang compiler
 cpp_compiler = meson.get_compiler('cpp')
 if cpp_compiler.get_id() == 'clang'
@@ -87,7 +89,7 @@ lc0_proto_gen = generator(compile_proto, output: ['@BASENAME@.pb.h'],
     '--cpp_out=@BUILD_DIR@',
     '@INPUT@'])
 
-includes = include_directories('csrc', 'libs/lc0/src')
+includes = [include_directories('csrc', 'libs/lc0/src')]
 
 add_project_arguments('-DNO_PEXT', language : 'cpp')
 
@@ -108,6 +110,44 @@ rescorer_files = [
   'libs/lc0/src/utils/random.cc',
   'libs/lc0/src/utils/string.cc',
 ]
+
+trace_lib = get_option('trace_library')
+trace_config = configuration_data()
+
+## ~~~~~~~~
+## perfetto
+## ~~~~~~~~
+if trace_lib == 'perfetto'
+  perfetto_dep = dependency('perfetto', required: true,
+                           fallback: ['perfetto', 'dep_perfetto'])
+  deps += perfetto_dep
+  trace_config.set('USE_PERFETTO_TRACE', 1)
+endif
+
+## ~~~~
+## nvtx
+## ~~~~
+if trace_lib == 'nvtx'
+  nvtx_includes = get_option('cudnn_include')
+  nvtx_header_found = false
+  foreach d : nvtx_includes
+    if fs.is_dir(d)
+      if cpp_compiler.has_header('nvtx3/nvtx3.hpp', args: '-I' + d)
+        includes += include_directories(d)
+        nvtx_header_found = true
+        break
+      endif
+    endif
+  endforeach
+  if not nvtx_header_found
+    error('nvtx3/nvtx3.hpp header not found in cudnn_include paths')
+  endif
+  # This could support other tracing apis like systemtap.
+  trace_config.set('USE_NVTX_TRACE', 1)
+endif
+configure_file(output : 'trace_config.h',
+               configuration : trace_config)
+
 
 if host_machine.system() == 'windows'
   rescorer_files += 'libs/lc0/src/utils/filesystem.win32.cc'
@@ -143,6 +183,7 @@ files = [
   'libs/lc0/src/utils/files.cc',
   'libs/lc0/src/utils/logging.cc',
   'libs/lc0/src/utils/protomessage.cc',
+  'libs/lc0/src/utils/trace.cc',
 ] + rescorer_files
 
 # Process protobuf files for C++

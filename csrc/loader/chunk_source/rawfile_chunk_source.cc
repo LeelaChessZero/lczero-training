@@ -8,6 +8,7 @@
 #include "trainingdata/trainingdata_v6.h"
 #include "utils/files.h"
 #include "utils/gz.h"
+#include "utils/trace.h"
 
 namespace lczero {
 namespace training {
@@ -27,6 +28,7 @@ size_t RawFileChunkSource::GetChunkCount() const { return 1; }
 
 std::optional<std::vector<FrameType>> RawFileChunkSource::GetChunkData(
     size_t index) {
+  LCTRACE_FUNCTION_SCOPE;
   if (index != 0) return std::nullopt;
   std::string data = ReadFileToString(filename_);
   if (data.empty()) return std::nullopt;

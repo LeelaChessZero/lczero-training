@@ -15,6 +15,8 @@
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -84,6 +86,7 @@ void TensorGenerator::Worker(std::stop_token stop_token,
 
 TensorTuple TensorGenerator::ConvertFramesToTensors(
     const std::vector<FrameType>& frames) {
+  LCTRACE_FUNCTION_SCOPE;
   const size_t batch_size = frames.size();
   constexpr size_t kNumPlanes = 112;
   constexpr size_t kNumPolicyMoves = 1858;
