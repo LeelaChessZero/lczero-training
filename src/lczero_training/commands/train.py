@@ -9,7 +9,10 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from google.protobuf import text_format
 
-from lczero_training.commands import configure_root_logging
+from lczero_training.commands import (
+    configure_root_logging,
+    configure_jax_compile_cache,
+)
 from lczero_training.convert.jax_to_leela import (
     LeelaExportOptions,
     jax_to_leela,
@@ -123,6 +126,7 @@ def train(config_filename: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
+    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)

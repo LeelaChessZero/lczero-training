@@ -2,12 +2,34 @@ import argparse
 import logging
 import os
 import sys
+import jax
+import jaxlib
+from jax._src.lib import jaxlib_extension_version
 
 _DEFAULT_FORMAT = (
     "%(levelname).1s%(asctime)s.%(msecs)03d %(name)s "
     "%(filename)s:%(lineno)d] %(message)s"
 )
 _DEFAULT_DATEFMT = "%m%d %H:%M:%S"
+
+def configure_jax_compile_cache() -> None:
+    """Configure JAX compile cache directory.
+
+    - Uses LCZERO_JAX_COMPILE_CACHE env var if set.
+    - Otherwise uses default path in user's home directory.
+    - Creates the directory if it does not exist.
+    """
+    xla_version_string = "jax_" + str(jaxlib.__version__) + "_ext_" + str(jaxlib_extension_version)
+    default_path = os.path.expanduser("~/.cache/lczero/jax_compile_cache_" + xla_version_string)
+    cache_dir = os.environ.get("LCZERO_JAX_COMPILE_CACHE", default_path)
+    xla_caches = os.environ.get(
+        "LCZERO_JAX_XLA_CACHES", "xla_gpu_per_fusion_autotune_cache_dir"
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    jax.config.update("jax_compilation_cache_dir", cache_dir)
+    jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+    jax.config.update("jax_persistent_cache_enable_xla_caches", xla_caches)
 
 
 def configure_root_logging(level: int | str = logging.INFO) -> None:

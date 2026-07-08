@@ -2,7 +2,10 @@ import argparse
 import logging
 import sys
 
-from lczero_training.commands import configure_root_logging
+from lczero_training.commands import (
+    configure_root_logging,
+    configure_jax_compile_cache,
+)
 from lczero_training.daemon.daemon import TrainingDaemon
 
 
@@ -14,6 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
+    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)
