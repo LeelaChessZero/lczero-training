@@ -17,10 +17,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
-    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+    configure_jax_compile_cache()
 
     daemon = TrainingDaemon(memory_profile_dir=args.memory_profile_dir)
     daemon.run()

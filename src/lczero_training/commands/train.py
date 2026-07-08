@@ -126,10 +126,10 @@ def train(config_filename: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
-    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+    configure_jax_compile_cache()
 
     train(config_filename=args.config)
     return 0

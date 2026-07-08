@@ -61,10 +61,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
-    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+    configure_jax_compile_cache()
 
     # Lazy import to keep --help responsive and avoid heavy deps unless needed.
     from lczero_training.training.eval import eval as eval_fn

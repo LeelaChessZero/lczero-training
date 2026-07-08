@@ -41,10 +41,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_root_logging(logging.INFO)
-    configure_jax_compile_cache()
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+    configure_jax_compile_cache()
 
     # Import on demand to avoid importing heavy deps on --help.
     from lczero_training.training.overfit import overfit
