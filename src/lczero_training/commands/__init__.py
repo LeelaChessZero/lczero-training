@@ -10,11 +10,13 @@ handling across commands without changing behaviour.
 
 from .common import (
     add_logging_arguments,
+    configure_jax_compile_cache,
     configure_root_logging,
     parse_log_level,
 )
 
 __all__ = [
+    "configure_jax_compile_cache",
     "configure_root_logging",
     "add_logging_arguments",
     "parse_log_level",
