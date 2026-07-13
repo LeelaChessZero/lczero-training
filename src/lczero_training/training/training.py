@@ -287,7 +287,7 @@ class Training:
         metrics: Optional[MetricsDict],
     ) -> None:
         if metrics is None:
-            return;
+            return
         step_value = int(metrics["step"])
         local_step = int(metrics["local"])
         num_steps = int(metrics["num_steps"])
