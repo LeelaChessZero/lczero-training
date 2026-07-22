@@ -91,3 +91,9 @@ Generating trainingdata from pgn files is currently broken and has low priority,
 8. `ln -s -T ../../build/release/_lczero_training.cpython-311-x86_64-linux-gnu.so src/lczero_training/_lczero_training.so`
 
 14. Run it! `uv run tui --config docs/example.textproto`
+
+## XLA autotuning cache configuration
+
+XLA autotuning cache is used to speed up the startup of the training pipeline. The default cache location is `~/.cache/lczero/jax_compile_cache_<version>`. User can override location using `LCZERO_JAX_XLA_CACHES` environment variable.
+
+Default configuration uses cache configuration `xla_gpu_per_fusion_autotune_cache_dir` which speeds up kernel compilation for GPU. User can override this configuration by setting `LCZERO_JAX_XLA_CACHES` to a different cache configuration, e.g. `none` to disable cache.
