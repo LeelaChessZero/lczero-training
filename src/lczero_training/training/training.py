@@ -359,8 +359,8 @@ class Training:
             jit_state = self.maybe_update_swa(
                 jit_state, local_step + 1, num_steps
             )
-            self._execute_step_hook(
-                step_hook, step_value, local_step, num_steps, metrics, jit_state
-            )
             self._log_step_metrics(step_value, local_step, num_steps, metrics)
+            self._execute_step_hook(
+                step_hook, step_value, local_step, num_steps, self._host_metrics['metrics'], jit_state
+            )
         return jit_state
