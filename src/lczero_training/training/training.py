@@ -38,6 +38,7 @@ class StepHookData:
 
 
 StepHook = Callable[[StepHookData], None]
+MetricsCollector = Callable[[MetricsDict, int], MetricsDict]
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class Training:
         self._host_metrics = None
 
         jit_kwargs: Dict[str, Any] = {
-            "static_argnames": ("optimizer_tx",),
+            "static_argnames": ("optimizer_tx","metrics_collector",),
             "donate_argnames": ("jit_state",),
         }
         if jax.device_count() > 1:
@@ -101,6 +102,7 @@ class Training:
             optimizer_tx: optax.GradientTransformation,
             jit_state: JitTrainingState,
             batch: TrainingBatch,
+            metrics_collector: Optional[MetricsCollector] = None,
         ) -> Tuple[JitTrainingState, MetricsDict]:
             model = nnx.merge(graphdef, jit_state.model_state)
 
@@ -151,6 +153,9 @@ class Training:
                 "unweighted_losses": mean_unweighted,
                 "grad_norm": grad_norm,
             }
+            if metrics_collector is not None:
+                metrics = metrics_collector(metrics, jit_state.step - 1)
+
             return new_jit_state, metrics
 
         self.train_step = cast(
@@ -329,6 +334,7 @@ class Training:
         num_steps: int,
         step_hook: Optional[StepHook] = None,
         memory_profile_dir: Optional[str] = None,
+        metrics_collector: Optional[MetricsCollector] = None,
     ) -> JitTrainingState:
         if self._host_step is None:
             self._host_step = int(jit_state.step)
@@ -346,7 +352,7 @@ class Training:
                 )
             batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
-                self.optimizer_tx, jit_state, batch
+                self.optimizer_tx, jit_state, batch, metrics_collector=metrics_collector
             )
             self._host_step = self._host_step + 1
             step_value = self._host_step

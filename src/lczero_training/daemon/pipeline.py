@@ -29,6 +29,7 @@ from lczero_training.training.training import (
     StepHookData,
     Training,
     from_dataloader,
+    MetricsDict,
 )
 from proto.data_loader_config_pb2 import DataLoaderConfig
 from proto.root_config_pb2 import RootConfig
@@ -316,9 +317,16 @@ class TrainingPipeline:
         except (KeyError, AttributeError, IndexError) as e:
             logging.error(f"Failed to extract model metadata for upload: {e}")
 
+    def _metrics_collector(
+        self,
+        metrics: MetricsDict,
+        step: int,
+    ) -> MetricsDict:
+        metrics['lr'] = self._lr_schedule(step)
+        return metrics
+
     def _step_hook(self, hook_data: StepHookData) -> None:
         # Append current learning rate from schedule to metrics.
-        hook_data.metrics["lr"] = self._lr_schedule(hook_data.global_step)
         if self._metrics is not None:
             self._metrics.on_step(hook_data, self._graphdef)
 
@@ -335,6 +343,7 @@ class TrainingPipeline:
             datagen=from_dataloader(self._data_loader),
             num_steps=self._schedule.steps_per_network,
             step_hook=self._step_hook,
+            metrics_collector=self._metrics_collector if self._metrics is not None else None,
             memory_profile_dir=self._memory_profile_dir,
         )
         self._training_state = self._training_state.replace(
