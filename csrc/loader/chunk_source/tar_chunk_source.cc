@@ -167,7 +167,11 @@ void TarChunkSource::Index() {
       case '5':  // Directory
         continue;
       case '0':  // Regular file
+      case '\0':  // Regular file (old format)
         break;
+      case 'x':  // Extended header
+        offset += static_cast<off_t>((ParseOctal(header.size) + 511) & ~511ULL);
+        continue;
       default:
         LOG(WARNING) << "Unsupported tar header type: " << header.typeflag;
         continue;
