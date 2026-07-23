@@ -32,13 +32,16 @@ class TrainingSample:
     Fields:
         inputs: Input planes tensor [112, 8, 8]
         probabilities: Policy probabilities tensor [1858]
-        values: Combined values tensor [6, 3] where:
-            - Index 0: result [result_q, result_d, plies_left]
-            - Index 1: best [best_q, best_d, best_m]
-            - Index 2: played [played_q, played_d, played_m]
-            - Index 3: orig [orig_q, orig_d, orig_m] (may contain NaN)
-            - Index 4: root [root_q, root_d, root_m]
-            - Index 5: st [q_st, d_st, NaN]
+        values: Combined values tensor [6, 4] of [q, d, m, p] per row, where:
+            - Index 0: result [result_q, result_d, plies_left,
+              plies_until_progress]
+            - Index 1: best [best_q, best_d, best_m, NaN]
+            - Index 2: played [played_q, played_d, played_m, NaN]
+            - Index 3: orig [orig_q, orig_d, orig_m, NaN] (q/d/m may be NaN)
+            - Index 4: root [root_q, root_d, root_m, NaN]
+            - Index 5: st [q_st, d_st, NaN, NaN]
+            Component 3 (p) holds plies_until_progress on the result row only
+            (NaN for unknown positions); NaN targets are masked by the loss.
     """
 
     inputs: jax.Array
@@ -54,13 +57,16 @@ class TrainingBatch:
     Fields:
         inputs: Input planes tensor [batch, 112, 8, 8]
         probabilities: Policy probabilities tensor [batch, 1858]
-        values: Combined values tensor [batch, 6, 3] where:
-            - Index 0: result [result_q, result_d, plies_left]
-            - Index 1: best [best_q, best_d, best_m]
-            - Index 2: played [played_q, played_d, played_m]
-            - Index 3: orig [orig_q, orig_d, orig_m] (may contain NaN)
-            - Index 4: root [root_q, root_d, root_m]
-            - Index 5: st [q_st, d_st, NaN]
+        values: Combined values tensor [batch, 6, 4] of [q, d, m, p] per row:
+            - Index 0: result [result_q, result_d, plies_left,
+              plies_until_progress]
+            - Index 1: best [best_q, best_d, best_m, NaN]
+            - Index 2: played [played_q, played_d, played_m, NaN]
+            - Index 3: orig [orig_q, orig_d, orig_m, NaN] (q/d/m may be NaN)
+            - Index 4: root [root_q, root_d, root_m, NaN]
+            - Index 5: st [q_st, d_st, NaN, NaN]
+            Component 3 (p) holds plies_until_progress on the result row only
+            (NaN for unknown positions); NaN targets are masked by the loss.
     """
 
     inputs: Union[jax.Array, jshard.NamedSharding]

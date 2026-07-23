@@ -24,6 +24,7 @@
 
 #include "loader/chunk_source/tar_chunk_source.h"
 #include "trainingdata/trainingdata_v6.h"
+#include "trainingdata/trainingdata_v7.h"
 
 ABSL_FLAG(std::string, output_csv, "",
           "Destination CSV file. Writes to stdout if empty.");
@@ -34,8 +35,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
+using ::lczero::V7TrainingData;
 using ::lczero::training::ChunkSourceLoaderConfig;
-using ::lczero::training::FrameType;
 using ::lczero::training::TarChunkSource;
 
 enum class ChunkResult { kWin, kDraw, kLoss };
@@ -79,13 +80,13 @@ constexpr float kFloatTolerance = 1e-6f;
 std::optional<ChunkResult> DetermineChunkResult(absl::string_view chunk_payload,
                                                 size_t chunk_index,
                                                 const fs::path& tar_path) {
-  if (chunk_payload.size() < sizeof(FrameType)) {
+  if (chunk_payload.size() < sizeof(V7TrainingData)) {
     LOG(WARNING) << "Chunk " << chunk_index << " in " << tar_path.string()
                  << " is too small.";
     return std::nullopt;
   }
 
-  FrameType frame;
+  V7TrainingData frame;
   std::memcpy(&frame, chunk_payload.data(), sizeof(frame));
 
   if (std::fabs(frame.result_d - 1.0f) <= kFloatTolerance) {
@@ -118,7 +119,7 @@ ResultCounts CountResultsInTar(const fs::path& tar_path) {
   const size_t chunk_count = source.GetChunkCount();
   for (size_t index = 0; index < chunk_count; ++index) {
     const std::optional<std::string> chunk =
-        source.GetChunkPrefix(index, sizeof(FrameType));
+        source.GetChunkPrefix(index, sizeof(V7TrainingData));
     if (!chunk) {
       LOG(WARNING) << "Skipping unreadable chunk " << index << " in "
                    << tar_path.string();

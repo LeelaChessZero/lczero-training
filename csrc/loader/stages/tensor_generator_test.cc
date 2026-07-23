@@ -3,6 +3,7 @@
 
 #include "loader/stages/tensor_generator.h"
 
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -84,6 +85,7 @@ class TensorGeneratorTest : public ::testing::Test {
     frame.best_d = 0.1f;
     frame.best_m = 42.5f;
     frame.plies_left = 42.5f;
+    frame.plies_until_progress = 7;
 
     return frame;
   }
@@ -113,14 +115,14 @@ class TensorGeneratorTest : public ::testing::Test {
     EXPECT_EQ(probs_tensor->shape()[0], batch_size);
     EXPECT_EQ(probs_tensor->shape()[1], 1858);
 
-    // Verify values tensor: (batch_size, 6, 3)
+    // Verify values tensor: (batch_size, 6, 4)
     const auto* values_tensor =
         dynamic_cast<const TypedTensor<float>*>(tensors[2].get());
     ASSERT_NE(values_tensor, nullptr);
     EXPECT_EQ(values_tensor->shape().size(), 3);
     EXPECT_EQ(values_tensor->shape()[0], batch_size);
     EXPECT_EQ(values_tensor->shape()[1], 6);
-    EXPECT_EQ(values_tensor->shape()[2], 3);
+    EXPECT_EQ(values_tensor->shape()[2], 4);
   }
 
   void VerifyTensorData(const TensorTuple& tensors,
@@ -142,17 +144,19 @@ class TensorGeneratorTest : public ::testing::Test {
         EXPECT_FLOAT_EQ(probs_slice[j], frame.probabilities[j]);
       }
 
-      // Verify values tensor [batch, 6, 3] with raw q/d/m values
-      // Index 0: result (q=0.5, d=0.2, m=42.5)
+      // Verify values tensor [batch, 6, 4] with raw q/d/m/p values.
+      // Index 0: result (q=0.5, d=0.2, m=42.5, p=7).
       auto values_slice = values_tensor->slice({static_cast<ssize_t>(i)});
-      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 0], 0.5f);   // result_q
-      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 1], 0.2f);   // result_d
-      EXPECT_FLOAT_EQ(values_slice[0 * 3 + 2], 42.5f);  // result_m
+      EXPECT_FLOAT_EQ(values_slice[0 * 4 + 0], 0.5f);   // result_q
+      EXPECT_FLOAT_EQ(values_slice[0 * 4 + 1], 0.2f);   // result_d
+      EXPECT_FLOAT_EQ(values_slice[0 * 4 + 2], 42.5f);  // result_m
+      EXPECT_FLOAT_EQ(values_slice[0 * 4 + 3], 7.0f);   // plies_until_progress
 
-      // Index 1: best (q=0.3, d=0.1, m=42.5)
-      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 0], 0.3f);   // best_q
-      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 1], 0.1f);   // best_d
-      EXPECT_FLOAT_EQ(values_slice[1 * 3 + 2], 42.5f);  // best_m
+      // Index 1: best (q=0.3, d=0.1, m=42.5, p=NaN).
+      EXPECT_FLOAT_EQ(values_slice[1 * 4 + 0], 0.3f);    // best_q
+      EXPECT_FLOAT_EQ(values_slice[1 * 4 + 1], 0.1f);    // best_d
+      EXPECT_FLOAT_EQ(values_slice[1 * 4 + 2], 42.5f);   // best_m
+      EXPECT_TRUE(std::isnan(values_slice[1 * 4 + 3]));  // p: NaN (non-result)
 
       // Verify planes data - check first few planes and meta planes.
       auto planes_slice = planes_tensor->slice({static_cast<ssize_t>(i)});
@@ -350,6 +354,8 @@ TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   frame.result_d = 0.3f;
   frame.best_q = -0.2f;
   frame.best_d = 0.1f;
+  // 0xff means "unknown" and must map to NaN.
+  frame.plies_until_progress = 0xff;
 
   producer.Put(frame);
   producer.Close();
@@ -361,12 +367,13 @@ TEST_F(TensorGeneratorTest, VerifiesQDConversion) {
   auto values_slice = values_tensor->slice({0});
 
   // Verify result values: q=0.4, d=0.3 (raw values, no WDL conversion)
-  EXPECT_FLOAT_EQ(values_slice[0 * 3 + 0], 0.4f);  // result_q
-  EXPECT_FLOAT_EQ(values_slice[0 * 3 + 1], 0.3f);  // result_d
+  EXPECT_FLOAT_EQ(values_slice[0 * 4 + 0], 0.4f);    // result_q
+  EXPECT_FLOAT_EQ(values_slice[0 * 4 + 1], 0.3f);    // result_d
+  EXPECT_TRUE(std::isnan(values_slice[0 * 4 + 3]));  // 0xff -> NaN
 
   // Verify best values: q=-0.2, d=0.1 (raw values, no WDL conversion)
-  EXPECT_FLOAT_EQ(values_slice[1 * 3 + 0], -0.2f);  // best_q
-  EXPECT_FLOAT_EQ(values_slice[1 * 3 + 1], 0.1f);   // best_d
+  EXPECT_FLOAT_EQ(values_slice[1 * 4 + 0], -0.2f);  // best_q
+  EXPECT_FLOAT_EQ(values_slice[1 * 4 + 1], 0.1f);   // best_d
 }
 
 }  // namespace training

@@ -88,7 +88,7 @@ TensorTuple TensorGenerator::ConvertFramesToTensors(
   constexpr size_t kNumPlanes = 112;
   constexpr size_t kNumPolicyMoves = 1858;
   constexpr size_t kNumValueTypes = 6;
-  constexpr size_t kValuesPerType = 3;
+  constexpr size_t kValuesPerType = 4;
 
   TensorTuple result;
   result.reserve(3);
@@ -109,8 +109,12 @@ TensorTuple TensorGenerator::ConvertFramesToTensors(
   }
   result.push_back(std::move(probs_tensor));
 
-  // Index 2: Values (batch_size, 6, 3) with [q, d, m] for each type.
-  // [0]: result, [1]: best, [2]: played, [3]: orig, [4]: root, [5]: st
+  // Index 2: Values (batch_size, 6, 4) with [q, d, m, p] for each type.
+  // [0]: result, [1]: best, [2]: played, [3]: orig, [4]: root, [5]: st.
+  // Component 3 (p) holds plies_until_progress for the result row only (0xff,
+  // i.e. unknown, maps to NaN); it is NaN for all other rows. NaN targets are
+  // masked out by the loss.
+  constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
   auto values_tensor =
       std::make_unique<TypedTensor<float>>(std::initializer_list<size_t>{
           batch_size, kNumValueTypes, kValuesPerType});
@@ -118,41 +122,49 @@ TensorTuple TensorGenerator::ConvertFramesToTensors(
     const auto& frame = frames[i];
     auto batch_slice = values_tensor->slice({static_cast<ssize_t>(i)});
 
-    // Index 0: result [result_q, result_d, plies_left]
+    // Index 0: result [result_q, result_d, plies_left, plies_until_progress]
     auto result_slice = batch_slice.subspan(0 * kValuesPerType, kValuesPerType);
     result_slice[0] = frame.result_q;
     result_slice[1] = frame.result_d;
     result_slice[2] = frame.plies_left;
+    result_slice[3] = frame.plies_until_progress == 0xff
+                          ? kNaN
+                          : static_cast<float>(frame.plies_until_progress);
 
-    // Index 1: best [best_q, best_d, best_m]
+    // Index 1: best [best_q, best_d, best_m, NaN]
     auto best_slice = batch_slice.subspan(1 * kValuesPerType, kValuesPerType);
     best_slice[0] = frame.best_q;
     best_slice[1] = frame.best_d;
     best_slice[2] = frame.best_m;
+    best_slice[3] = kNaN;
 
-    // Index 2: played [played_q, played_d, played_m]
+    // Index 2: played [played_q, played_d, played_m, NaN]
     auto played_slice = batch_slice.subspan(2 * kValuesPerType, kValuesPerType);
     played_slice[0] = frame.played_q;
     played_slice[1] = frame.played_d;
     played_slice[2] = frame.played_m;
+    played_slice[3] = kNaN;
 
-    // Index 3: orig [orig_q, orig_d, orig_m] (may be NaN)
+    // Index 3: orig [orig_q, orig_d, orig_m, NaN] (q/d/m may be NaN)
     auto orig_slice = batch_slice.subspan(3 * kValuesPerType, kValuesPerType);
     orig_slice[0] = frame.orig_q;
     orig_slice[1] = frame.orig_d;
     orig_slice[2] = frame.orig_m;
+    orig_slice[3] = kNaN;
 
-    // Index 4: root [root_q, root_d, root_m]
+    // Index 4: root [root_q, root_d, root_m, NaN]
     auto root_slice = batch_slice.subspan(4 * kValuesPerType, kValuesPerType);
     root_slice[0] = frame.root_q;
     root_slice[1] = frame.root_d;
     root_slice[2] = frame.root_m;
+    root_slice[3] = kNaN;
 
-    // Index 5: st [q_st, d_st, NaN]
+    // Index 5: st [q_st, d_st, NaN, NaN]
     auto st_slice = batch_slice.subspan(5 * kValuesPerType, kValuesPerType);
     st_slice[0] = frame.q_st;
     st_slice[1] = frame.d_st;
-    st_slice[2] = std::numeric_limits<float>::quiet_NaN();
+    st_slice[2] = kNaN;
+    st_slice[3] = kNaN;
   }
   result.push_back(std::move(values_tensor));
 
