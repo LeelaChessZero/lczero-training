@@ -8,6 +8,8 @@
 #include "absl/strings/str_cat.h"
 #include "loader/data_loader_metrics.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -144,6 +146,7 @@ void ChunkSourceSplitter::Worker(std::stop_token stop_token) {
 
 std::vector<std::vector<uint32_t>> ChunkSourceSplitter::BuildAssignments(
     const std::shared_ptr<ChunkSource>& source) {
+  LCTRACE_FUNCTION_SCOPE;
   const std::string sort_key = source->GetChunkSortKey();
   const size_t n = source->GetChunkCount();
 

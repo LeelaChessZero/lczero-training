@@ -11,10 +11,20 @@
 #include <stdexcept>
 
 #include "loader/data_loader_metrics.h"
+#include "utils/trace.h"
 
 namespace lczero {
 namespace training {
+
+namespace {
+class TraceInitializer {
+ public:
+  TraceInitializer() { LCTRACE_INITIALIZE; }
+} trace_initializer;
+}  // namespace
+
 DataLoaderConfig DataLoader::ParseConfig(const std::string& serialized_config) {
+  LCTRACE_FUNCTION_SCOPE;
   DataLoaderConfig config;
   config.ParseFromString(serialized_config);
   return config;
@@ -26,6 +36,7 @@ DataLoader::DataLoader(const std::string& serialized_data_loader_config)
           [](DataLoaderMetricsProto& dest, const DataLoaderMetricsProto& src) {
             UpdateFrom(dest, src);
           }) {
+  LCTRACE_FUNCTION_SCOPE;
   DataLoaderConfig config = ParseConfig(serialized_data_loader_config);
   AddStages(config);
   BuildOutputMapping(config);
@@ -40,11 +51,13 @@ void DataLoader::AddStages(const std::string& serialized_data_loader_config) {
 }
 
 void DataLoader::AddStages(const DataLoaderConfig& config) {
+  LCTRACE_FUNCTION_SCOPE;
   for (const auto& stage_config : config.stage()) AddStage(stage_config);
   for (const auto& stage_config : config.stage()) SetStageInputs(stage_config);
 }
 
 void DataLoader::AddStage(const StageConfig& stage_config) {
+  LCTRACE_FUNCTION_SCOPE;
   if (started_) {
     throw std::runtime_error("Cannot add stages after DataLoader has started.");
   }
@@ -59,6 +72,7 @@ void DataLoader::AddStage(const StageConfig& stage_config) {
 }
 
 void DataLoader::SetStageInputs(const StageConfig& stage_config) {
+  LCTRACE_FUNCTION_SCOPE;
   // Resolve input names to queue pointers.
   std::vector<QueueBase*> input_queues;
   input_queues.reserve(stage_config.input_size());
@@ -84,6 +98,7 @@ void DataLoader::SetStageInputs(const StageConfig& stage_config) {
 }
 
 void DataLoader::Start() {
+  LCTRACE_FUNCTION_SCOPE;
   if (started_) {
     throw std::runtime_error("DataLoader has already been started.");
   }
@@ -100,6 +115,7 @@ void DataLoader::Start() {
 }
 
 TensorTuple DataLoader::GetNext(std::string_view alias) {
+  LCTRACE_FUNCTION_SCOPE;
   Queue<TensorTuple>* q = GetOutputQueue(alias);
   if (!q) {
     std::string alias_list = absl::StrJoin(
@@ -113,6 +129,7 @@ TensorTuple DataLoader::GetNext(std::string_view alias) {
 }
 
 std::optional<TensorTuple> DataLoader::MaybeGetNext(std::string_view alias) {
+  LCTRACE_FUNCTION_SCOPE;
   Queue<TensorTuple>* q = GetOutputQueue(alias);
   if (!q) {
     std::string alias_list = absl::StrJoin(
@@ -126,6 +143,7 @@ std::optional<TensorTuple> DataLoader::MaybeGetNext(std::string_view alias) {
 }
 
 void DataLoader::Stop() {
+  LCTRACE_FUNCTION_SCOPE;
   if (stopped_) return;
 
   LOG(INFO) << "Stopping DataLoader.";
@@ -174,6 +192,7 @@ std::pair<std::string, float> DataLoader::GetAggregateEndingNow(
 void DataLoader::MetricsThread(std::stop_token stop_token) {
   while (!stop_token.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    LCTRACE_FUNCTION_SCOPE;
     DataLoaderMetricsProto metrics;
     for (auto& [name, stage] : stage_registry_.stages()) {
       StageMetricProto stage_metric = stage->FlushMetrics();
@@ -189,6 +208,7 @@ void DataLoader::MetricsThread(std::stop_token stop_token) {
 
 std::vector<std::pair<std::string, StageControlResponse>>
 DataLoader::SendControlMessage(const StageControlRequest& request) {
+  LCTRACE_FUNCTION_SCOPE;
   std::vector<std::pair<std::string, StageControlResponse>> responses;
   responses.reserve(stage_registry_.size());
   for (auto& [name, stage] : stage_registry_.stages()) {
@@ -201,6 +221,7 @@ DataLoader::SendControlMessage(const StageControlRequest& request) {
 }
 
 void DataLoader::BuildOutputMapping(const DataLoaderConfig& config) {
+  LCTRACE_FUNCTION_SCOPE;
   outputs_.clear();
   outputs_.reserve(config.output_size());
 

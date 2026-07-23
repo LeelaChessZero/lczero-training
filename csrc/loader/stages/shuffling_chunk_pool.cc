@@ -23,6 +23,7 @@
 #include "loader/stages/position_sampling.h"
 #include "proto/data_loader_config.pb.h"
 #include "utils/thread_pool.h"
+#include "utils/trace.h"
 
 namespace lczero {
 namespace training {
@@ -400,6 +401,7 @@ void ShufflingChunkPool::CachingWorker(std::stop_token stop_token,
         LoadMetricPauser pauser(context->load_metric_updater);
         return cache_request_queue_->Get(stop_token);
       }();
+      LCTRACE_FUNCTION_SCOPE;
 
       std::shared_ptr<ChunkSourceItem> source_item;
       float max_weight = 0.0f;
@@ -486,6 +488,7 @@ struct ShufflingChunkPool::ChunkData {
 
 std::optional<std::variant<TrainingChunk, FrameType>>
 ShufflingChunkPool::GetNextChunkData() {
+  LCTRACE_FUNCTION_SCOPE;
   while (true) {
     ChunkData chunk_data;
     const ChunkStatus status = GetChunkInfo(chunk_data);
@@ -657,6 +660,7 @@ bool ShufflingChunkPool::HanseAccept(ChunkData& chunk_data) {
 
 void ShufflingChunkPool::AddNewChunkSource(std::unique_ptr<ChunkSource> source)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(chunk_sources_mutex_) {
+  LCTRACE_FUNCTION_SCOPE;
   // Add new chunk source to the end of the deque.
   size_t old_upper_bound = 0;
   if (!chunk_sources_.empty()) {

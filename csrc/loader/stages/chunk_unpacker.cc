@@ -23,6 +23,8 @@
 #include "proto/data_loader_config.pb.h"
 #include "proto/training_metrics.pb.h"
 
+#include "utils/trace.h"
+
 namespace lczero {
 namespace training {
 
@@ -35,6 +37,7 @@ namespace training {
 std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
                                            int32_t iteration,
                                            absl::BitGen& gen) {
+  LCTRACE_FUNCTION_SCOPE;
   assert(p > 0.0 && p <= 1.0);
   double carried_prob = p;
 
@@ -70,6 +73,7 @@ std::vector<uint32_t> PickSampledPositions(int32_t n, double p,
 std::vector<uint32_t> SampleProbabilisticSequence(
     uint64_t k, uint64_t skip, std::span<const float> probabilities,
     absl::BitGen& gen) {
+  LCTRACE_FUNCTION_SCOPE;
   const size_t n = probabilities.size();
   if (n == 0 || k == 0) return {};
 
@@ -187,6 +191,7 @@ QueueBase* ChunkUnpacker::GetOutput(std::string_view name) {
 namespace {
 std::vector<float> FramesToProbabilities(std::span<const FrameType> frames,
                                          const PositionSamplingConfig& config) {
+  LCTRACE_FUNCTION_SCOPE;
   std::vector<float> probabilities;
   probabilities.reserve(frames.size());
   absl::c_transform(frames, std::back_inserter(probabilities),

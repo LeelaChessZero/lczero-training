@@ -8,6 +8,7 @@
 #include "loader/chunk_source/tar_chunk_source.h"
 #include "loader/data_loader_metrics.h"
 #include "proto/data_loader_config.pb.h"
+#include "utils/trace.h"
 
 namespace lczero {
 namespace training {
@@ -15,6 +16,7 @@ namespace training {
 std::unique_ptr<ChunkSource> CreateChunkSourceFromFile(
     const std::filesystem::path& filepath,
     ChunkSourceLoaderConfig::FrameFormat frame_format) {
+  LCTRACE_FUNCTION_SCOPE;
   auto extension = filepath.extension();
   try {
     if (extension == ".gz") {

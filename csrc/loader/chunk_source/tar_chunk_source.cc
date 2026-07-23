@@ -15,6 +15,7 @@
 
 #include "trainingdata/trainingdata_v6.h"
 #include "utils/gz.h"
+#include "utils/trace.h"
 
 namespace lczero {
 namespace training {
@@ -195,6 +196,7 @@ size_t TarChunkSource::GetChunkCount() const { return files_.size(); }
 
 std::optional<std::vector<FrameType>> TarChunkSource::GetChunkData(
     size_t index) {
+  LCTRACE_FUNCTION_SCOPE;
   if (index >= files_.size()) {
     throw std::out_of_range("File index out of range");
   }
