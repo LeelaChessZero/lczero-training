@@ -56,7 +56,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=64", "pybind11>=2.10.0", "wheel"]
+requires = ["setuptools>=83.0.0", "pybind11>=2.10.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 
