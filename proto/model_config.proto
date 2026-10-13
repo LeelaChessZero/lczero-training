@@ -13,6 +13,14 @@ message ModelConfig {
   repeated PolicyHeadConfig policy_head = 8;
   repeated ValueHeadConfig value_head = 9;
   repeated MovesLeftHeadConfig movesleft_head = 10;
+  // Depth-attending value heads. Empty (the default) leaves the model
+  // byte-for-byte the model it was without this field: nothing is built and
+  // the encoder tower keeps its original code path.
+  repeated VdaValueHeadConfig vda_value_head = 11;
+  // Depth-attending policy heads. Empty (the default) leaves the model
+  // byte-for-byte the model it was without this field: nothing is built and
+  // the encoder tower keeps its original code path.
+  repeated PdaPolicyHeadConfig pda_policy_head = 12;
 }
 
 message DefaultsConfig {
@@ -58,4 +66,76 @@ message ValueHeadConfig {
 message MovesLeftHeadConfig {
   optional string name = 1;
   optional uint32 num_channels = 2;
+}
+
+// Depth-attending value head ("vda"): a value head that reads the residual
+// stream at EVERY trunk depth (the embedding output plus every encoder block
+// output) instead of only at the last encoder block.
+//
+// Two channels, both optional so the same module also builds the matched
+// last-layer-only control head:
+//   per_square_depth_attention -- each square attends over its OWN depth
+//     history and the result is added to the head's per-square features
+//     BEFORE the 64*num_channels -> hidden bottleneck;
+//   global_depth_channel -- a board-level query mixes square-mean position
+//     summaries from every depth and the result enters AFTER that bottleneck
+//     at full residual width, so it never passes through the funnel.
+//
+// deep_supervision adds a per-depth linear WDL probe on each depth's position
+// summary. Those probes are exposed as extra value heads named
+// "<name>_aux<NN>" (NN = zero-padded depth index, 00 = embedding output).
+//
+// lc0's weights format cannot represent a head that reads intermediate
+// layers, so a model with a vda head is not exportable (jax_to_leela drops
+// the head and says so loudly).
+message VdaValueHeadConfig {
+  optional string name = 1;
+  // Per-square width entering the bottleneck (the classic head's
+  // ValueHeadConfig.num_channels).
+  optional uint32 num_channels = 2 [default = 8];
+  // Query/key width of both depth attentions.
+  optional uint32 attention_dim = 3 [default = 32];
+  // Width after the bottleneck (128 in the classic value head).
+  optional uint32 hidden_size = 4 [default = 128];
+  optional bool per_square_depth_attention = 5 [default = true];
+  optional bool global_depth_channel = 6 [default = true];
+  optional bool deep_supervision = 7 [default = true];
+}
+
+// Depth-attending policy head ("pda"): the policy analogue of
+// VdaValueHeadConfig. Same taps (the embedding output plus every encoder block
+// output), same per-square depth attention, but the depth-selected mixture is
+// added to the token features of an ordinary attention-policy head (per-square
+// q/k plus promotion dense) instead of a value head's bottleneck.
+//
+// per_square_depth_attention false builds the matched control: the identical
+// module with the identical parameter count, with the depth axis filled by
+// copies of the final layer. That collapses the mixture to the final layer
+// exactly, so the control reads no depth -- at the cost of leaving its query/
+// See pda_head.py.
+//
+// deep_supervision adds a minimal attention-policy probe (q/k + promotion, no
+// token projection, no activation) per depth. Those probes are exposed as
+// extra policy heads named "<name>_aux<NN>" (NN = zero-padded depth index,
+// 00 = embedding output), which makes the per-depth POLICY accuracy curve a
+// plain TensorBoard scalar -- the policy analogue of vda's per-depth WDL
+// curve.
+//
+// lc0's weights format cannot represent a head that reads intermediate
+// layers, so a model with a pda head is not exportable (jax_to_leela drops
+// the head and says so loudly), exactly as for vda.
+message PdaPolicyHeadConfig {
+  optional string name = 1;
+  // Per-square token width feeding q/k (the production head's
+  // PolicyHeadConfig.embedding_size).
+  optional uint32 embedding_size = 2 [default = 256];
+  // q/k width of the policy attention (PolicyHeadConfig.d_model).
+  optional uint32 d_model = 3 [default = 256];
+  // Query/key width of the DEPTH attention.
+  optional uint32 attention_dim = 4 [default = 32];
+  optional bool per_square_depth_attention = 5 [default = true];
+  optional bool deep_supervision = 6 [default = true];
+  // q/k width of each per-depth probe. Small on purpose: the probe measures
+  // what the trunk has made linearly legible, not what a wide head can fit.
+  optional uint32 probe_d_model = 7 [default = 64];
 }
