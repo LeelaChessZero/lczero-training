@@ -27,12 +27,19 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "trainingdata/trainingdata_v7.h"
 
 namespace lczero {
 namespace training {
 
-using FrameType = V7TrainingData;
+struct FrameType : V7TrainingData {
+  uint8_t plies_until_progress = 0xff;
+
+  FrameType() = default;
+  FrameType(const V7TrainingData& v7) : V7TrainingData(v7) {}
+};
 
 }  // namespace training
 }  // namespace lczero
