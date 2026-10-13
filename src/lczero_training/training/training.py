@@ -68,6 +68,7 @@ class Training:
         self.optimizer_tx = optimizer_tx
         self._swa_config = swa_config
         self._dp_sharding = None
+        self._host_num_averages = None
 
         jit_kwargs: Dict[str, Any] = {
             "static_argnames": ("optimizer_tx",),
@@ -159,17 +160,6 @@ class Training:
             _step,
         )
 
-    @staticmethod
-    @jax.jit
-    def _swa_tree_map(
-        alpha: jax.Array,
-        beta: jax.Array,
-        swa_state: nnx.State,
-        model_state: nnx.State,
-    ) -> nnx.State:
-        return tree_util.tree_map(
-            lambda a, b: alpha * a + beta * b, swa_state, model_state
-        )
 
     def update_swa(
         self, jit_state: JitTrainingState, weight: float
@@ -181,22 +171,36 @@ class Training:
         logger.info(
             "Updating SWA model, weight=%f, num_averages=%f",
             weight,
-            jit_state.num_averages,
+            self._host_num_averages,
         )
         assert self._swa_config is not None
         assert jit_state.swa_state is not None
         assert weight > 0.0
-        max_num_averages = self._swa_config.num_averages
+        max_num_averages = jnp.array(self._swa_config.num_averages)
+        self._host_num_averages = min(
+            self._host_num_averages + weight,
+            self._swa_config.num_averages
+        )
+        return self._update_swa_jit(jit_state, jnp.array(weight), max_num_averages)
+
+    @staticmethod
+    @partial(jax.jit, donate_argnums=(0,))
+    def _update_swa_jit(
+        jit_state: JitTrainingState,
+        weight: jax.Array,
+        max_num_averages: jax.Array,
+    ) -> JitTrainingState:
+
         denom = jit_state.num_averages + weight
         alpha = jit_state.num_averages / denom
         beta = weight / denom
-        new_swa_state = self._swa_tree_map(
-            jnp.array(alpha),
-            jnp.array(beta),
-            jit_state.swa_state,
-            jit_state.model_state,
+
+        # TODO: tree_map generates many small kernels which run sequentially on
+        # GPU. jax.vmap could maybe improve occupancy.
+        new_swa_state = tree_util.tree_map(
+            lambda a, b: alpha * a + beta * b, jit_state.swa_state, jit_state.model_state
         )
-        new_num_averages = min(
+        new_num_averages = jnp.minimum(
             max_num_averages, jit_state.num_averages + weight
         )
         return jit_state.replace(
@@ -300,6 +304,8 @@ class Training:
         step_hook: Optional[StepHook] = None,
         memory_profile_dir: Optional[str] = None,
     ) -> JitTrainingState:
+        if self._swa_config is not None and self._host_num_averages is None:
+            self._host_num_averages = float(jit_state.num_averages)
         assert jit_state.opt_state is not None
         if self._dp_sharding is not None:
             replicated = jshard.NamedSharding(self._dp_sharding.mesh, P())
