@@ -68,6 +68,8 @@ class Training:
         self.optimizer_tx = optimizer_tx
         self._swa_config = swa_config
         self._dp_sharding = None
+        self._host_step = None
+        self._host_metrics = None
 
         jit_kwargs: Dict[str, Any] = {
             "static_argnames": ("optimizer_tx",),
@@ -158,6 +160,9 @@ class Training:
             ],
             _step,
         )
+
+    def __del__(self):
+        self._log_last_step_metrics()
 
     @staticmethod
     @jax.jit
@@ -262,6 +267,31 @@ class Training:
         num_steps: int,
         metrics: MetricsDict,
     ) -> None:
+        previous_metrics = self._host_metrics
+        self._host_metrics = {
+            "step": step_value,
+            "local": local_step,
+            "num_steps": num_steps,
+            "metrics": jax.copy_to_host_async(metrics),
+        }
+
+        self._log_metrics(previous_metrics)
+
+    def _log_last_step_metrics(
+        self,
+    ) -> None:
+        self._log_metrics(self._host_metrics)
+
+    def _log_metrics(
+        self,
+        metrics: Optional[MetricsDict],
+    ) -> None:
+        if metrics is None:
+            return
+        step_value = int(metrics["step"])
+        local_step = int(metrics["local"])
+        num_steps = int(metrics["num_steps"])
+        metrics = metrics["metrics"]
         loss = float(metrics["loss"])
         unweighted_losses = {
             k: float(v) for k, v in metrics["unweighted_losses"].items()
@@ -300,25 +330,26 @@ class Training:
         step_hook: Optional[StepHook] = None,
         memory_profile_dir: Optional[str] = None,
     ) -> JitTrainingState:
+        if self._host_step is None:
+            self._host_step = int(jit_state.step)
         assert jit_state.opt_state is not None
         if self._dp_sharding is not None:
             replicated = jshard.NamedSharding(self._dp_sharding.mesh, P())
             jit_state = jax.device_put(jit_state, replicated)
         for local_step in range(num_steps):
-            logger.info(f"Starting step {jit_state.step}")
+            logger.info(f"Starting step {self._host_step}")
             if memory_profile_dir is not None:
                 jax.profiler.save_device_memory_profile(
                     f"{memory_profile_dir}/"
                     f"{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                    f"_before_{int(jit_state.step)}.prof"
+                    f"_before_{int(self._host_step)}.prof"
                 )
             batch = self._validate_and_prepare_batch(next(datagen))
             jit_state, metrics = self.train_step(
                 self.optimizer_tx, jit_state, batch
             )
-            step_value = int(
-                np.asarray(jax.device_get(jit_state.step)).reshape(())
-            )
+            self._host_step = self._host_step + 1
+            step_value = self._host_step
             jit_state = self.maybe_update_swa(
                 jit_state, local_step + 1, num_steps
             )
