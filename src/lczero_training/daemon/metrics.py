@@ -66,9 +66,23 @@ class _TrainingBatchMetric(_Metric):
                 f"Metric '{config.name}': Cannot use SWA model for "
                 "training_batch metrics"
             )
+        self.previous_metrics = None
+
+    def __del__(self):
+        """Ensure that the last metrics are logged before destruction."""
+        self._do_log(self.previous_metrics)
 
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
-        self.logger.log(hook_data.global_step, hook_data.metrics)
+        previous = self.previous_metrics
+        self.previous_metrics = {
+            "step": hook_data.global_step,
+            "metrics": hook_data.metrics,
+        }
+        self._do_log(previous)
+
+    def _do_log(self, previous: Optional[Dict[str, Any]] = None) -> None:
+        if previous is not None:
+            self.logger.log(previous['step'], previous['metrics'])
 
 
 class _EvaluatingMetric(_Metric, ABC):
@@ -84,6 +98,11 @@ class _EvaluatingMetric(_Metric, ABC):
         if not loss_fn:
             raise ValueError(f"Metric '{config.name}': Loss function required")
         self.loss_fn = loss_fn
+        self.previous_metrics = None
+
+    def __del__(self):
+        """Ensure that the last metrics are logged before destruction."""
+        self._do_log(self.previous_metrics)
 
     @abstractmethod
     def get_batch(self) -> BatchTuple:
@@ -92,7 +111,16 @@ class _EvaluatingMetric(_Metric, ABC):
     def log(self, hook_data: StepHookData, graphdef: nnx.GraphDef) -> None:
         batch = self.get_batch()
         metrics = self._evaluate(batch, hook_data.jit_state, graphdef)
-        self.logger.log(hook_data.global_step, metrics)
+        previous = self.previous_metrics
+        self.previous_metrics = {
+            "step": hook_data.global_step,
+            "metrics": jax.copy_to_host_async(metrics),
+        }
+        self._do_log(previous)
+
+    def _do_log(self, previous: Optional[Dict[str, Any]] = None) -> None:
+        if previous is not None:
+            self.logger.log(previous['step'], previous['metrics'])
 
     def _evaluate(
         self,
