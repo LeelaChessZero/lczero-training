@@ -17,7 +17,7 @@ from jax import tree_util
 from lczero_training.dataloader import make_dataloader
 from lczero_training.model.loss_function import LczeroLoss
 from lczero_training.model.model import LczeroModel
-from lczero_training.training.state import TrainingState
+from lczero_training.training.state import TrainingSample, TrainingState
 from proto.root_config_pb2 import RootConfig
 
 from .training import Training, from_dataloader
@@ -25,13 +25,13 @@ from .training import Training, from_dataloader
 logger = logging.getLogger(__name__)
 
 
-def _prepare_batch(batch_tuple: tuple) -> Dict:
+def _prepare_sample(batch_tuple: tuple) -> TrainingSample:
     # DataLoader now returns tuple: (inputs, probabilities, values)
-    return {
-        "inputs": batch_tuple[0],
-        "probabilities": batch_tuple[1],
-        "values": batch_tuple[2],
-    }
+    return TrainingSample(
+            inputs=batch_tuple[0],
+            probabilities=batch_tuple[1],
+            values=batch_tuple[2]
+    )
 
 
 def _make_optimizer_with_schedule(
@@ -69,16 +69,16 @@ def _make_eval_step(
     graphdef: nnx.GraphDef, loss_fn: LczeroLoss
 ) -> Callable[[nnx.State, Dict], jax.Array]:
     @partial(nnx.jit, static_argnames=())
-    def eval_step(model_state: nnx.State, batch: Dict) -> jax.Array:
+    def eval_step(model_state: nnx.State, sample: TrainingSample) -> jax.Array:
         model = nnx.merge(graphdef, model_state)
 
         def calculate_loss(
-            model_arg: LczeroModel, batch_arg: Dict
+            model_arg: LczeroModel, sample_arg: TrainingSample
         ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
-            return loss_fn(model_arg, **batch_arg)
+            return loss_fn(model_arg, sample_arg)
 
         loss_vfn = jax.vmap(calculate_loss, in_axes=(None, 0), out_axes=0)
-        per_sample_data_loss, _ = loss_vfn(model, batch)
+        per_sample_data_loss, _ = loss_vfn(model, sample)
         return jnp.mean(per_sample_data_loss)
 
     return cast(Callable[[nnx.State, Dict], jax.Array], eval_step)
@@ -161,12 +161,12 @@ def tune_lr(
     use_validation = num_test_batches > 0
     if use_validation:
         logger.info("Fetching %d validation batches", num_test_batches)
-        validation_batches = [
-            tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
+        validation_samples = [
+            tree_util.tree_map(jnp.asarray, _prepare_sample(next(datagen)))
             for _ in range(num_test_batches)
         ]
     else:
-        validation_batches = []
+        validation_samples = []
 
     loss_fn = LczeroLoss(config=config.training.losses)
     eval_step = _make_eval_step(model, loss_fn)
@@ -174,7 +174,7 @@ def tune_lr(
     def avg_val_loss() -> float:
         assert use_validation
         total_loss = 0.0
-        for vb in validation_batches:
+        for vb in validation_samples:
             total_loss += float(
                 eval_step(training_state.jit_state.model_state, vb)
             )
@@ -184,9 +184,9 @@ def tune_lr(
         training: Training, tx: optax.GradientTransformation
     ) -> float:
         nonlocal training_state
-        batch = tree_util.tree_map(jnp.asarray, _prepare_batch(next(datagen)))
+        sample = tree_util.tree_map(jnp.asarray, _prepare_sample(next(datagen)))
         new_jit_state, metrics = training.train_step(
-            tx, training_state.jit_state, batch
+            tx, training_state.jit_state, sample
         )
         training_state = training_state.replace(jit_state=new_jit_state)
         return float(metrics["loss"])  # training batch loss
@@ -199,7 +199,7 @@ def tune_lr(
         label: str,
         on_result: Callable[[float, float, float | None], None],
     ) -> None:
-        start_step = training_state.jit_state.step
+        start_step = int(training_state.jit_state.step)
 
         def offset_schedule(count: jax.Array) -> jax.Array:
             return schedule(count - start_step)
