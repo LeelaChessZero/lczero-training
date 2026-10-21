@@ -28,6 +28,22 @@ def _compute_q_from_wdl(wdl_logits: jax.Array) -> jax.Array:
     return jnp.dot(wdl_probs, q_weights)
 
 
+def _mask_nan_target(loss: jax.Array, *targets: jax.Array) -> jax.Array:
+    """Zero `loss` (per sample) when any target element is NaN.
+
+    NaN targets mark positions that must not train: `plies_until_progress` is
+    NaN for unknown positions (truncated games / after the last progress move),
+    and some value-type targets (e.g. ORIG) can be NaN as well.
+
+    `loss` must already be finite -- callers compute it from a sanitized target
+    (NaN replaced via `jnp.nan_to_num`) so reverse-mode gradients stay clean;
+    this only selects between the finite `loss` and 0.0. Note that a masked
+    sample still counts in the batch-mean denominator (slight dilution).
+    """
+    finite = jnp.all(jnp.stack([jnp.all(~jnp.isnan(t)) for t in targets]))
+    return jnp.where(finite, loss, 0.0)
+
+
 class LossBase:
     def __init__(
         self,
@@ -190,20 +206,23 @@ class ValueLoss(LossBase):
     ) -> jax.Array:
         value_pred = predictions.value[self.head_name]
         value_logits = value_pred[0]
-        # Extract raw q/d from sample and compute WDL.
+        # Extract raw q/d from sample and compute WDL. Sanitize NaN targets
+        # (e.g. ORIG) before use; the loss is masked out below.
         value_q = sample.values[self.value_type, 0]
         value_d = sample.values[self.value_type, 1]
+        q = jnp.nan_to_num(value_q)
+        d = jnp.nan_to_num(value_d)
         # Compute WDL: w = (1 + q - d) / 2, l = (1 - q - d) / 2
-        value_w = (1.0 + value_q - value_d) / 2.0
-        value_l = (1.0 - value_q - value_d) / 2.0
-        value_wdl = jnp.stack([value_w, value_d, value_l], axis=-1)
+        value_w = (1.0 + q - d) / 2.0
+        value_l = (1.0 - q - d) / 2.0
+        value_wdl = jnp.stack([value_w, d, value_l], axis=-1)
 
         # The cross-entropy between the predicted value and the target value.
         value_cross_entropy = optax.softmax_cross_entropy(
             logits=value_logits, labels=jax.lax.stop_gradient(value_wdl)
         )
         assert isinstance(value_cross_entropy, jax.Array)
-        return value_cross_entropy
+        return _mask_nan_target(value_cross_entropy, value_q, value_d)
 
 
 class PolicyLoss(LossBase):
@@ -324,6 +343,30 @@ class MovesLeftLoss(LossBase):
     def __init__(self, config: MovesLeftLossConfig) -> None:
         super().__init__(config)
         self.value_type = config.value_type
+        # `component` enum values are column indices into values[6, 4]
+        # (Q=0, D=1, MOVES_LEFT=2, PLIES_UNTIL_PROGRESS=3). Regressing a
+        # moves-left head onto q/d is rejected (remove if ever needed).
+        if config.component not in (
+            MovesLeftLossConfig.MOVES_LEFT,
+            MovesLeftLossConfig.PLIES_UNTIL_PROGRESS,
+        ):
+            raise ValueError(
+                f"movesleft loss '{config.head_name}' component must be "
+                "MOVES_LEFT or PLIES_UNTIL_PROGRESS."
+            )
+        self.component = config.component
+        # `scale` multiplies prediction and target (e.g. 0.05); `huber_delta`
+        # is the Huber threshold in plies. Both must be set explicitly.
+        if config.scale <= 0:
+            raise ValueError(
+                f"movesleft loss '{config.head_name}' must set scale > 0."
+            )
+        if config.huber_delta <= 0:
+            raise ValueError(
+                f"movesleft loss '{config.head_name}' must set huber_delta > 0."
+            )
+        self.scale = config.scale
+        self.huber_delta = config.huber_delta
 
     def __call__(
         self,
@@ -331,21 +374,22 @@ class MovesLeftLoss(LossBase):
         sample: TrainingSample,
     ) -> jax.Array:
         movesleft_pred = predictions.movesleft[self.head_name]
-        # Extract movesleft from sample.
-        # sample.values shape: [6, 3], component 2 is movesleft.
-        movesleft_targets = sample.values[self.value_type, 2]
+        # sample.values shape: [6, 4]; component is the column index.
+        movesleft_targets = sample.values[self.value_type, self.component]
 
-        # Scale the loss to similar range as other losses.
-        scale = 20.0
-        targets = movesleft_targets / scale
-        scaled_predictions = movesleft_pred / scale
+        # Scale the loss to a similar range as other losses. Sanitize NaN
+        # targets (unknown positions) before computing; masked out below.
+        targets = jnp.nan_to_num(movesleft_targets) * self.scale
+        scaled_predictions = movesleft_pred * self.scale
 
-        # Huber loss
+        # Huber loss (delta is in plies, so scale it the same way).
         huber_loss = optax.huber_loss(
-            predictions=scaled_predictions, targets=targets, delta=10.0 / scale
+            predictions=scaled_predictions,
+            targets=targets,
+            delta=self.huber_delta * self.scale,
         )
         assert isinstance(huber_loss, jax.Array)
-        return huber_loss.squeeze()
+        return _mask_nan_target(huber_loss.squeeze(), movesleft_targets)
 
 
 class ValueErrorLoss(LossBase):
@@ -367,11 +411,13 @@ class ValueErrorLoss(LossBase):
         # Convert WDL to Q value.
         predicted_q = _compute_q_from_wdl(wdl_logits)
 
-        # Get target Q value.
+        # Get target Q value (sanitize NaN; masked out below).
         target_q = sample.values[self.value_type, 0]
 
         # Compute actual squared error.
-        actual_squared_error = jnp.square(predicted_q - target_q)
+        actual_squared_error = jnp.square(
+            predicted_q - jnp.nan_to_num(target_q)
+        )
 
         # Optionally block gradients to WDL head.
         if not self.propagate_value_gradients:
@@ -380,7 +426,7 @@ class ValueErrorLoss(LossBase):
         # MSE between error prediction and actual error.
         loss = jnp.square(error_pred - actual_squared_error)
 
-        return loss.squeeze()
+        return _mask_nan_target(loss.squeeze(), target_q)
 
 
 class ValueCategoricalLoss(LossBase):
@@ -397,14 +443,14 @@ class ValueCategoricalLoss(LossBase):
         categorical_logits = value_pred[2]
         assert categorical_logits is not None
 
-        # Get target Q value from sample.
+        # Get target Q value from sample (sanitize NaN; masked out below).
         target_q = sample.values[self.value_type, 0]
 
         # Convert Q to bucket index: map [-1, 1) to [0, num_buckets).
         num_buckets = categorical_logits.shape[-1]
-        bucket_index = jnp.floor((target_q + 1.0) / 2.0 * num_buckets).astype(
-            jnp.int32
-        )
+        bucket_index = jnp.floor(
+            (jnp.nan_to_num(target_q) + 1.0) / 2.0 * num_buckets
+        ).astype(jnp.int32)
         bucket_index = jnp.clip(bucket_index, 0, num_buckets - 1)
 
         # Create one-hot target.
@@ -416,4 +462,4 @@ class ValueCategoricalLoss(LossBase):
             labels=jax.lax.stop_gradient(target_one_hot),
         )
         assert isinstance(loss, jax.Array)
-        return loss
+        return _mask_nan_target(loss, target_q)
