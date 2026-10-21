@@ -46,8 +46,28 @@ class EncoderTower(nnx.Module):
             ]
         )
 
-    def __call__(self, x: jax.Array) -> jax.Array:
-        return self.encoders(x)
+    def __call__(
+        self,
+        x: jax.Array,
+        tap_out: list[jax.Array] | None = None,
+    ) -> jax.Array:
+        """Runs the tower.
+
+        `tap_out`, when a list is passed, is filled with the residual stream at
+        every depth: the tower input (embedding output) first, then the output
+        of each encoder block, so it ends up with num_blocks + 1 entries. It is
+        a plain Python list appended to at trace time, which is what depth-
+        attending heads (model/vda_head.py) read. Passing no tap list keeps the
+        original nnx.Sequential call, so models without that feature are
+        untouched.
+        """
+        if tap_out is None:
+            return self.encoders(x)
+        tap_out.append(x)
+        for layer in self.encoders.layers:
+            x = layer(x)
+            tap_out.append(x)
+        return x
 
 
 class EncoderBlock(nnx.Module):
