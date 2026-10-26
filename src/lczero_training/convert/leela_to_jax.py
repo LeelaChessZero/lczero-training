@@ -186,6 +186,6 @@ def leela_to_jax_files(
             license=license_str,
             training_steps=lc0_weights.training_params.training_steps,
         )
-        verification_net = jax_to_leela(state, export_options)
+        verification_net = jax_to_leela(state, export_options, config)
         with gzip.open(output_leela_verification, "wb") as f:
             f.write(verification_net.SerializeToString())

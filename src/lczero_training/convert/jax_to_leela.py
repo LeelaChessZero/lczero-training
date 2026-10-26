@@ -8,7 +8,7 @@ from flax import nnx
 from lczero_training.convert.leela_pytree_visitor import (
     LeelaPytreeWeightsVisitor,
 )
-from proto import net_pb2
+from proto import model_config_pb2, net_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,9 @@ class LeelaExportOptions:
 
 
 def jax_to_leela(
-    jax_weights: nnx.State, export_options: LeelaExportOptions
+    jax_weights: nnx.State,
+    export_options: LeelaExportOptions,
+    model_config: model_config_pb2.ModelConfig,
 ) -> net_pb2.Net:
     lc0_weights = net_pb2.Net()
     lc0_weights.magic = 0x1C0
@@ -84,6 +86,37 @@ def jax_to_leela(
     if export_options.training_steps is not None:
         lc0_weights.training_params.training_steps = (
             export_options.training_steps
+        )
+
+    if len(model_config.vda_value_head) > 0:
+        # A depth-attending value head reads the residual stream at every
+        # encoder depth. lc0's weights format describes a tower whose heads
+        # hang off the last layer only, so there is nowhere to put this head
+        # and no way to fold it into one that exists. The exported file is a
+        # valid net WITHOUT the vda heads -- i.e. not this model. Say so
+        # rather than shipping a quiet lie.
+        logger.error(
+            "EXPORTED NET IS NOT THE TRAINED MODEL: this model has %d "
+            "depth-attending value head(s) (%s), which read intermediate "
+            "encoder layers. lc0's weights format cannot represent them and "
+            "they are being DROPPED from the export. Evaluate the orbax "
+            "checkpoint, not this file.",
+            len(model_config.vda_value_head),
+            ", ".join(h.name for h in model_config.vda_value_head),
+        )
+
+    if len(model_config.pda_policy_head) > 0:
+        # Same story as vda: a depth-attending policy head reads the residual
+        # stream at every encoder depth and lc0's weights format has nowhere
+        # to put it. The exported file is a valid net WITHOUT these heads.
+        logger.error(
+            "EXPORTED NET IS NOT THE TRAINED MODEL: this model has %d "
+            "depth-attending policy head(s) (%s), which read intermediate "
+            "encoder layers. lc0's weights format cannot represent them and "
+            "they are being DROPPED from the export. Evaluate the orbax "
+            "checkpoint, not this file.",
+            len(model_config.pda_policy_head),
+            ", ".join(h.name for h in model_config.pda_policy_head),
         )
 
     visitor = JaxToLeela(jax_weights, lc0_weights)

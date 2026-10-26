@@ -100,7 +100,11 @@ def jax2leela(
     )
 
     logging.info("Converting to Leela format")
-    net = jax_to_leela(jax_weights=export_state, export_options=options)
+    net = jax_to_leela(
+        jax_weights=export_state,
+        export_options=options,
+        model_config=config.model,
+    )
 
     logging.info("Serializing network")
     network_bytes = gzip.compress(net.SerializeToString())
