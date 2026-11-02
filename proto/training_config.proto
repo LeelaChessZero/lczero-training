@@ -169,7 +169,22 @@ message MovesLeftLossConfig {
   string head_name = 1;
   string metric_name = 2;
   float weight = 3;
+  // Selects the value-type row of the values[6,4] tensor.
   ValueType value_type = 4;
+  // Selects the component column of the values tensor; the enum value is the
+  // column index. Defaults to COMPONENT_Q (column 0).
+  enum Component {
+    COMPONENT_Q = 0;           // values[value_type, 0]
+    COMPONENT_D = 1;           // values[value_type, 1]
+    MOVES_LEFT = 2;            // values[value_type, 2]
+    PLIES_UNTIL_PROGRESS = 3;  // values[value_type, 3]
+  }
+  Component component = 5;
+  // `scale` multiplies prediction and target before the Huber loss (e.g. 0.05
+  // to bring plies into ~unit range). `huber_delta` is the Huber threshold in
+  // plies. Both must be set to a positive value (no default).
+  float scale = 6;
+  float huber_delta = 7;
 }
 
 message ValueErrorLossConfig {
